@@ -1,5 +1,12 @@
 [
   {
+    "version": "4.69.1",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "ui", "text": "Dashboard (offener Zustand): „Offen seit\"-Box mit „Käfig\"-Label steht jetzt ganz oben; die Cage-Trainingsvorgabe wird auch im offenen Zustand angezeigt; die Schnellstart-Boxen für inaktive Geräte/Sessions entfallen (Start weiterhin über „+ Neu\")." }
+    ]
+  },
+  {
     "version": "4.69.0",
     "date": "2026-07-08",
     "changes": [
