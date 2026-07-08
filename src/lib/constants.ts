@@ -146,6 +146,8 @@ export const NOTIFICATION_EVENT_TYPES = [
   "KONTROLLE_ANGEFORDERT",
   "WEAR_BEGIN_ANY",
   "WEAR_END_ANY",
+  "PAUSE_BEGIN_ANY",
+  "PAUSE_END_ANY",
 ] as const;
 
 export type NotificationEventType = typeof NOTIFICATION_EVENT_TYPES[number];

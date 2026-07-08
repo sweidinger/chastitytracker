@@ -501,6 +501,8 @@ export async function POST(req: NextRequest) {
       if (type === "PRUEFUNG" && !kontrollCode) eventTypes.push("KONTROLLE_FREIWILLIG");
       if (type === "WEAR_BEGIN") eventTypes.push("WEAR_BEGIN_ANY");
       if (type === "WEAR_END") eventTypes.push("WEAR_END_ANY");
+      if (type === "PAUSE_BEGIN") eventTypes.push("PAUSE_BEGIN_ANY");
+      if (type === "PAUSE_END") eventTypes.push("PAUSE_END_ANY");
 
       if (eventTypes.length === 0) return;
 
@@ -553,6 +555,12 @@ export async function POST(req: NextRequest) {
         const verb = type === "WEAR_BEGIN" ? "trägt" : "hat abgelegt";
         title = `${username} ${verb} ${catName}`;
         pushBody = dev?.name ? `${time} · ${dev.name}` : time;
+      } else if (type === "PAUSE_BEGIN" || type === "PAUSE_END") {
+        const devLabel = pauseDevice === "PLUG" ? "Plug" : "Käfig";
+        const grund = oeffnenGrund ? ` · ${grundLabel(oeffnenGrund)}` : "";
+        const verb = type === "PAUSE_BEGIN" ? "Pause gestartet" : "Pause beendet";
+        title = `${username} — ${verb} (${devLabel})`;
+        pushBody = `${time}${grund}`;
       }
 
       const adminUrl = `/admin/users/${session.user.id}`;
@@ -655,9 +663,9 @@ export async function POST(req: NextRequest) {
     revalidatePath("/dashboard", "layout");
   }
 
-  // Fire-and-forget: AI keyholder reacts to the new entry (push + chat message).
-  // Only for KG-relevant types to avoid spam on WEAR_BEGIN/END.
-  if (["VERSCHLUSS", "OEFFNEN", "PRUEFUNG", "ORGASMUS"].includes(type)) {
+  // Fire-and-forget: AI keyholder reacts to the new entry (chat message; push nur bei KG-Typen).
+  // WEAR_BEGIN/END bleiben aussen vor (Spam); Pausen sind für die Keyholderin relevant.
+  if (["VERSCHLUSS", "OEFFNEN", "PRUEFUNG", "ORGASMUS", "PAUSE_BEGIN", "PAUSE_END"].includes(type)) {
     reactToSubEvent(session.user.id, session.user.name ?? session.user.id, type, note ?? null).catch(() => {});
   }
 

@@ -1,5 +1,13 @@
 [
   {
+    "version": "4.68.0",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "feat", "text": "Benachrichtigungen für Pausen (Cage & Plug): neuer Bereich „Pausen\" mit Push/E-Mail für Keyholder — und die AI-Keyholderin reagiert jetzt auch auf Pause-Beginn/-Ende." },
+      { "type": "fix", "text": "Admin-Panel (pro User): aktive Kontrollen werden jetzt pro Gerät (Cage/Plug) als getrennte Banner mit Geräte-Label angezeigt (vorher nur eine)." }
+    ]
+  },
+  {
     "version": "4.67.0",
     "date": "2026-07-08",
     "changes": [

@@ -1220,6 +1220,8 @@ const EVENT_LABELS: Record<string, string> = {
   WEAR_END: "hat ein Gerät abgelegt",
   SESSION_BEGIN: "hat eine Trainings-Session gestartet",
   SESSION_END: "hat eine Trainings-Session beendet",
+  PAUSE_BEGIN: "hat eine Pause begonnen (Gerät kurz abgenommen)",
+  PAUSE_END: "hat eine Pause beendet (Gerät wieder angelegt)",
 };
 
 /**

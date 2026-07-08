@@ -77,9 +77,20 @@ export default async function AdminUserOverview({ params }: { params: Promise<{ 
   const reinigung: ReinigungSettings = { erlaubt: user.reinigungErlaubt, maxMinuten: user.reinigungMaxMinuten };
   // Aktiv offene Kontrolle für das grosse Banner — geplante (wirksamAb in der Zukunft) ausschliessen:
   // die erscheinen unten in der Kontroll-Liste mit "geplant"-Pill, nicht als aktiver Alarm.
-  const offeneKontrolle = alleAnforderungen.find(
+  // Aktive offene Kontrollen — max. eine je Gerät (Cage/Plug), geplante ausgeschlossen.
+  const aktiveKontrollenAdmin = alleAnforderungen.filter(
     k => !k.entryId && !k.withdrawnAt && !(k.wirksamAb && k.wirksamAb > now),
-  ) ?? null;
+  );
+  const offeneKontrollenAdmin: { k: (typeof aktiveKontrollenAdmin)[number]; device: "CAGE" | "PLUG" }[] = [];
+  {
+    const seen = new Set<string>();
+    for (const k of aktiveKontrollenAdmin) {
+      const device = k.device === "PLUG" ? "PLUG" as const : "CAGE" as const;
+      if (seen.has(device)) continue;
+      seen.add(device);
+      offeneKontrollenAdmin.push({ k, device });
+    }
+  }
 
   const kontrollItems = buildKontrolleItems(alleAnforderungen, entries.filter(e => e.type === "PRUEFUNG"), now);
 
@@ -155,17 +166,19 @@ export default async function AdminUserOverview({ params }: { params: Promise<{ 
         />
       )}
 
-      {offeneKontrolle && (
+      {offeneKontrollenAdmin.map(({ k, device }) => (
         <KontrolleBanner
-          deadline={offeneKontrolle.deadline}
-          code={offeneKontrolle.code || null}
-          kommentar={offeneKontrolle.kommentar}
-          overdue={offeneKontrolle.deadline < now}
+          key={device}
+          deadline={k.deadline}
+          code={k.code || null}
+          kommentar={k.kommentar}
+          overdue={k.deadline < now}
           variant="large"
+          deviceLabel={td(device === "PLUG" ? "deviceLabelPlug" : "deviceLabelCage")}
           tz={tz}
           viewerTz={viewerTz}
         />
-      )}
+      ))}
 
       {offeneOrgasmusAnforderung && (() => {
         const orgasmusExpired = offeneOrgasmusAnforderung.endetAt < now;
