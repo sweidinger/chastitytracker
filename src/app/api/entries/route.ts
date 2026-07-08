@@ -11,6 +11,7 @@ import { isDevBypassEnabled } from "@/lib/devMode";
 import { validateDeviceOwnership, releaseSperrzeitenOnOpen, prepareWearEntry, activeVerschlussAnforderungWhere, aktiveKontrolleWhere } from "@/lib/queries";
 import { getActiveSessionForCategory, fulfillSessionAnforderung, getActiveSessionAnforderung } from "@/lib/sessionService";
 import { getActivePause, pauseSettingsForDevice, pauseReasonsForDevice, maybeCreatePauseOverageStrafe, type PauseDevice } from "@/lib/pauseService";
+import { parseReinigungsFenster, aktivesReinigungsFenster } from "@/lib/reinigungService";
 import { gatherDeviceReferences } from "@/lib/deviceReferenceService";
 import { checkDeviceInPhoto } from "@/lib/detectDevice";
 import { structuredLog } from "@/lib/serverLog";
@@ -140,6 +141,7 @@ export async function POST(req: NextRequest) {
               reinigungErlaubt: true, reinigungMaxMinuten: true, reinigungMaxProTag: true,
               toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true,
               plugReinigungErlaubt: true, plugReinigungMaxMinuten: true, plugReinigungMaxProTag: true,
+              plugReinigungsFenster: true,
               plugToiletteMaxMinuten: true,
             },
           });
@@ -157,6 +159,14 @@ export async function POST(req: NextRequest) {
                 },
               });
               if (todayCount >= chosen.maxProTag) throw Object.assign(new Error(), { _code: "PAUSE_LIMIT_REACHED" });
+            }
+            // Plug-Reinigung nur innerhalb der konfigurierten Tages-Zeitfenster (falls gesetzt).
+            if (dev === "PLUG" && chosen.grund === "REINIGUNG" && puser) {
+              const tzP = session.user.timezone ?? APP_TZ;
+              const windows = parseReinigungsFenster(puser.plugReinigungsFenster);
+              if (windows.length > 0 && !aktivesReinigungsFenster(puser.plugReinigungsFenster, new Date(), tzP)) {
+                throw Object.assign(new Error(), { _code: "PLUG_REINIGUNG_FENSTER" });
+              }
             }
           }
         }
@@ -406,6 +416,7 @@ export async function POST(req: NextRequest) {
     if (code === "PAUSE_NOT_WEARING") return NextResponse.json({ error: "Plug wird nicht getragen" }, { status: 400 });
     if (code === "PAUSE_REASON_REQUIRED") return NextResponse.json({ error: "Grund der Pause (Reinigung/Toilette) ist erforderlich" }, { status: 400 });
     if (code === "PAUSE_LIMIT_REACHED") return NextResponse.json({ error: "Tageslimit für diese Pause erreicht" }, { status: 400 });
+    if (code === "PLUG_REINIGUNG_FENSTER") return NextResponse.json({ error: "Plug-Reinigung außerhalb des erlaubten Zeitfensters" }, { status: 400 });
     throw e;
   }
 

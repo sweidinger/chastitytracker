@@ -6,7 +6,7 @@ import bcrypt from "bcryptjs";
 import { isValidEmail, passwordErrorCode } from "@/lib/constants";
 import { getActiveSperrzeit } from "@/lib/queries";
 import { isUniqueConstraintOn } from "@/lib/prismaErrors";
-import { setReinigungSettings } from "@/lib/reinigungService";
+import { setReinigungSettings, parseReinigungsFenster } from "@/lib/reinigungService";
 import { setToiletteSettings } from "@/lib/toiletteService";
 import { setAutoKontrolleSettings } from "@/lib/autoKontrolleService";
 import { setReasonConfig } from "@/lib/reasonsService";
@@ -109,12 +109,14 @@ export async function PATCH(
 
   if (
     body.plugReinigungErlaubt !== undefined || body.plugReinigungMaxMinuten !== undefined ||
-    body.plugReinigungMaxProTag !== undefined || body.plugToiletteMaxMinuten !== undefined
+    body.plugReinigungMaxProTag !== undefined || body.plugReinigungsFenster !== undefined ||
+    body.plugToiletteMaxMinuten !== undefined
   ) {
     const data: Record<string, unknown> = {};
     if (body.plugReinigungErlaubt !== undefined) data.plugReinigungErlaubt = Boolean(body.plugReinigungErlaubt);
     if (body.plugReinigungMaxMinuten !== undefined) data.plugReinigungMaxMinuten = Math.max(1, Math.min(120, Number(body.plugReinigungMaxMinuten) || 15));
     if (body.plugReinigungMaxProTag !== undefined) data.plugReinigungMaxProTag = Math.max(0, Math.min(20, Number(body.plugReinigungMaxProTag) || 0));
+    if (body.plugReinigungsFenster !== undefined) data.plugReinigungsFenster = JSON.stringify(parseReinigungsFenster(body.plugReinigungsFenster));
     // Plug-Toilette ist immer erlaubt & unbegrenzt — nur Max.-Dauer konfigurierbar.
     if (body.plugToiletteMaxMinuten !== undefined) data.plugToiletteMaxMinuten = Math.max(1, Math.min(120, Number(body.plugToiletteMaxMinuten) || 15));
     await prisma.user.update({ where: { id }, data });

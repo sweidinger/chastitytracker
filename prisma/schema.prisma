@@ -50,6 +50,7 @@ model User {
   plugReinigungErlaubt    Boolean  @default(false)
   plugReinigungMaxMinuten Int      @default(15)
   plugReinigungMaxProTag  Int      @default(0)
+  plugReinigungsFenster   String?  // JSON [{start,end}] — tägliche Zeitfenster für Plug-Reinigung (analog reinigungsFenster)
   // Plug-Toilette: immer erlaubt, unbegrenzte Anzahl — nur Max.-Dauer konfigurierbar.
   plugToiletteMaxMinuten  Int      @default(15)
   // Pro-User anpassbare Auswahllisten als JSON-Array [{code,label?}] (TEXT). null = eingebaute
