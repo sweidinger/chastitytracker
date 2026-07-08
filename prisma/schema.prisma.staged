@@ -1,0 +1,782 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                    String                 @id @default(cuid())
+  username              String                 @unique
+  passwordHash          String
+  role                  String                 @default("user")
+  email                 String?                @unique
+  createdAt             DateTime               @default(now())
+  reinigungErlaubt      Boolean                @default(false)
+  reinigungMaxMinuten   Int                    @default(15)
+  reinigungMaxProTag    Int                    @default(0)
+  // Tägliche Öffnungs-Fenster für Reinigung als JSON-String, z.B. [{"start":"19:00","end":"20:00"}]
+  // (CH-Lokalzeit). SQLite/Prisma 5 kennt kein Json → TEXT; parseReinigungsFenster deserialisiert.
+  reinigungsFenster     String?
+  // Automatische Kontrollen: pro Tag zufällig X Kontrollen, wobei X selbst zufällig aus
+  // [PerDayMin, PerDayMax] gewürfelt wird. Frist darf nicht ins Schlaf-Fenster (RuheVon–RuheBis,
+  // CH-Lokalzeit) fallen; Erfüllungsdauer zufällig in [FristVon, FristBis] Min.
+  autoKontrolleAktiv     Boolean               @default(false)
+  autoKontrollePerDayMin Int                   @default(0)  // Min-Anzahl/Tag
+  autoKontrollePerDayMax Int                   @default(0)  // Max-Anzahl/Tag (< Min → als Min behandelt)
+  autoKontrolleRuheVon  String                 @default("22:00")
+  autoKontrolleRuheBis  String                 @default("06:00")
+  autoKontrolleFristVon Int                    @default(15)
+  autoKontrolleFristBis Int                    @default(60)
+  mobileDesktopUpload   Boolean                @default(false)
+  // IANA-Zeitzone des Nutzers (z.B. "America/New_York"). Governiert Anzeige, Eingabe-Defaults und
+  // die Wanduhr-Fenster (Reinigung/Schlaf) für DIESEN Nutzer. Default "Europe/Zurich" = bisheriges
+  // Verhalten für alle Bestandsnutzer (keine sichtbare Änderung).
+  timezone              String                 @default("Europe/Zurich")
+  // Startseite nach Login (pro User): "auto" = rollen-/sub-abhängig (Keyholder→Übersicht bzw. einziger
+  // Sub direkt, sonst eigener Tracker), "overview" = Keyholder-Übersicht, "dashboard" = eigener Tracker.
+  startPage             String                 @default("auto")
+  // Keyholder/Admin-Präferenz: eigene Karte in der Keyholder-Übersicht ausblenden (für Keyholder,
+  // die keinen eigenen Tracker nutzen). Nur relevant, wenn die eigene Karte dort überhaupt erscheint.
+  hideOwnTracker        Boolean                @default(false)
+  // Toiletten-Öffnungen: analog zu Reinigung (aber ohne Zeitfenster).
+  toiletteErlaubt       Boolean  @default(false)
+  toiletteMaxMinuten    Int      @default(15)
+  toiletteMaxProTag     Int      @default(0)
+  // Anal-Plug: Reinigung + Toilette analog zu KG, aber getrennte Einstellungen.
+  plugReinigungErlaubt    Boolean  @default(false)
+  plugReinigungMaxMinuten Int      @default(15)
+  plugReinigungMaxProTag  Int      @default(0)
+  plugToiletteErlaubt     Boolean  @default(false)
+  plugToiletteMaxMinuten  Int      @default(15)
+  plugToiletteMaxProTag   Int      @default(0)
+  // Pro-User anpassbare Auswahllisten als JSON-Array [{code,label?}] (TEXT). null = eingebaute
+  // Standardliste (Bestandsnutzer unverändert). Öffnungsgründe enthalten IMMER die geschützten
+  // Built-ins "REINIGUNG" und "TOILETTE" (Code fix, nur Label umbenennbar). Siehe reasonsService.ts.
+  orgasmusArtenConfig   String?
+  oeffnenGruendeConfig  String?
+  // Free-text keyholder rules the human admin sets for the MCP AI keyholder (soft guidance, read-only to the agent).
+  mcpKeyholderInstructions String?
+  entries               Entry[]
+  notificationPrefs     NotificationPreference[]
+  vorgaben              TrainingVorgabe[]
+  passwordResetTokens   PasswordResetToken[]
+  kontrollAnforderungen   KontrollAnforderung[]
+  verschlussAnforderungen VerschlussAnforderung[]
+  orgasmusAnforderungen   OrgasmusAnforderung[]
+  devices                 Device[]
+  strafeRecords           StrafeRecord[]
+  adminRelationships      AdminUserRelationship[] @relation("AdminRelationships")
+  userRelationships       AdminUserRelationship[] @relation("UserRelationships")
+  pushSubscriptions       PushSubscription[]
+  nativePushTokens        NativePushToken[]
+  passkeys                Passkey[]
+  deviceCategories        DeviceCategory[]
+  aiKeyholderConfig       AiKeyholderConfig?
+  aiKeyholderMessages     AiKeyholderMessage[]
+  generatedMedia          GeneratedMedia[]
+  keyholderTasks          KeyholderTask[]
+  boxEvents               BoxEvent[]
+  boxStatuses             BoxStatus[]
+  keyholderNotes          KeyholderNote[]
+  keyholderActionLogs     KeyholderActionLog[]
+  healthHolds             HealthHold[]
+  recurringContexts       RecurringContext[]
+  appointments            Appointment[]
+}
+
+// Gesundheits-Zurückhaltung (§8): ein Signal, dass aus Gesundheitsgründen (Migräne/Aura, Schlaf,
+// Blutdruck) gerade Zurückhaltung gilt. Aktuell aktiver Hold = active=true, resolvedAt=null.
+// MCP-only, additiv — der Tracker liest diese Tabellen nicht.
+model HealthHold {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  active     Boolean   @default(true)
+  reason     String
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+
+  @@index([userId, active])
+}
+
+// Wiederkehrender Wochen-Kontext (§8): HO-Tage, Bürotage, Pilates-Slots … damit der Keyholder
+// Anker/Kontrollen ums echte Leben plant. weekday: 0=So .. 6=Sa. deviceFree = Slot ist gerätefrei.
+model RecurringContext {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label     String   // z.B. "Home Office", "Pilates"
+  weekday   Int      // 0=So .. 6=Sa
+  // null = jede Woche (Default, bisheriges Verhalten). 1..5 = n-ter <weekday> im Monat.
+  // -1 = letzter <weekday> im Monat (z.B. "erster Mittwoch" = weekday:3, ordinal:1).
+  ordinal   Int?
+  deviceFree Boolean @default(false)
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Einzeltermine (§8): geräte-frei-Termine (Arzt, Therapie) + Hitze-Ausnahmen, strukturiert statt Prosa.
+model Appointment {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  when       DateTime
+  typ        String?  // z.B. "Therapie", "Arzt"
+  deviceFree Boolean  @default(false)
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId, when])
+}
+
+// Append-only Audit-Log jeder mutierenden MCP-V2-Aktion (Pflicht-`reason` + `source`).
+// Deckt §9.2 (Action-Log) und §6 (Goal-Audit-Historie) ab: die nächste Keyholder-Instanz
+// erbt Entscheidungen samt Begründung, nicht nur Zustände. MCP-only, additiv — der Tracker
+// schreibt/liest diese Tabelle nicht.
+model KeyholderActionLog {
+  id        String   @id @default(cuid())
+  userId    String   // Ziel-User der Aktion (MCP_USERNAME)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tool      String   // MCP-Tool-Name, z.B. "set_training_goal" | "judge_offense" | "upsert_note"
+  actor     String?  // OAuth-userId des handelnden Keyholders (null = unbekannt/legacy)
+  reason    String   // Pflicht-Begründung — nie stille Mutation
+  source    String   @default("agent") // agent | user-stated
+  argsJson  String?  // Tool-Input als JSON (Audit)
+  resultRef String?  // erzeugte/betroffene Entity-id (Goal, Sperrzeit, Note ...)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// Freie Beobachtungen, die der virtuelle Keyholder (MCP-KI) zum Trageverhalten ablegt und
+// später wieder auswertet. NUR über den MCP zugänglich — kein Sub-/Admin-UI. kg/kategorie
+// sind optionale Freitext-Tags (z.B. Gerätename bzw. "Druckstelle"/"Ausbruchsversuch"/"Gemecker").
+model KeyholderNote {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kg        String?
+  kategorie String?
+  text      String
+  createdAt DateTime @default(now())
+
+  // ── Notes v2 (MCP-only, additiv — Tracker liest diese Felder nicht) ──
+  // type: DIRECTIVE | BOUNDARY | OBSERVATION | CORRECTION | EQUIPMENT | DATA | HISTORY
+  type        String    @default("OBSERVATION")
+  // status: active | superseded | archived  (Supersession statt Delete)
+  status      String    @default("active")
+  pinned      Boolean   @default(false)
+  // Vorgänger-Note, die diese hier ablöst (status der alten → superseded). Reiner id-Pointer.
+  supersedesId String?
+  // source: user-stated | inferred  — trennt Nutzer-Fakt von Agenten-Schluss
+  source      String    @default("inferred")
+  // confidence: low | medium | high (optional, v.a. für inferred)
+  confidence  String?
+  validFrom   DateTime?
+  validUntil  DateTime?
+  // doDont: JSON {"do":[...],"dont":[...]} — strukturiert für BOUNDARY-Notes
+  doDont      String?
+
+  refs        NoteRef[]
+
+  @@index([userId, createdAt])
+  @@index([userId, status, pinned])
+  @@index([supersedesId])
+}
+
+// Polymorphe Verknüpfung einer Keyholder-Note an ein Tracking-Objekt (das fehlende Bindeglied).
+// Bidirektional: ein geholtes Objekt bringt seine Notes inline mit, eine Note zeigt auf ihre Belege.
+// entityId für segment ist die Re-Lock-Entry-id des Teilstücks (berechnet, nicht persistiert).
+model NoteRef {
+  id         String        @id @default(cuid())
+  noteId     String
+  note       KeyholderNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  // entityType: device | session | segment | control | offense | orgasmDirective | goal | appointment
+  entityType String
+  entityId   String
+  createdAt  DateTime      @default(now())
+
+  @@index([entityType, entityId])
+  @@index([noteId])
+}
+
+// User-defined device categories (KG, Plug, Collar, Cuffs, ...).
+// One built-in "kg" category is seeded per user — it cannot be deleted and keeps
+// KG-specific features (photo-pflicht, seal-detection, kontrollen, reinigung).
+// All other categories are user-defined and have plain wear-tracking only.
+model DeviceCategory {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String   // user-editable display name
+  slug            String   // stable identifier; "kg" for built-in
+  color           String   // CSS-variable suffix (e.g. "cat-steel", "cat-plum")
+  icon            String   // lucide-react icon name (e.g. "Lock", "Crown")
+  isBuiltIn       Boolean  @default(false) // true only for KG; cannot be deleted
+  trackingEnabled Boolean  @default(true)  // when false: inventory-only, no wear sessions
+  requirePhoto    Boolean  @default(false) // when true: WEAR_BEGIN entries require an imageUrl
+  allowVorgaben   Boolean  @default(true)  // when false: category cannot be linked to TrainingVorgaben
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  devices  Device[]
+  vorgaben TrainingVorgabe[]
+  verschlussAnforderungen VerschlussAnforderung[]
+
+  @@unique([userId, slug])
+  @@index([userId])
+}
+
+// WebAuthn passkeys for biometric login (Face ID, Touch ID, Fingerprint, Windows Hello).
+// One user can have multiple passkeys (e.g. phone + laptop).
+model Passkey {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentialId String   @unique // base64url-encoded credential ID
+  publicKey    String   // base64url-encoded public key
+  counter      Int      @default(0)
+  transports   String?  // JSON array of transport strings (e.g. ["internal","hybrid"])
+  deviceName   String?  // user-chosen label (e.g. "iPhone 15")
+  createdAt    DateTime @default(now())
+  lastUsedAt   DateTime?
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model TrainingVorgabe {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoryId    String?   // nullable until backfilled; future: required
+  category      DeviceCategory? @relation(fields: [categoryId], references: [id])
+  gueltigAb     DateTime
+  gueltigBis    DateTime?
+  // true = Enddatum bewusst vom Keyholder gesetzt → Auto-Verkettung (reorderVorgabenDates)
+  // darf es NICHT überschreiben. false = Ende ergibt sich aus der Verkettung (Start der Folge-
+  // Vorgabe) bzw. offen, wenn es die neueste ihrer Kategorie ist.
+  validUntilManual Boolean @default(false)
+  minProTagH    Float?
+  minProWocheH  Float?
+  minProMonatH  Float?
+  // 4. Zielperiode „Jahr" (Stunden). Folgt bewusst der deutschen Feld-Familie minProTagH/WocheH/MonatH
+  // (Konsistenz der Geschwister), obwohl neue Identifier sonst englisch benannt werden.
+  minProJahrH   Float?
+  notiz         String?
+  createdAt     DateTime  @default(now())
+
+  @@index([userId])
+  @@index([categoryId])
+}
+
+model KontrollAnforderung {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code        String
+  kommentar   String?
+  deadline    DateTime
+  createdAt   DateTime  @default(now())
+  fulfilledAt DateTime? // Server-seitig gesetzt beim Erstellen des PRUEFUNG-Eintrags – nie editierbar
+  withdrawnAt DateTime?
+  // Zeitversetzte Auslösung: null = sofort. Gesetzt = geplant; bis dahin für den Sub
+  // unsichtbar, Benachrichtigung + Frist starten erst dann (Poller verschickt sie).
+  wirksamAb        DateTime?
+  benachrichtigtAt DateTime? // wann Mail/Push raus ging (sofort beim Anlegen, oder per Poller)
+  auto        Boolean   @default(false) // automatisch generiert (Auto-Kontrollen); manuelle = false
+  requireCode Boolean   @default(true)  // false = kein Frische-Code in E-Mail/Formular; nur Foto (ggf. mit Siegel)
+  entryId     String?   @unique
+  entry       Entry?    @relation("KontrolleEntry", fields: [entryId], references: [id], onDelete: SetNull)
+
+  @@index([userId, withdrawnAt])
+  @@index([userId, entryId])
+  @@index([wirksamAb])
+}
+
+model VerschlussAnforderung {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  art         String    // "ANFORDERUNG" | "SPERRZEIT"
+  nachricht   String?
+  endetAt     DateTime? // ANFORDERUNG: Frist zum Einschliessen; SPERRZEIT: darf nicht öffnen bis
+  dauerH      Float?    // ANFORDERUNG only: Mindest-Tragedauer (h) – erzeugt nach Einschliessen automatisch SPERRZEIT
+  deviceId         String?
+  device           Device?         @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  deviceCategoryId String?         // null = KG (backward compat); non-null = Plug oder andere non-KG Kategorie
+  deviceCategory   DeviceCategory? @relation(fields: [deviceCategoryId], references: [id], onDelete: SetNull)
+  reinigungErlaubt Boolean @default(false) // SPERRZEIT: Reinigungsöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
+  toiletteErlaubt  Boolean @default(false) // SPERRZEIT: Toilettenöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
+  createdAt   DateTime  @default(now())
+  fulfilledAt DateTime? // ANFORDERUNG: gesetzt wenn User VERSCHLUSS erstellt
+  withdrawnAt DateTime?
+  // Zeitversetzte Auslösung: null = sofort. Gesetzt = geplant; bis dahin für den Sub
+  // unsichtbar (gilt nicht als aktiv), Benachrichtigung + Frist starten erst dann (Poller verschickt sie).
+  wirksamAb        DateTime?
+  benachrichtigtAt DateTime? // wann Mail/Push raus ging (sofort beim Anlegen, oder per Poller)
+
+  @@index([userId, art, withdrawnAt])
+  @@index([wirksamAb])
+}
+
+// n:m relationship between admins and the users they supervise.
+// Additive migration — no existing data is changed.
+// Only active when USE_ADMIN_RELATIONSHIPS=true (feature flag).
+model AdminUserRelationship {
+  id        String   @id @default(cuid())
+  adminId   String
+  admin     User     @relation("AdminRelationships", fields: [adminId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation("UserRelationships", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([adminId, userId])
+  @@index([adminId])
+  @@index([userId])
+}
+
+// Tracks consumed portal-login JTIs to prevent replay attacks.
+// Rows older than 1h are pruned automatically by the portal-login endpoint.
+model PortalTokenUsed {
+  jti    String   @id
+  usedAt DateTime @default(now())
+}
+
+// Native push tokens for Capacitor apps (APNs on iOS, FCM on Android).
+// One row per device per user; token is the unique device push token.
+model NativePushToken {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform   String   // "ios" | "android"
+  token      String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// Web Push subscriptions for PWA push notifications.
+// One row per browser/device per user; endpoint is the unique push endpoint URL.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Persistent rate limiting — replaces in-memory Maps across all API routes.
+// key format: "ip:<ip>" | "user:<userId>" | "login:<username>" | "fp:<ip>"
+// Expired rows are deleted on each check (no background job needed for SQLite).
+model RateLimit {
+  key     String   @id
+  count   Int      @default(1)
+  resetAt DateTime
+}
+
+// Urteil über ein erkanntes Vergehen. Lebenszyklus: erkannt (kein Record) →
+// verworfen (status=DISMISSED) | bestraft (status=PUNISHED). Identität des Vergehens
+// über (offenseType, refId); refId ist die Entry-/Kontrolle-/Anforderungs-id.
+model StrafeRecord {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  offenseType   String   // "KONTROLLANFORDERUNG" | "OEFFNEN_ENTRY" | "REINIGUNG_LIMIT" | "FALSCHES_GERAET" | "ORGASMUS_ANWEISUNG" | "AI_KEYHOLDER"
+  refId         String   @unique
+  bestraftDatum DateTime // Urteilszeitpunkt (bei PUNISHED = Strafdatum)
+  notiz         String?
+  // Urteils-Status + Audit
+  status        String   @default("PUNISHED") // "PUNISHED" | "DISMISSED"
+  reason        String?  // DAS eine Freitextfeld: Strafe-Text bei PUNISHED, optionaler Grund bei DISMISSED
+  judgedBy      String?  // "ai" | "admin" | "system"
+  erledigtAt    DateTime? // nur PUNISHED: null = Strafe offen, gesetzt = erledigt (Loop geschlossen)
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Device {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoryId    String?   // nullable until backfilled; future: required for new devices
+  category      DeviceCategory? @relation(fields: [categoryId], references: [id])
+  name          String
+  description   String?
+  imageUrl      String?
+  purchasePrice Float?
+  currency      String?   // "CHF" | "EUR" | "USD"
+  createdAt     DateTime  @default(now())
+  archivedAt    DateTime? // Soft-delete: null = active, set = archived
+
+  // ── Geräte-Metadaten für Keyholder-Entscheidungen (MCP-only, additiv) ──
+  // securityLevel: SECURING | TRUST_ONLY — Vertrauensgerät vs. sicherndes Gerät, maschinenlesbar
+  securityLevel      String?
+  // lookalikeClusterId: gleiche Optik = gleicher Cluster. Mismatch INNERHALB eines Clusters ist soft, nie ein Vergehen.
+  lookalikeClusterId String?
+  abstreifbar        Boolean @default(false) // Anti-Auszieh-Status
+  material           String? // Edelstahl | Kunststoff | Silikon
+  bauform            String? // flach | voll | standard | Plug ...
+  healthFlags        String? // JSON string[] — Druckstellen, scheuert, rutscht ...
+  retentionNotes     String? // z.B. "njoy: rutscht beim Entspannen"
+
+  entries               Entry[]
+  verschlussAnforderungen VerschlussAnforderung[]
+  boxEvents             BoxEvent[]
+  referenceImages       DeviceReferenceImage[]
+
+  @@index([userId, archivedAt])
+  @@index([categoryId])
+}
+
+/// Kuratierte Referenzfotos je Gerät — „Trainingsmaterial" für die Geräte-Erkennung
+/// (Few-Shot in detectDevice). Eigene Datei-Kopie unter data/uploads; sourceEntryId
+/// dokumentiert die Herkunft, falls aus einem Verschluss-Eintrag importiert.
+/// embedding*-Spalten sind für einen späteren Embedding-Index (Phase 3) reserviert und
+/// in der Few-Shot-Phase leer.
+model DeviceReferenceImage {
+  id             String   @id @default(cuid())
+  deviceId       String
+  device         Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  imageUrl       String   // /api/uploads/<filename>, wie Entry.imageUrl
+  sourceEntryId  String?  // Herkunft, falls aus einem bestehenden Entry importiert
+  note           String?
+  embedding      Bytes?   // Phase 3: Float32-Vektor als Blob; vorerst leer
+  embeddingModel String?  // welches Modell den Vektor erzeugt hat (Invalidierung)
+  createdAt      DateTime @default(now())
+
+  @@index([deviceId])
+}
+
+// Hardware-Wahrheit der Heimdall-Schlüsselbox (Spur 2), getrennt vom selbst-
+// erfassten Entry (Spur 1). Wird vom Heimdall-Server über /api/integration/box/*
+// (Shared-Secret) eingespielt. Abgleich Entry↔BoxEvent erfolgt später (P3).
+model BoxEvent {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId   String?
+  device     Device?  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  type       String   // "LOCKED" | "UNLOCKED" | "EARLY_OPEN" | "UNAUTHORIZED_OPEN"
+  wakeReason String?  // gemeldeter Öffnungsgrund der Box
+  battery    Int?     // 0–100
+  fwVersion  String?
+  at         DateTime // Zeitpunkt des Box-Ereignisses (server-autoritativ vom Heimdall-Sync)
+  createdAt  DateTime @default(now())
+
+  @@index([userId, at])
+}
+
+// Live-Zustand der Heimdall-Box(en) eines Users — vom Heimdall-Server bei jedem Box-Sync
+// gepusht. Zeigt den Box-Status im Tracker (statt zweiter App). pendingCommand = vom Sub
+// im Tracker ausgelöste Aktion, die Heimdall beim nächsten Sync zieht & anwendet.
+model BoxStatus {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  boxId           String    // Heimdall-Geräte-id (stabil)
+  name            String
+  locked          Boolean   @default(false)
+  lockUntil       DateTime? // effektive Sperre (eigene + Tracker-Sperrzeit, gekappt)
+  simpleLock      Boolean   @default(false)
+  keyholderLocked Boolean   @default(false) // durch Tracker-Sperrzeit gehalten (Sub kann lokal nicht öffnen)
+  battery         Int?
+  charging        Boolean?
+  boltPos         String?
+  fwVersion       String?
+  lastSyncAt      DateTime?
+  // Vom Sub ausgelöstes, noch nicht vollzogenes Kommando.
+  pendingCommand         String?   // "lock" | "open" | "clean_open"
+  pendingCommandRelockBy DateTime? // nur clean_open: Re-Lock-Frist
+  pendingCommandAt       DateTime?
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([userId, boxId])
+  @@index([userId])
+}
+
+model Entry {
+  id                  String               @id @default(cuid())
+  userId              String
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type                String               @default("VERSCHLUSS")
+  startTime           DateTime
+  imageUrl            String?
+  imageExifTime       DateTime?
+  // Bildersafe (Schlüssel-Verwahrung): versiegeltes Foto des Schlüsselbox-Codes. Getrennt von
+  // imageUrl (offenes Siegel/Gerät). Wird erst freigegeben, wenn Öffnen erlaubt ist.
+  codeImageUrl        String?
+  codeReadable        Boolean?             // detectSealNumber hat Ziffern erkannt (nur "lesbar ✓", Zahl wird NICHT gespeichert)
+  note                String?
+  oeffnenGrund        String?
+  orgasmusArt         String?
+  kontrollCode        String?
+  verifikationStatus  String?
+  // Geräte-Check der Kontrolle (PRUEFUNG): wird das verschlossene Gerät im Foto erkannt?
+  // null = nicht geprüft · "ok" = passendes Gerät sichtbar · "wrong" = anderes Gerät · "missing" = kein Gerät.
+  // Advisory (Keyholder sieht es), blockiert nicht. Server-seitig per Vision gesetzt.
+  deviceCheck         String?
+  deviceCheckNote     String?              // erkanntes Gerät (Name) oder null, wenn keins erkannt
+  deviceCheckExpected String?              // erwartetes (verschlossenes) Gerät zur Check-Zeit
+  // OEFFNEN-Einträge (Reinigung/Toilette): war eine Erektion vorhanden? → automatischer StrafeRecord(EREKTION).
+  erektionGemeldet    Boolean              @default(false)
+  deviceId            String?
+  device              Device?              @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  createdAt           DateTime             @default(now())
+  kontrollAnforderung KontrollAnforderung? @relation("KontrolleEntry")
+  orgasmusAnforderung OrgasmusAnforderung? @relation("OrgasmusAnforderungEntry")
+
+  @@index([userId])
+  @@index([userId, type, startTime(sort: Desc)])
+}
+
+// Keyholder-Aufforderung für einen Orgasmus innerhalb eines Zeitfensters.
+// art=ANWEISUNG: Pflicht (Versäumnis -> Strafbuch, Phase 2). art=GELEGENHEIT: Erlaubnis, kein Zwang.
+// vorgegebeneArt (optional): erforderliche orgasmusArt-Basis; null = jeder Orgasmus erfüllt.
+model OrgasmusAnforderung {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  art            String    // "ANWEISUNG" | "GELEGENHEIT"
+  nachricht      String?
+  beginntAt      DateTime  // Fenster-Start
+  endetAt        DateTime  // Fenster-Ende
+  vorgegebeneArt String?   // erforderliche orgasmusArt-Basis (aus ORGASMUS_ARTEN); null = egal
+  oeffnenErlaubt Boolean   @default(false) // während des Fensters darf zum Orgasmus geöffnet werden, ohne Sperre zu brechen / Strafe
+  createdAt      DateTime  @default(now())
+  fulfilledAt    DateTime? // gesetzt wenn passender ORGASMUS-Eintrag im Fenster erstellt
+  entryId        String?   @unique
+  entry          Entry?    @relation("OrgasmusAnforderungEntry", fields: [entryId], references: [id], onDelete: SetNull)
+  withdrawnAt    DateTime?
+
+  @@index([userId, fulfilledAt, withdrawnAt])
+}
+
+model NotificationPreference {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventType String  // VERSCHLUSS | OEFFNUNG_IMMER | OEFFNUNG_VERBOTEN | ORGASMUS | KONTROLLE_FREIWILLIG | KONTROLLE_ANGEFORDERT
+  mail      Boolean @default(true)
+  push      Boolean @default(true)
+
+  @@unique([userId, eventType])
+  @@index([userId])
+}
+
+model AppMeta {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// ── OAuth 2.0 Authorization Server ──────────────────────────────────────────
+// Enables Claude Mobile / Claude Desktop to authenticate to the MCP server
+// via OAuth 2.0 Authorization Code + PKCE instead of a static bearer token.
+
+// Registered OAuth clients (e.g. Claude Desktop, Claude Mobile).
+// Dynamic Client Registration (RFC 7591) creates rows here automatically.
+model OAuthClient {
+  id           String   @id @default(cuid())
+  clientId     String   @unique
+  clientName   String
+  redirectUris String   // JSON array of allowed redirect URIs
+  createdAt    DateTime @default(now())
+
+  codes         OAuthCode[]
+  tokens        OAuthToken[]
+  refreshTokens OAuthRefreshToken[]
+}
+
+// Short-lived authorization codes (10 min). Exchanged once for an access token.
+model OAuthCode {
+  id                  String      @id @default(cuid())
+  code                String      @unique
+  clientId            String
+  client              OAuthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  userId              String
+  redirectUri         String
+  scopes              String      // space-separated list, e.g. "read"
+  codeChallenge       String      // PKCE S256 challenge
+  codeChallengeMethod String      @default("S256")
+  expiresAt           DateTime
+  usedAt              DateTime?   // set when exchanged — single-use enforcement
+  createdAt           DateTime    @default(now())
+
+  @@index([code])
+  @@index([expiresAt])
+}
+
+// Short-lived access tokens issued to MCP clients (1 h). Renewed silently via refresh token.
+model OAuthToken {
+  id        String      @id @default(cuid())
+  tokenHash String      @unique // SHA-256 hex of the raw token — never store plaintext
+  clientId  String
+  client    OAuthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  userId    String
+  scopes    String      // space-separated list, e.g. "read"
+  expiresAt DateTime    // short (1 h) — refresh via OAuthRefreshToken
+  createdAt DateTime    @default(now())
+
+  @@index([tokenHash])
+  @@index([expiresAt])
+}
+
+// Long-lived refresh tokens (RFC 6749 §6) for silent access-token renewal. Bewusst NICHT-rotierend
+// (wiederverwendbar) — vermeidet die Rotation-Race, bei der ein noch-in-Transit alter Token den Grant
+// killt. Sicherheit: kurzlebiger Access-Token + Widerruf über /api/oauth/revoke (RFC 7009).
+model OAuthRefreshToken {
+  id        String      @id @default(cuid())
+  tokenHash String      @unique // SHA-256 hex — never store plaintext
+  clientId  String
+  client    OAuthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  userId    String
+  scopes    String      // space-separated list, e.g. "read"
+  expiresAt DateTime    // long (1 year)
+  createdAt DateTime    @default(now())
+
+  @@index([tokenHash])
+  @@index([expiresAt])
+}
+
+// ── AI Keyholder ─────────────────────────────────────────────────────────────
+
+// Per-user configuration for the AI keyholder agent.
+// One row per user; created on first save in the admin settings.
+model AiKeyholderConfig {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  enabled              Boolean  @default(false)
+  // LLM backend
+  llmProvider          String   @default("anthropic") // "anthropic" | "ollama"
+  ollamaBaseUrl        String?  // e.g. "http://192.168.1.10:11434"
+  ollamaModel          String?  // e.g. "qwen2.5:32b"
+  // Persona / instructions
+  systemPrompt         String?  // dominant persona + rules for the AI keyholder
+  currentPersonaId     String?  // FK to AiPersona (set when a persona template is applied; cleared on manual edit)
+  currentPersona       AiPersona? @relation(fields: [currentPersonaId], references: [id], onDelete: SetNull)
+  // Autonomous action schedule — random interval
+  cronExpression       String?  // legacy / display only; actual scheduling uses randomInterval fields
+  lastRunAt            DateTime?
+  nextRunAt            DateTime? // when the next autonomous run is scheduled
+  randomIntervalMinMin Int?      // minimum wait between runs in minutes (default 15)
+  randomIntervalMinMax Int?      // maximum wait between runs in minutes (default 120)
+  // Anthropic API key override (AES-256-GCM encrypted, see src/lib/encrypt.ts)
+  // If set, takes precedence over the ANTHROPIC_API_KEY env var.
+  anthropicApiKeyEnc   String?
+  // Media generation (ComfyUI)
+  mediaEnabled         Boolean  @default(false)
+  comfyUiBaseUrl       String?  // e.g. "http://192.168.1.10:8188"
+  // JSON array of prompt-theme objects: [{ "theme": "bondage", "weight": 2 }, ...]
+  mediaPromptTemplates String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+// Chat messages between the user and the AI keyholder.
+// role "system" is used for autonomous-action log entries (not shown in chat, but
+// included as context when the LLM builds its next reply).
+model AiKeyholderMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   // "user" | "assistant" | "system"
+  content   String
+  // Optional: message references a piece of generated media (e.g. "hier ist dein Bild")
+  mediaId   String?
+  media     GeneratedMedia? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+
+  // Composite index covers the most common query: messages by user + role filter + time order
+  @@index([userId, role, createdAt(sort: Desc)])
+}
+
+// Images and videos pre-generated by ComfyUI for the AI keyholder to assign as tasks.
+model GeneratedMedia {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaType        String   // "image" | "video"
+  // "queued"      → waiting for a free generation slot
+  // "generating"  → ComfyUI job submitted, polling for result
+  // "ready"       → file saved, not yet shown to user
+  // "assigned"    → linked to a KeyholderTask
+  // "failed"      → ComfyUI returned an error
+  status           String   @default("queued")
+  prompt           String
+  negativePrompt   String?
+  width            Int?
+  height           Int?
+  // ComfyUI internal prompt_id — used to poll /history/{id} for completion
+  comfyPromptId    String?
+  // Relative path under uploads/ once generation is done
+  filePath         String?
+  assignedAt       DateTime? // set when a KeyholderTask is created from this media
+  failedReason     String?
+  createdAt        DateTime @default(now())
+
+  messages         AiKeyholderMessage[]
+  tasks            KeyholderTask[]
+
+  @@index([userId, status])
+}
+
+// Tasks the AI keyholder assigns to the user.
+// Currently supports VIEW_MEDIA (watch a video / look at an image) but
+// the type field is open for future task types (e.g. WRITE_ESSAY, WEAR_DURATION).
+model KeyholderTask {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           String   // "VIEW_MEDIA" | "WRITE_RESPONSE"
+  // The AI keyholder's message introducing / explaining the task
+  message        String
+  // Optional media attachment
+  mediaId        String?
+  media          GeneratedMedia? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  assignedAt     DateTime @default(now())
+  dueAt          DateTime?
+  // Completion
+  completedAt    DateTime?
+  // User's written response (required for VIEW_MEDIA + WRITE_RESPONSE tasks)
+  responseText   String?
+  // AI keyholder's reaction to the user's response (set after user completes the task)
+  aiReactionText String?
+  createdAt      DateTime @default(now())
+
+  // Combined index for the open-tasks query: userId + completedAt=null + assignedAt order
+  @@index([userId, completedAt, assignedAt(sort: Desc)])
+}
+
+// Reusable AI persona templates. When applied to a user's AiKeyholderConfig
+// the systemPrompt is copied (template semantics, not a live reference).
+model AiPersona {
+  id               String              @id @default(cuid())
+  name             String              @unique
+  description      String?
+  systemPrompt     String
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  keyholderConfigs AiKeyholderConfig[]
+}

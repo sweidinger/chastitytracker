@@ -3,9 +3,11 @@ import { redirect } from "next/navigation";
 import { assertKeyholderOrAdmin } from "@/lib/authGuards";
 import RoleSelect from "@/app/admin/RoleSelect";
 import ReinigungToggle from "@/app/admin/ReinigungToggle";
+import ToiletteToggle from "@/app/admin/ToiletteToggle";
+import PlugToggle from "@/app/admin/PlugToggle";
 import AutoKontrolleToggle from "@/app/admin/AutoKontrolleToggle";
 import { parseReinigungsFenster } from "@/lib/reinigungService";
-import { parseReasonConfig, resolveOrgasmusOptions, ART_SEP } from "@/lib/reasonsService";
+import { parseReasonConfig, resolveOrgasmusOptions, ART_SEP, PROTECTED_OPENING_CODES } from "@/lib/reasonsService";
 import ReasonsEditor from "@/app/admin/ReasonsEditor";
 import { ORGASMUS_ARTEN, OEFFNEN_GRUENDE, ORGASMUS_ART_I18N_KEYS, GRUND_I18N_KEYS } from "@/lib/constants";
 import AccountSection from "./AccountSection";
@@ -35,7 +37,7 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
 
   const { userId: actorId, isGlobalAdmin } = await assertKeyholderOrAdmin(id);
 
-  const [user, vorgaben, categories, keyholders, t, tc, dl, tOrgasm, tOpen] = await Promise.all([
+  const [user, vorgaben, categories, keyholders, aiKeyholderConfig, aiPersonas, t, tc, dl, tOrgasm, tOpen] = await Promise.all([
     prisma.user.findUnique({ where: { id } }),
     prisma.trainingVorgabe.findMany({ where: { userId: id }, orderBy: { gueltigAb: "desc" } }),
     // Vorgaben can only be set on KG-built-in or user-categories with allowVorgaben=true.
@@ -45,6 +47,8 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
       select: { id: true, name: true },
     }),
     getKeyholdersOfUser(id),
+    prisma.aiKeyholderConfig.findUnique({ where: { userId: id }, select: { enabled: true, currentPersona: { select: { name: true } } } }),
+    prisma.aiPersona.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, systemPrompt: true } }),
     getTranslations("admin"),
     getTranslations("common"),
     getLocale().then(toDateLocale),
@@ -88,7 +92,7 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
       {/* Keyholder dieses Subs */}
       {isGlobalAdmin && (
         <SettingsSection title={t("sectionKeyholders")} description={t("keyholdersDesc")} bodyPadded>
-          <KeyholderManager subId={user.id} initial={keyholders.map((k) => ({ id: k.id, username: k.username }))} />
+          <KeyholderManager subId={user.id} initial={keyholders.map((k) => ({ id: k.id, username: k.username }))} aiKeyholderActive={aiKeyholderConfig?.enabled === true} aiPersonas={aiPersonas} currentPersonaName={aiKeyholderConfig?.currentPersona?.name ?? null} />
         </SettingsSection>
       )}
 
@@ -100,6 +104,27 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
           initialMaxMinuten={user.reinigungMaxMinuten}
           initialMaxProTag={user.reinigungMaxProTag}
           initialFenster={parseReinigungsFenster(user.reinigungsFenster)}
+        />
+      </SettingsSection>
+
+      {/* Toilette */}
+      <SettingsSection title={t("sectionToilette")} description={t("sectionToiletteDesc")} bodyPadded>
+        <ToiletteToggle
+          userId={user.id}
+          initialErlaubt={user.toiletteErlaubt}
+          initialMaxMinuten={user.toiletteMaxMinuten}
+          initialMaxProTag={user.toiletteMaxProTag}
+        />
+      </SettingsSection>
+
+      {/* Anal-Plug */}
+      <SettingsSection title={t("sectionPlug")} description={t("sectionPlugDesc")} bodyPadded>
+        <PlugToggle
+          userId={user.id}
+          initialReinigungErlaubt={user.plugReinigungErlaubt}
+          initialReinigungMaxMinuten={user.plugReinigungMaxMinuten}
+          initialReinigungMaxProTag={user.plugReinigungMaxProTag}
+          initialToiletteMaxMinuten={user.plugToiletteMaxMinuten}
         />
       </SettingsSection>
 
@@ -124,7 +149,7 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
               configKey="oeffnenGruendeConfig"
               initial={parseReasonConfig(user.oeffnenGruendeConfig, "opening")}
               builtinLabels={openingBuiltinLabels}
-              protectedCode="REINIGUNG"
+              protectedCodes={PROTECTED_OPENING_CODES}
             />
           </div>
         </div>

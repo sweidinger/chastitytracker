@@ -107,6 +107,8 @@ WEBAUTHN_RP_ID=<hostname>          # default: localhost
 WEBAUTHN_RP_ORIGIN=<origin-url>    # default: http://localhost:3000
 PORTAL_SHARED_SECRET=<secret>      # optional: Portal-Login JWT-Secret
 USE_ADMIN_RELATIONSHIPS=true       # optional: Admin↔User n:m Zuordnung aktivieren
+DB_ENCRYPTION_KEY=<64-hex-chars>   # optional: AES-256 Key für verschlüsselte DB-Felder (Anthropic API-Key)
+                                   # Generieren: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 TELEMETRY_URL=<url>                # optional: Telemetrie-Endpunkt
 TELEMETRY_INSTANCE_ID=<id>         # optional: Instanz-Kennung
 BUILD_DATE=<iso-date>              # optional: wird beim Build gesetzt
@@ -228,3 +230,13 @@ Alle UI-Elemente MÜSSEN auf den gemeinsamen Shared Primitives basieren. Erfinde
 - Kernfunktionalität modifiziert oder gelöscht wird
 - Kritische Geschäftslogik angepasst wird
 - Das erwartete Ergebnis nicht explizit angegeben ist
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

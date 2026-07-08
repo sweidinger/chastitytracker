@@ -1,0 +1,166 @@
+import Anthropic from "@anthropic-ai/sdk";
+
+export interface LlmMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+
+export interface LlmConfig {
+  provider: "anthropic" | "ollama";
+  ollamaBaseUrl?: string | null;
+  ollamaModel?: string | null;
+  /** Override for ANTHROPIC_API_KEY env var. Decrypted by the caller. */
+  anthropicApiKey?: string | null;
+}
+
+/**
+ * Send a chat completion request and return the full response text.
+ * System messages are handled differently per provider:
+ * - Anthropic: system is passed as top-level `system` param
+ * - Ollama:    system messages are included inline in the messages array
+ */
+export async function llmChat(
+  config: LlmConfig,
+  messages: LlmMessage[],
+): Promise<string> {
+  if (config.provider === "ollama") {
+    return ollamaChat(config, messages);
+  }
+  return anthropicChat(config, messages);
+}
+
+/**
+ * Stream a chat completion. Yields text chunks as they arrive.
+ * Caller is responsible for flushing chunks to the HTTP response.
+ */
+export async function* llmStream(
+  config: LlmConfig,
+  messages: LlmMessage[],
+): AsyncGenerator<string> {
+  if (config.provider === "ollama") {
+    yield* ollamaStream(config, messages);
+  } else {
+    yield* anthropicStream(config, messages);
+  }
+}
+
+// ── Anthropic ────────────────────────────────────────────────────────────────
+
+const ANTHROPIC_MODEL = process.env.AI_KEYHOLDER_ANTHROPIC_MODEL ?? "claude-haiku-4-5-20251001";
+
+/** Returns an Anthropic client using config.anthropicApiKey if set, else the env var. */
+function getAnthropicClient(config: LlmConfig): Anthropic {
+  const apiKey = config.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY;
+  return new Anthropic({ apiKey });
+}
+
+function splitSystemFromMessages(messages: LlmMessage[]): {
+  system: string | undefined;
+  rest: Anthropic.MessageParam[];
+} {
+  const systemParts = messages
+    .filter((m) => m.role === "system")
+    .map((m) => m.content)
+    .join("\n\n");
+  const rest = messages
+    .filter((m) => m.role !== "system")
+    .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+  return { system: systemParts || undefined, rest };
+}
+
+async function anthropicChat(config: LlmConfig, messages: LlmMessage[]): Promise<string> {
+  const { system, rest } = splitSystemFromMessages(messages);
+  const response = await getAnthropicClient(config).messages.create({
+    model: ANTHROPIC_MODEL,
+    max_tokens: 1024,
+    system,
+    messages: rest,
+  });
+  const block = response.content[0];
+  return block.type === "text" ? block.text : "";
+}
+
+async function* anthropicStream(config: LlmConfig, messages: LlmMessage[]): AsyncGenerator<string> {
+  const { system, rest } = splitSystemFromMessages(messages);
+  const stream = getAnthropicClient(config).messages.stream({
+    model: ANTHROPIC_MODEL,
+    max_tokens: 1024,
+    system,
+    messages: rest,
+  });
+  for await (const event of stream) {
+    if (
+      event.type === "content_block_delta" &&
+      event.delta.type === "text_delta"
+    ) {
+      yield event.delta.text;
+    }
+  }
+}
+
+// ── Ollama ───────────────────────────────────────────────────────────────────
+
+function ollamaUrl(config: LlmConfig, path: string): string {
+  const base = (config.ollamaBaseUrl ?? "http://localhost:11434").replace(/\/$/, "");
+  return `${base}${path}`;
+}
+
+function ollamaModel(config: LlmConfig): string {
+  return config.ollamaModel ?? "qwen2.5:32b";
+}
+
+async function ollamaChat(config: LlmConfig, messages: LlmMessage[]): Promise<string> {
+  const res = await fetch(ollamaUrl(config, "/v1/chat/completions"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: ollamaModel(config),
+      messages,
+      stream: false,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
+  }
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
+async function* ollamaStream(
+  config: LlmConfig,
+  messages: LlmMessage[],
+): AsyncGenerator<string> {
+  const res = await fetch(ollamaUrl(config, "/v1/chat/completions"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: ollamaModel(config),
+      messages,
+      stream: true,
+    }),
+  });
+  if (!res.ok || !res.body) {
+    throw new Error(`Ollama stream error ${res.status}: ${await res.text()}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.replace(/^data: /, "").trim();
+      if (!trimmed || trimmed === "[DONE]") continue;
+      try {
+        const parsed = JSON.parse(trimmed);
+        const delta = parsed.choices?.[0]?.delta?.content;
+        if (delta) yield delta;
+      } catch {
+        // malformed chunk — skip
+      }
+    }
+  }
+}

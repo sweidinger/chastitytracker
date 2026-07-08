@@ -19,9 +19,11 @@ export default async function NewWearBeginPage({ searchParams }: { searchParams:
 
   const category = await prisma.deviceCategory.findUnique({
     where: { id: categoryId },
-    select: { id: true, userId: true, name: true, color: true, icon: true, isBuiltIn: true, requirePhoto: true },
+    select: { id: true, userId: true, name: true, color: true, icon: true, isBuiltIn: true, slug: true, requirePhoto: true },
   });
-  if (!category || category.userId !== session.user.id || category.isBuiltIn) notFound();
+  // Block KG (uses VERSCHLUSS/OEFFNEN, not WEAR_BEGIN/END); allow plug + user-defined.
+  if (!category || category.userId !== session.user.id) notFound();
+  if (category.isBuiltIn && category.slug !== "plug") notFound();
 
   // Block if a session is already active in this category
   const active = await getActiveWearSessionForCategory(session.user.id, categoryId);

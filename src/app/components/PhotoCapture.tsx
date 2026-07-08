@@ -174,10 +174,25 @@ export default function PhotoCapture({ onFile, uploading, variant = "emerald", c
     setZoomLevel(1);
   }
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) onFile(file);
-    e.target.value = "";
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const input = e.currentTarget; // capture before any async suspend
+    const file = input.files?.[0];
+    if (file) {
+      // Read bytes BEFORE clearing the input.
+      // On iOS, setting input.value = "" signals the OS to reclaim the captured-photo
+      // file backing — this happens even for the front camera before arrayBuffer() can
+      // start inside usePhotoUpload (due to how JS async/await scheduling works).
+      // Awaiting here ensures the bytes are safely in the JS heap first.
+      let safeFile: File = file;
+      try {
+        const bytes = await file.arrayBuffer();
+        if (bytes.byteLength > 0) {
+          safeFile = new File([bytes], file.name, { type: file.type, lastModified: file.lastModified });
+        }
+      } catch { /* keep original — arrayBuffer failed, will surface as upload error */ }
+      onFile(safeFile);
+    }
+    input.value = "";
   }
 
   return (

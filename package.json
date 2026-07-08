@@ -1,6 +1,6 @@
 {
   "name": "kg-app",
-  "version": "4.48.0",
+  "version": "4.64.4",
   "private": true,
   "license": "SEE LICENSE IN LICENSE.md",
   "scripts": {
@@ -30,7 +30,6 @@
     "next-auth": "^5.0.0-beta.30",
     "next-intl": "^4.8.3",
     "nodemailer": "^7.0.13",
-    "prisma": "^5.22.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "sharp": "^0.34.5",
@@ -52,6 +51,7 @@
     "puppeteer": "^24.40.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.5",
+    "prisma": "^5.22.0"
   }
 }

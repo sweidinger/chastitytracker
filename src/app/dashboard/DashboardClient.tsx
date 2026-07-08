@@ -18,7 +18,7 @@ export interface DashboardProps {
   // Kontrolle
   offeneKontrolle: {
     deadline: string;
-    code: string;
+    code: string | null;
     kommentar: string | null;
     overdue: boolean;
     href: string;
@@ -35,6 +35,21 @@ export interface DashboardProps {
 
   // Sperrzeit
   activeSperrzeit: {
+    endetAt: string | null;
+    nachricht: string | null;
+    endetAtLabel: string | null;
+  } | null;
+
+  // Plug-Anforderung (Tragen anfordern)
+  offenePlugAnf: {
+    endetAt: string | null;
+    nachricht: string | null;
+    endetAtLabel: string | null;
+    categoryId: string;
+  } | null;
+
+  // Plug-Sperrdauer
+  activePlugSperrzeit: {
     endetAt: string | null;
     nachricht: string | null;
     endetAtLabel: string | null;
@@ -85,6 +100,8 @@ export default function DashboardClient(props: DashboardProps) {
     offeneKontrolle,
     offeneVerschlussAnf,
     activeSperrzeit,
+    offenePlugAnf,
+    activePlugSperrzeit,
     offeneOrgasmusAnf,
     tagH: baseTagH,
     wocheH: baseWocheH,
@@ -128,11 +145,34 @@ export default function DashboardClient(props: DashboardProps) {
     />
   ) : null;
 
+  const plugAnforderungBanner = offenePlugAnf ? (
+    <LockRequestBanner
+      variant="large"
+      colorScheme="request"
+      label={t("plugWearRequest")}
+      nachricht={offenePlugAnf.nachricht}
+      endetAtLabel={offenePlugAnf.endetAtLabel}
+      action={{ label: t("plugWearRequestAction"), href: `/dashboard/new/wear-begin?category=${offenePlugAnf.categoryId}` }}
+    />
+  ) : null;
+
+  const plugSperrzeitBanner = activePlugSperrzeit ? (
+    <LockRequestBanner
+      variant="large"
+      colorScheme="sperrzeit"
+      label={t("plugWearDuration")}
+      nachricht={activePlugSperrzeit.nachricht}
+      endetAtLabel={activePlugSperrzeit.endetAtLabel}
+    />
+  ) : null;
+
   if (!hasEntries) {
     return (
       <main className="flex-1 w-full max-w-2xl mx-auto px-4 py-8 flex flex-col gap-5">
         {lockRequestBanner}
         {orgasmusRequestBanner}
+        {plugAnforderungBanner}
+        {plugSperrzeitBanner}
         <EmptyState
           icon={<Lock size={48} />}
           title={t("welcomeTitle")}
@@ -189,6 +229,10 @@ export default function DashboardClient(props: DashboardProps) {
       {lockRequestBanner}
 
       {orgasmusRequestBanner}
+
+      {plugAnforderungBanner}
+
+      {plugSperrzeitBanner}
 
       {/* Sperrzeit-Banner entfernt — wird bereits im Sperrzeit-Footer der LaufendeSessionCard angezeigt */}
 

@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Home, ClipboardList, BarChart2, Plus, LogOut,
+  Home, ClipboardList, BarChart2, Plus, LogOut, Bot,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { signOut } from "next-auth/react";
@@ -20,9 +20,10 @@ interface Props {
   version: string;
   categoryRows?: NewEntryCategoryRow[];
   bildersafe?: boolean;
+  aiKeyholderEnabled?: boolean;
 }
 
-export default function DesktopSidebar({ isAdmin, isKeyholder, isLocked, version, categoryRows, bildersafe }: Props) {
+export default function DesktopSidebar({ isAdmin, isKeyholder, isLocked, version, categoryRows, bildersafe, aiKeyholderEnabled }: Props) {
   const t = useTranslations("nav");
   const pathname = usePathname();
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -31,6 +32,7 @@ export default function DesktopSidebar({ isAdmin, isKeyholder, isLocked, version
     { href: "/dashboard", icon: Home, label: t("overview"), exact: true },
     { href: "/dashboard/eintraege", icon: ClipboardList, label: t("entries"), exact: false },
     { href: "/dashboard/stats", icon: BarChart2, label: t("stats"), exact: false },
+    ...(aiKeyholderEnabled ? [{ href: "/dashboard/keyholder", icon: Bot, label: t("aiKeyholder"), exact: false }] : []),
     ...adminNavEntry({ isAdmin, isKeyholder, adminLabel: t("admin"), keyholderLabel: t("keyholder") }),
   ];
 

@@ -16,11 +16,16 @@ export default async function NewPruefungPage({ searchParams }: { searchParams: 
     userId ? getLatestKgEntry(userId) : null,
   ]);
 
-  // Angeforderter Code (Mail-Link) hat Vorrang; sonst bekommt die Selbstkontrolle bei aktivem
-  // Verschluss einen frischen Zufallscode (Frische-Beweis statt wiederverwendbarem Siegel-Foto).
+  // Angeforderter Code (Mail-Link) hat Vorrang.
+  // Selbstkontrolle: Frische-Code nur erzeugen, wenn der aktive Verschluss einen kontrollCode
+  // (Siegel-Nummer) hat — ohne Siegel gibt es nichts zu verifizieren.
   // Bei aktivem Siegel prüft die Verifikation die Siegel-Nummer zusätzlich (Server-seitig).
-  const isLocked = latest?.type === "VERSCHLUSS";
-  const effectiveCode = code || (isLocked ? generateKontrollCode() : undefined);
+  const hasSeal = latest?.type === "VERSCHLUSS" && !!latest.kontrollCode;
+  // URL-Code (von KontrollAnforderungs-E-Mail) hat immer Vorrang — er wurde bereits generiert und
+  // versendet, unabhängig vom Siegel-Status.
+  // Selbstkontrolle (kein URL-Code): Frische-Code nur erzeugen wenn ein Siegel vorhanden ist —
+  // ohne Siegel gibt es nichts zu verifizieren, kein Code nötig.
+  const effectiveCode = code ?? (hasSeal ? generateKontrollCode() : undefined);
   const sealRequired = sealRequiredForCode(effectiveCode, latest ?? null);
   const tn = await getTranslations("newEntry");
   const tf = await getTranslations("inspectionForm");

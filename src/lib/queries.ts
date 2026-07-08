@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import type { OeffnenGrund } from "@/lib/constants";
 import { aktivesReinigungsFenster } from "@/lib/reinigungService";
 import { APP_TZ } from "@/lib/utils";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 
 /**
  * Where-Fragment: bereits AKTIVE Kontroll-Anforderungen — sofortige (wirksamAb null) und
@@ -60,19 +61,28 @@ export async function getUserTimezone(userId: string): Promise<string> {
 }
 
 /** Returns active (non-archived) KG devices for a user, ordered by creation date.
- *  KG-specific filter: includes only devices in the built-in KG category — Plug, Collar
- *  etc. are excluded because Verschluss/Öffnen-Flows operate on KG only. Devices without
- *  a category are also included for legacy data (pre-DeviceCategory migration safety). */
+ *  KG-specific filter: only slug="kg" category — Plug and other built-in categories are excluded
+ *  because Verschluss/Öffnen-Flows operate on KG only. Devices without a category are also
+ *  included for legacy data (pre-DeviceCategory migration safety). */
 export async function getUserDeviceOptions(userId: string): Promise<DeviceOption[]> {
   return prisma.device.findMany({
     where: {
       userId,
       archivedAt: null,
       OR: [
-        { category: { isBuiltIn: true } },
+        { category: { slug: KG_BUILTIN_SLUG } },
         { categoryId: null },
       ],
     },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, name: true, imageUrl: true },
+  });
+}
+
+/** Returns active (non-archived) Plug devices for a user (devices in the plug category). */
+export async function getPlugDeviceOptions(userId: string, categoryId: string): Promise<DeviceOption[]> {
+  return prisma.device.findMany({
+    where: { userId, categoryId, archivedAt: null },
     orderBy: { createdAt: "asc" },
     select: { id: true, name: true, imageUrl: true },
   });
@@ -100,6 +110,7 @@ export interface ActiveWearSession {
   deviceId: string;
   deviceName: string;
   since: Date;
+  imageUrl: string | null;
 }
 
 /** Result of `prepareWearEntry` — never thrown, returned for the route to inspect. */
@@ -130,10 +141,11 @@ export async function prepareWearEntry(
   if (!deviceId) return { ok: false, code: "WEAR_DEVICE_REQUIRED" };
   const dev = await tx.device.findUnique({
     where: { id: deviceId },
-    select: { categoryId: true, category: { select: { isBuiltIn: true, requirePhoto: true } } },
+    select: { categoryId: true, category: { select: { isBuiltIn: true, slug: true, requirePhoto: true } } },
   });
   if (!dev?.categoryId) return { ok: false, code: "WEAR_DEVICE_NO_CATEGORY" };
-  if (dev.category?.isBuiltIn) return { ok: false, code: "WEAR_DEVICE_KG" };
+  // KG uses VERSCHLUSS/OEFFNEN, not WEAR_BEGIN/END. Other built-ins (e.g. Plug) are allowed.
+  if (dev.category?.slug === "kg") return { ok: false, code: "WEAR_DEVICE_KG" };
   if (type === "WEAR_BEGIN" && dev.category?.requirePhoto && !imageUrl) {
     return { ok: false, code: "WEAR_PHOTO_REQUIRED" };
   }
@@ -174,7 +186,8 @@ export async function getActiveWearSessions(userId: string): Promise<(ActiveWear
       type: true,
       startTime: true,
       deviceId: true,
-      device: { select: { id: true, name: true, category: { select: { id: true, name: true, color: true, icon: true, isBuiltIn: true } } } },
+      imageUrl: true,
+      device: { select: { id: true, name: true, category: { select: { id: true, name: true, color: true, icon: true, isBuiltIn: true, slug: true } } } },
     },
   });
   // Group by deviceId, keep only the latest per device.
@@ -183,7 +196,8 @@ export async function getActiveWearSessions(userId: string): Promise<(ActiveWear
   for (const e of latestPerDevice) {
     if (!e.deviceId || seenDevices.has(e.deviceId)) continue;
     seenDevices.add(e.deviceId);
-    if (e.type !== "WEAR_BEGIN" || !e.device?.category || e.device.category.isBuiltIn) continue;
+    // Skip KG (uses VERSCHLUSS/OEFFNEN); include Plug and all other non-KG categories.
+    if (e.type !== "WEAR_BEGIN" || !e.device?.category || e.device.category.slug === "kg") continue;
     sessions.push({
       categoryId: e.device.category.id,
       categoryName: e.device.category.name,
@@ -192,6 +206,7 @@ export async function getActiveWearSessions(userId: string): Promise<(ActiveWear
       deviceId: e.device.id,
       deviceName: e.device.name,
       since: e.startTime,
+      imageUrl: e.imageUrl,
     });
   }
   return sessions;
@@ -213,6 +228,7 @@ export async function getActiveWearSessionForCategory(
     select: {
       type: true,
       startTime: true,
+      imageUrl: true,
       device: { select: { id: true, name: true, category: { select: { id: true, name: true } } } },
     },
   });
@@ -223,15 +239,26 @@ export async function getActiveWearSessionForCategory(
     deviceId: latest.device.id,
     deviceName: latest.device.name,
     since: latest.startTime,
+    imageUrl: latest.imageUrl,
   };
 }
 
-/** Returns non-KG device categories with tracking enabled, ordered by sortOrder then createdAt. */
+/** Returns non-KG device categories with tracking enabled, ordered by sortOrder then createdAt.
+ *  Includes the plug built-in category (isBuiltIn=true, slug="plug") since it uses WEAR_BEGIN/END. */
 export async function getNonKgTrackingCategories(userId: string) {
   return prisma.deviceCategory.findMany({
-    where: { userId, isBuiltIn: false, trackingEnabled: true },
+    where: { userId, slug: { not: "kg" }, trackingEnabled: true },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     select: { id: true, name: true, color: true, icon: true },
+  });
+}
+
+/** Returns session categories (isSessionCategory=true) for a user, ordered by sortOrder then createdAt. */
+export async function getSessionCategories(userId: string) {
+  return prisma.deviceCategory.findMany({
+    where: { userId, isSessionCategory: true },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    select: { id: true, name: true, color: true, icon: true, maxSessionMinutes: true, requiresVideo: true },
   });
 }
 
@@ -271,11 +298,14 @@ export async function validateDeviceOwnership(
 
 /** Shared base `where` for KEYHOLDER Sperrzeit-Sichten: nicht zurückgezogen, noch nicht beendet —
  *  ABER OHNE wirksamAb-Gate, damit GEPLANTE Sperrzeiten dem Keyholder sichtbar/stornierbar sind.
- *  `activeSperrzeitWhere` baut darauf auf und ergänzt das wirksamAb-Gate für Sub/Enforcement. */
+ *  `activeSperrzeitWhere` baut darauf auf und ergänzt das wirksamAb-Gate für Sub/Enforcement.
+ *  Filtert explizit `deviceCategoryId: null` → KG only; Plug-Sperrzeiten laufen über
+ *  `getActivePlugSperrzeit`. */
 function keyholderSperrzeitWhere(userIdFilter: string | { in: string[] }, now: Date) {
   return {
     userId: userIdFilter,
     art: "SPERRZEIT" as const,
+    deviceCategoryId: null, // KG only — Plug-Sperrzeiten haben eine deviceCategoryId gesetzt
     withdrawnAt: null,
     OR: [{ endetAt: { gt: now } }, { endetAt: null }],
   };
@@ -337,6 +367,43 @@ export async function getKeyholderSperrzeiten(userIds: string[]) {
   if (userIds.length === 0) return [];
   return prisma.verschlussAnforderung.findMany({
     where: keyholderSperrzeitWhere({ in: userIds }, new Date()),
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+/** Returns the currently active Sperrzeit for a non-KG DeviceCategory (e.g. Plug), or null.
+ *  Parallel to `getActiveSperrzeit` but scoped to a specific category. */
+export async function getActivePlugSperrzeit(userId: string, categoryId: string, tx?: PrismaTx) {
+  const client = tx ?? prisma;
+  const now = new Date();
+  return client.verschlussAnforderung.findFirst({
+    where: {
+      userId,
+      art: "SPERRZEIT" as const,
+      deviceCategoryId: categoryId,
+      withdrawnAt: null,
+      AND: [
+        activeVerschlussAnforderungWhere(now),
+        { OR: [{ endetAt: { gt: now } }, { endetAt: null }] },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+/** Returns the open Tragen-Anforderung (art=ANFORDERUNG, deviceCategoryId set) for a
+ *  non-KG category, or null. Parallel to the KG `offeneVerschlussAnf` query. */
+export async function getActivePlugAnforderung(userId: string, categoryId: string) {
+  const now = new Date();
+  return prisma.verschlussAnforderung.findFirst({
+    where: {
+      userId,
+      art: "ANFORDERUNG" as const,
+      deviceCategoryId: categoryId,
+      fulfilledAt: null,
+      withdrawnAt: null,
+      ...activeVerschlussAnforderungWhere(now),
+    },
     orderBy: { createdAt: "desc" },
   });
 }

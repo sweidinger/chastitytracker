@@ -29,6 +29,10 @@ export default async function CategoriesPage() {
         trackingEnabled: true,
         requirePhoto: true,
         allowVorgaben: true,
+        isSessionCategory: true,
+        maxSessionMinutes: true,
+        requiresVideo: true,
+        orgasmusZiel: true,
         sortOrder: true,
         createdAt: true,
         _count: { select: { devices: true, vorgaben: true } },
@@ -45,9 +49,9 @@ export default async function CategoriesPage() {
     <main className="flex-1 w-full max-w-2xl mx-auto px-4 py-6">
       <CategoriesClient
         categories={categories.map((c) => {
-          // KG: VERSCHLUSS/OEFFNEN pairs (no category filter — all V/O entries are KG by design).
-          // Non-KG: WEAR_BEGIN/END pairs filtered to this category.
-          const pairs = c.isBuiltIn
+          // KG slug: VERSCHLUSS/OEFFNEN pairs (no category filter — all V/O entries are KG by design).
+          // Plug + user-defined: WEAR_BEGIN/END pairs filtered to this category.
+          const pairs = c.slug === "kg"
             ? buildWearPairs(entries, now, { types: KG_PAIR })
             : buildWearPairs(entries, now, { types: WEAR_PAIR, categoryId: c.id });
           const wocheH = wearingHoursFromPairs(pairs, wocheStart, now);
@@ -61,6 +65,10 @@ export default async function CategoriesPage() {
             trackingEnabled: c.trackingEnabled,
             requirePhoto: c.requirePhoto,
             allowVorgaben: c.allowVorgaben,
+            isSessionCategory: c.isSessionCategory,
+            maxSessionMinutes: c.maxSessionMinutes,
+            requiresVideo: c.requiresVideo,
+            orgasmusZiel: c.orgasmusZiel,
             sortOrder: c.sortOrder,
             createdAt: c.createdAt.toISOString(),
             deviceCount: c._count.devices,

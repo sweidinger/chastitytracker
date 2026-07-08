@@ -9,11 +9,14 @@ import { validateEntryPayload, TYPE_EMAIL_COLORS, VALID_ROTATIONS, parseOrgasmus
 import { orgasmusValueAllowed, validOeffnenCodes, effectiveOrgasmusArten, effectiveOeffnenGruende, resolveOrgasmusArtDisplay, resolveReasonLabel } from "@/lib/reasonsService";
 import { isDevBypassEnabled } from "@/lib/devMode";
 import { validateDeviceOwnership, releaseSperrzeitenOnOpen, prepareWearEntry, activeVerschlussAnforderungWhere, aktiveKontrolleWhere } from "@/lib/queries";
+import { getActiveSessionForCategory, fulfillSessionAnforderung, getActiveSessionAnforderung } from "@/lib/sessionService";
+import { getActivePause, pauseSettingsForDevice, maybeCreatePauseOverageStrafe, type PauseDevice } from "@/lib/pauseService";
 import { gatherDeviceReferences } from "@/lib/deviceReferenceService";
 import { checkDeviceInPhoto } from "@/lib/detectDevice";
 import { structuredLog } from "@/lib/serverLog";
 import { sendPushToUser } from "@/lib/push";
 import { getControllersOfUser } from "@/lib/keyholder";
+import { reactToSubEvent } from "@/lib/aiKeyholder/keyholderService";
 import { sendMail, escHtml } from "@/lib/mail";
 import { formatDateTime, formatDuration } from "@/lib/utils";
 import { getTranslations } from "next-intl/server";
@@ -42,7 +45,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
   // verifikationStatus is never accepted from client – set server-side only
-  const { type, startTime, imageUrl, imageExifTime, note, oeffnenGrund, orgasmusArt, kontrollCode, deviceId, imageRotation, codeImageUrl, codeReadable } = body;
+  const { type, startTime, imageUrl, imageExifTime, note, oeffnenGrund, orgasmusArt, kontrollCode, deviceId, imageRotation, codeImageUrl, codeReadable, erektionGemeldet, videoUrl, sessionGoalAchieved, pauseDevice } = body;
 
   const devBypass = isDevBypassEnabled(req.headers.get("host"));
   // Reason-Codes gegen die (ggf. angepasste) Liste DES SESSION-USERS validieren; null-Config → Built-ins.
@@ -61,18 +64,94 @@ export async function POST(req: NextRequest) {
   let withdrawnSperrzeit = false;
   let lockStartTime: Date | null = null;
   let fulfilledAnforderungDeviceId: string | null = null;
+  let pauseBeginTime: Date | null = null;
+  let pauseMaxMinuten: number | null = null;
   try {
     entry = await prisma.$transaction(async (tx) => {
-      // Validate deviceId ownership inside transaction (VERSCHLUSS / WEAR_*)
-      if (deviceId && (type === "VERSCHLUSS" || type === "WEAR_BEGIN" || type === "WEAR_END")) {
+      // Validate deviceId ownership inside transaction (VERSCHLUSS / WEAR_* / SESSION_*)
+      if (deviceId && (type === "VERSCHLUSS" || type === "WEAR_BEGIN" || type === "WEAR_END" || type === "SESSION_BEGIN" || type === "SESSION_END")) {
         const device = await validateDeviceOwnership(deviceId, session.user.id, tx);
         if (!device) throw Object.assign(new Error(), { _code: "INVALID_DEVICE" });
       }
 
       // WEAR_BEGIN / WEAR_END: shared validation lives in lib/queries.ts (single source of truth).
+      let wearResult: Awaited<ReturnType<typeof prepareWearEntry>> | null = null;
       if (type === "WEAR_BEGIN" || type === "WEAR_END") {
-        const wearResult = await prepareWearEntry(tx, session.user.id, type, deviceId, startTime, imageUrl);
+        wearResult = await prepareWearEntry(tx, session.user.id, type, deviceId, startTime, imageUrl);
         if (!wearResult.ok) throw Object.assign(new Error(), { _code: wearResult.code });
+      }
+
+      // SESSION_BEGIN / SESSION_END: validate against active session state for this category
+      let sessionCategoryId: string | null = null;
+      if (type === "SESSION_BEGIN" || type === "SESSION_END") {
+        if (!deviceId) throw Object.assign(new Error(), { _code: "SESSION_DEVICE_REQUIRED" });
+        const dev = await tx.device.findUnique({
+          where: { id: deviceId },
+          select: { categoryId: true, category: { select: { isSessionCategory: true, requiresVideo: true } } },
+        });
+        if (!dev?.categoryId || !dev.category?.isSessionCategory) {
+          throw Object.assign(new Error(), { _code: "SESSION_WRONG_CATEGORY" });
+        }
+        sessionCategoryId = dev.categoryId;
+        const active = await getActiveSessionForCategory(session.user.id, dev.categoryId, tx);
+        if (type === "SESSION_BEGIN" && active) {
+          throw Object.assign(new Error(), { _code: "SESSION_ALREADY_ACTIVE" });
+        }
+        if (type === "SESSION_END") {
+          if (!active) throw Object.assign(new Error(), { _code: "SESSION_NOT_ACTIVE" });
+          if (new Date(startTime) <= active.startTime) throw Object.assign(new Error(), { _code: "TIME_BEFORE" });
+          if (dev.category.requiresVideo && !videoUrl) {
+            throw Object.assign(new Error(), { _code: "SESSION_VIDEO_REQUIRED" });
+          }
+        }
+      }
+
+      // PAUSE_BEGIN / PAUSE_END validation
+      if (type === "PAUSE_BEGIN" || type === "PAUSE_END") {
+        const dev = (pauseDevice === "CAGE" || pauseDevice === "PLUG") ? pauseDevice as PauseDevice : null;
+        if (!dev) throw Object.assign(new Error(), { _code: "PAUSE_DEVICE_REQUIRED" });
+        // PAUSE_END needs a photo (checked by validateEntryPayload via PAUSE_PHOTO_REQUIRED)
+        if (type === "PAUSE_END" && !imageUrl) throw Object.assign(new Error(), { _code: "PAUSE_PHOTO_REQUIRED" });
+
+        const activePause = await getActivePause(session.user.id, dev, tx);
+        if (type === "PAUSE_BEGIN") {
+          if (activePause) throw Object.assign(new Error(), { _code: "PAUSE_ALREADY_ACTIVE" });
+          // Check that the device is actually in use
+          if (dev === "CAGE") {
+            const latestKg = await tx.entry.findFirst({
+              where: { userId: session.user.id, type: { in: ["VERSCHLUSS", "OEFFNEN"] } },
+              orderBy: { startTime: "desc" },
+            });
+            if (!latestKg || latestKg.type !== "VERSCHLUSS") throw Object.assign(new Error(), { _code: "PAUSE_NOT_LOCKED" });
+          }
+          if (dev === "PLUG") {
+            const latestWear = await tx.entry.findFirst({
+              where: { userId: session.user.id, type: { in: ["WEAR_BEGIN", "WEAR_END"] } },
+              orderBy: { startTime: "desc" },
+            });
+            if (!latestWear || latestWear.type !== "WEAR_BEGIN") throw Object.assign(new Error(), { _code: "PAUSE_NOT_WEARING" });
+          }
+        }
+        if (type === "PAUSE_END") {
+          if (!activePause) throw Object.assign(new Error(), { _code: "PAUSE_NOT_ACTIVE" });
+          if (new Date(startTime) <= activePause.startTime) throw Object.assign(new Error(), { _code: "TIME_BEFORE" });
+          pauseBeginTime = activePause.startTime;
+
+          // Look up pause settings to check for overage later
+          const user = await tx.user.findUnique({
+            where: { id: session.user.id },
+            select: {
+              reinigungErlaubt: true, reinigungMaxMinuten: true, reinigungMaxProTag: true,
+              toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true,
+              plugReinigungErlaubt: true, plugReinigungMaxMinuten: true, plugReinigungMaxProTag: true,
+              plugToiletteMaxMinuten: true,
+            },
+          });
+          if (user) {
+            const settings = pauseSettingsForDevice(user, dev);
+            pauseMaxMinuten = settings.maxMinuten;
+          }
+        }
       }
 
       if (type === "VERSCHLUSS") {
@@ -117,24 +196,46 @@ export async function POST(req: NextRequest) {
           orgasmusArt: orgasmusArt || null,
           kontrollCode: kontrollCode || null,
           verifikationStatus: initialVerifikationStatus,
-          deviceId: (type === "VERSCHLUSS" || type === "WEAR_BEGIN" || type === "WEAR_END") ? (deviceId || null) : null,
+          deviceId: (type === "VERSCHLUSS" || type === "WEAR_BEGIN" || type === "WEAR_END" || type === "SESSION_BEGIN" || type === "SESSION_END") ? (deviceId || null) : null,
+          pauseDevice: (type === "PAUSE_BEGIN" || type === "PAUSE_END") ? (pauseDevice || null) : null,
           // Bildersafe: versiegeltes Schlüsselbox-Code-Foto (nur VERSCHLUSS)
           codeImageUrl: type === "VERSCHLUSS" ? (codeImageUrl || null) : null,
           codeReadable: type === "VERSCHLUSS" && codeImageUrl ? (codeReadable ?? null) : null,
+          // Erektion-Flag: für OEFFNEN und WEAR_END (Plug) bei REINIGUNG/TOILETTE
+          erektionGemeldet: (type === "OEFFNEN" || type === "WEAR_END") && erektionGemeldet === true ? true : undefined,
+          // Session: Video-Beweis + Ziel-erreicht (nur SESSION_END)
+          videoUrl: type === "SESSION_END" ? (videoUrl || null) : null,
+          sessionGoalAchieved: type === "SESSION_END" && typeof sessionGoalAchieved === "boolean" ? sessionGoalAchieved : undefined,
         },
       });
 
       // KontrollAnforderung verknüpfen + fulfilledAt server-seitig setzen (unveränderlich).
       // Nur bereits AUSGELÖSTE Anforderungen (wirksamAb erreicht) — sonst könnte ein zufällig
       // kollidierender Selbstkontroll-Code eine noch unsichtbare, geplante Auto-Kontrolle erfüllen.
-      if (type === "PRUEFUNG" && kontrollCode) {
-        await tx.kontrollAnforderung.updateMany({
-          where: {
-            userId: session.user.id, code: kontrollCode, entryId: null, withdrawnAt: null,
-            ...aktiveKontrolleWhere(),
-          },
-          data: { entryId: created.id, fulfilledAt: new Date() },
+      if (type === "PRUEFUNG") {
+        if (kontrollCode) {
+          // requireCode=true: Code aus URL/Mail muss übereinstimmen.
+          await tx.kontrollAnforderung.updateMany({
+            where: {
+              userId: session.user.id, code: kontrollCode, entryId: null, withdrawnAt: null,
+              ...aktiveKontrolleWhere(),
+            },
+            data: { entryId: created.id, fulfilledAt: new Date() },
+          });
+        }
+        // requireCode=false: Code ist "" in der DB — jede Foto-Prüfung erfüllt die älteste offene Anforderung.
+        // Nur wenn noch kein Entry verknüpft ist (nicht doppelt erfüllen).
+        const noCodeKontrolle = await tx.kontrollAnforderung.findFirst({
+          where: { userId: session.user.id, requireCode: false, entryId: null, withdrawnAt: null, ...aktiveKontrolleWhere() },
+          orderBy: { createdAt: "asc" },
+          select: { id: true },
         });
+        if (noCodeKontrolle) {
+          await tx.kontrollAnforderung.update({
+            where: { id: noCodeKontrolle.id },
+            data: { entryId: created.id, fulfilledAt: new Date() },
+          });
+        }
       }
 
       // VerschlussAnforderung (ANFORDERUNG) als erfüllt markieren + ggf. SPERRZEIT erstellen
@@ -142,7 +243,8 @@ export async function POST(req: NextRequest) {
         const offeneAnforderung = await tx.verschlussAnforderung.findFirst({
           // Nur bereits ausgelöste (wirksamAb erreicht) Anforderungen — eine geplante, noch
           // nicht versendete darf nicht vorzeitig als erfüllt markiert werden.
-          where: { userId: session.user.id, art: "ANFORDERUNG", fulfilledAt: null, withdrawnAt: null, ...activeVerschlussAnforderungWhere(new Date()) },
+          // KG only: deviceCategoryId = null
+          where: { userId: session.user.id, art: "ANFORDERUNG", deviceCategoryId: null, fulfilledAt: null, withdrawnAt: null, ...activeVerschlussAnforderungWhere(new Date()) },
         });
         if (offeneAnforderung) {
           await tx.verschlussAnforderung.update({
@@ -161,6 +263,49 @@ export async function POST(req: NextRequest) {
               },
             });
           }
+        }
+      }
+
+      // Plug ANFORDERUNG erfüllen: WEAR_BEGIN auf eine Plug-Kategorie erfüllt offene Tragen-Anforderung
+      if (type === "WEAR_BEGIN" && wearResult?.ok) {
+        const plugAnf = await tx.verschlussAnforderung.findFirst({
+          where: {
+            userId: session.user.id,
+            art: "ANFORDERUNG",
+            deviceCategoryId: wearResult.categoryId,
+            fulfilledAt: null,
+            withdrawnAt: null,
+            ...activeVerschlussAnforderungWhere(new Date()),
+          },
+          orderBy: { createdAt: "asc" },
+        });
+        if (plugAnf) {
+          await tx.verschlussAnforderung.update({
+            where: { id: plugAnf.id },
+            data: { fulfilledAt: new Date() },
+          });
+        }
+      }
+
+      // WEAR_DEVICE-Task erfüllen: WEAR_BEGIN schließt automatisch einen offenen Trage-Task ab.
+      if (type === "WEAR_BEGIN" && wearResult?.ok) {
+        const openTask = await tx.keyholderTask.findFirst({
+          where: { userId: session.user.id, type: "WEAR_DEVICE", completedAt: null },
+          orderBy: { assignedAt: "asc" },
+        });
+        if (openTask) {
+          await tx.keyholderTask.update({
+            where: { id: openTask.id },
+            data: { completedAt: new Date() },
+          });
+        }
+      }
+
+      // SessionAnforderung als erfüllt markieren wenn SESSION_END erfasst wird.
+      if (type === "SESSION_END" && sessionCategoryId) {
+        const offeneSessionAnf = await getActiveSessionAnforderung(session.user.id, sessionCategoryId, tx);
+        if (offeneSessionAnf) {
+          await fulfillSessionAnforderung(offeneSessionAnf.id, created.id, tx);
         }
       }
 
@@ -204,13 +349,51 @@ export async function POST(req: NextRequest) {
     if (code === "ALREADY_WEARING") return NextResponse.json({ error: "Bereits aktive Session in dieser Kategorie" }, { status: 400 });
     if (code === "NOT_WEARING") return NextResponse.json({ error: "Keine aktive Session in dieser Kategorie" }, { status: 400 });
     if (code === "WEAR_PHOTO_REQUIRED") return NextResponse.json({ error: "Foto ist bei dieser Kategorie zwingend" }, { status: 400 });
+    if (code === "SESSION_DEVICE_REQUIRED") return NextResponse.json({ error: "Gerät ist für Sessions erforderlich" }, { status: 400 });
+    if (code === "SESSION_WRONG_CATEGORY") return NextResponse.json({ error: "Gerät gehört keiner Session-Kategorie an" }, { status: 400 });
+    if (code === "SESSION_ALREADY_ACTIVE") return NextResponse.json({ error: "Bereits eine aktive Session in dieser Kategorie" }, { status: 400 });
+    if (code === "SESSION_NOT_ACTIVE") return NextResponse.json({ error: "Keine aktive Session in dieser Kategorie" }, { status: 400 });
+    if (code === "SESSION_VIDEO_REQUIRED") return NextResponse.json({ error: "Video ist bei dieser Kategorie beim Session-Ende zwingend" }, { status: 400 });
+    if (code === "PAUSE_DEVICE_REQUIRED") return NextResponse.json({ error: "Gerät (CAGE/PLUG) für Pause erforderlich" }, { status: 400 });
+    if (code === "PAUSE_PHOTO_REQUIRED") return NextResponse.json({ error: "Foto ist bei Pause-Ende zwingend" }, { status: 400 });
+    if (code === "PAUSE_ALREADY_ACTIVE") return NextResponse.json({ error: "Bereits eine aktive Pause für dieses Gerät" }, { status: 409 });
+    if (code === "PAUSE_NOT_ACTIVE") return NextResponse.json({ error: "Keine aktive Pause für dieses Gerät" }, { status: 400 });
+    if (code === "PAUSE_NOT_LOCKED") return NextResponse.json({ error: "Cage ist nicht verschlossen" }, { status: 400 });
+    if (code === "PAUSE_NOT_WEARING") return NextResponse.json({ error: "Plug wird nicht getragen" }, { status: 400 });
     throw e;
+  }
+
+  // Auto-create StrafeRecord(PAUSE_OVERAGE) when PAUSE_END exceeds maxMinuten.
+  if (type === "PAUSE_END" && pauseBeginTime && pauseMaxMinuten) {
+    try {
+      await prisma.$transaction(async (tx) => {
+        await maybeCreatePauseOverageStrafe(
+          tx, session.user.id, entry.id,
+          pauseBeginTime!, new Date(startTime), pauseMaxMinuten!,
+        );
+      });
+    } catch { /* ignore if already exists */ }
   }
 
   // REINIGUNG-Limit wird NICHT mehr automatisch bestraft: eine Reinigungsöffnung über dem
   // Tageskontingent (auch ein Geräte-Wechsel) wird im Strafbuch nur noch ERKANNT (live in
   // buildStrafbuch abgeleitet); ob sie geahndet wird, entscheidet die Keyholderin. Das
   // Öffnen-Formular warnt weiterhin vorab — forcedReinigung bleibt rein informativ.
+
+  // Auto-create StrafeRecord(EREKTION) when user reports an erection during REINIGUNG/TOILETTE opening (KG or Plug).
+  if ((type === "OEFFNEN" || type === "WEAR_END") && erektionGemeldet === true && (oeffnenGrund === "REINIGUNG" || oeffnenGrund === "TOILETTE")) {
+    try {
+      await prisma.strafeRecord.create({
+        data: {
+          userId: session.user.id,
+          offenseType: "EREKTION",
+          refId: entry.id,
+          bestraftDatum: new Date(),
+          notiz: null,
+        },
+      });
+    } catch { /* ignore if duplicate — e.g. offline replay */ }
+  }
 
   // Auto-create StrafeRecord when user picked a different device than the Anforderung specified.
   // Automatische Ahndung ohne Urteilsschritt → sofort erledigt (judgedBy=system), damit sie
@@ -435,6 +618,12 @@ export async function POST(req: NextRequest) {
 
   if (type === "VERSCHLUSS" || type === "OEFFNEN") {
     revalidatePath("/dashboard", "layout");
+  }
+
+  // Fire-and-forget: AI keyholder reacts to the new entry (push + chat message).
+  // Only for KG-relevant types to avoid spam on WEAR_BEGIN/END.
+  if (["VERSCHLUSS", "OEFFNEN", "PRUEFUNG", "ORGASMUS"].includes(type)) {
+    reactToSubEvent(session.user.id, session.user.name ?? session.user.id, type, note ?? null).catch(() => {});
   }
 
   return NextResponse.json(entry, { status: 201 });

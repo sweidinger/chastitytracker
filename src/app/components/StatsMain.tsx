@@ -316,7 +316,8 @@ export default async function StatsMain({ userId, heading, backHref, backLabel, 
   const dl = toDateLocale(await getLocale());
   const now = new Date();
 
-  const [entries, vorgaben, kontrollen, sperrzeiten, userSettings, allDevices, nonKgCategories] = await Promise.all([
+  const tagesformSince = new Date(now.getTime() - 14 * 86_400_000);
+  const [entries, vorgaben, kontrollen, sperrzeiten, userSettings, allDevices, nonKgCategories, tagesformen] = await Promise.all([
     prisma.entry.findMany({
       where: { userId },
       orderBy: { startTime: "asc" },
@@ -335,6 +336,11 @@ export default async function StatsMain({ userId, heading, backHref, backLabel, 
       where: { userId, isBuiltIn: false },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
       select: { id: true, name: true, color: true, icon: true },
+    }),
+    prisma.tagesform.findMany({
+      where: { userId, datum: { gte: tagesformSince } },
+      orderBy: { datum: "asc" },
+      select: { datum: true, erregung: true, koerper: true, headspace: true },
     }),
   ]);
 
@@ -489,6 +495,23 @@ export default async function StatsMain({ userId, heading, backHref, backLabel, 
       months: buildCalendarMonths({ entries: catEntries, wearPairs: catPairs, vorgaben: catVorgaben, orgasmDateSet: new Set(), now, dl, tz }),
     });
   }
+
+  // ── Tagesform 14-day history ───────────────────────────────────────────────
+  // Build an ordered array of the last 14 days (oldest first) with their tagesform values.
+  const tagesformByKey = new Map(
+    tagesformen.map((tf) => {
+      const { year, month, day } = tzDateParts(tf.datum, tz);
+      return [`${year}-${month}-${day}`, tf];
+    })
+  );
+  const tagesformDays: TagesformDay[] = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date(now.getTime() - (13 - i) * 86_400_000);
+    const { year, month, day } = tzDateParts(d, tz);
+    const key = `${year}-${month}-${day}`;
+    const tf = tagesformByKey.get(key);
+    return { key, erregung: tf?.erregung ?? null, koerper: tf?.koerper ?? null, headspace: tf?.headspace ?? null };
+  });
+  const hasTagesformData = tagesformen.length > 0;
 
   // ── Device usage stats ─────────────────────────────────────────────────────
   const deviceMap = new Map(allDevices.map((d) => [d.id, d]));
@@ -757,6 +780,18 @@ export default async function StatsMain({ userId, heading, backHref, backLabel, 
           </div>
         </Card>
       )}
+
+      {/* Tagesform – 14-Tage-Verlauf */}
+      {hasTagesformData && (
+        <Card padding="none" className="overflow-hidden">
+          <div className="px-6 py-4 border-b border-border-subtle">
+            <p className="text-sm font-bold text-foreground">{t("tagesformVerlaufTitle")}</p>
+          </div>
+          <div className="px-5 py-4 overflow-x-auto">
+            <TagesformHistory days={tagesformDays} />
+          </div>
+        </Card>
+      )}
     </main>
   );
 }
@@ -790,6 +825,61 @@ function GoalBar({ label, actual, target, sub, reachedLabel }: { label: string; 
         <div className={`h-full rounded-full transition-all ${reached ? "bg-[var(--color-lock)]" : "bg-[var(--color-request)]"}`} style={{ width: `${pct}%` }} />
       </div>
       <p className="text-xs text-foreground-faint mt-1">{sub}</p>
+    </div>
+  );
+}
+
+const TAGESFORM_DIMS = [
+  { key: "erregung" as const, emoji: "🔥" },
+  { key: "koerper" as const, emoji: "💪" },
+  { key: "headspace" as const, emoji: "🧠" },
+];
+
+/** Color for a value 1–5; null = no entry (grey). */
+function tagesformColor(value: number | null): string {
+  if (value === null) return "bg-border";
+  if (value <= 1) return "bg-blue-200";
+  if (value <= 2) return "bg-blue-300";
+  if (value <= 3) return "bg-blue-400";
+  if (value <= 4) return "bg-blue-500";
+  return "bg-blue-600";
+}
+
+type TagesformDay = { key: string; erregung: number | null; koerper: number | null; headspace: number | null };
+
+function TagesformHistory({ days }: { days: TagesformDay[] }) {
+  return (
+    <div className="flex flex-col gap-2.5">
+      {TAGESFORM_DIMS.map(({ key, emoji }) => (
+        <div key={key} className="flex items-center gap-2">
+          <span className="text-sm w-5 text-center shrink-0" aria-hidden>{emoji}</span>
+          <div className="flex gap-1">
+            {days.map((d) => (
+              <div
+                key={d.key}
+                title={d[key] !== null ? `${d.key}: ${d[key]}/5` : d.key}
+                className={`w-4 h-4 rounded-sm transition-colors ${tagesformColor(d[key])}`}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+      {/* Day axis: show day-of-month for every other column */}
+      <div className="flex items-center gap-2 mt-0.5">
+        <span className="w-5 shrink-0" />
+        <div className="flex gap-1">
+          {days.map((d, i) => {
+            const dayNum = Number(d.key.split("-")[2]);
+            return (
+              <div key={d.key} className="w-4 flex justify-center">
+                {i % 2 === 0 ? (
+                  <span className="text-[9px] text-foreground-faint tabular-nums leading-none">{dayNum}</span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

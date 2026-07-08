@@ -51,6 +51,8 @@ export interface OeffnenPayload {
   note: string | null;
   /** Only set when user confirmed the Reinigung-limit-bypass sheet. */
   forcedReinigung?: boolean;
+  /** True when user reports an erection occurred during REINIGUNG or TOILETTE opening. */
+  erektionGemeldet?: boolean;
 }
 
 export interface WearBeginPayload {
@@ -71,8 +73,29 @@ export interface WearEndPayload {
   note: string | null;
 }
 
+/** Payload for the Plug "Tragen beenden" form — mirrors OeffnenPayload but for WEAR_END. */
+export interface PlugEndPayload {
+  type: "WEAR_END";
+  startTime: string;
+  deviceId: string;
+  oeffnenGrund: string;
+  note: string | null;
+  /** Only set when user confirmed the Reinigung-limit-bypass sheet. */
+  forcedReinigung?: boolean;
+  /** True when user reports an erection occurred during REINIGUNG or TOILETTE removal. */
+  erektionGemeldet?: boolean;
+}
+
 /** Bundled user-cleaning config (kept together to avoid prop sprawl). */
 export interface ReinigungConfig {
+  erlaubt: boolean;
+  maxMinuten: number;
+  maxProTag: number;
+  heuteAnzahl: number;
+}
+
+/** Bundled Toilette config (like ReinigungConfig but without Fenster). */
+export interface ToiletteConfig {
   erlaubt: boolean;
   maxMinuten: number;
   maxProTag: number;
@@ -85,4 +108,6 @@ export interface SperrzeitState {
   unbefristet: boolean;
   /** Ob DIESE Sperrzeit Reinigungsöffnungen erlaubt — dann ist ein REINIGUNG-Öffnen keine Sperrverletzung. */
   reinigungErlaubt: boolean;
+  /** Ob DIESE Sperrzeit Toilettenöffnungen erlaubt — dann ist ein TOILETTE-Öffnen keine Sperrverletzung. */
+  toiletteErlaubt: boolean;
 }

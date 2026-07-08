@@ -11,9 +11,10 @@ interface Props {
   version?: string;
   categoryRows?: NewEntryCategoryRow[];
   bildersafe?: boolean;
+  aiKeyholderEnabled?: boolean;
 }
 
-export default function DashboardBottomNav({ isAdmin, isKeyholder, isLocked, version, categoryRows, bildersafe }: Props) {
+export default function DashboardBottomNav({ isAdmin, isKeyholder, isLocked, version, categoryRows, bildersafe, aiKeyholderEnabled }: Props) {
   const [sheetOpen, setSheetOpen] = useState(false);
 
   return (
@@ -24,6 +25,7 @@ export default function DashboardBottomNav({ isAdmin, isKeyholder, isLocked, ver
         isLocked={isLocked}
         onNewEntry={() => setSheetOpen(true)}
         version={version}
+        aiKeyholderEnabled={aiKeyholderEnabled}
       />
       <NewEntrySheet
         open={sheetOpen}

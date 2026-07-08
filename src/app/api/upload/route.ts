@@ -34,6 +34,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No file provided" }, { status: 400 });
   }
 
+  console.log(`[upload] received: name=${file.name} size=${file.size} type=${file.type}`);
+
   // Validate file extension (whitelist)
   const ALLOWED_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif"];
   const rawExt = file.name.split(".").pop()?.toLowerCase() ?? "";
@@ -107,14 +109,17 @@ export async function POST(req: NextRequest) {
 
   if (compressed) {
     await writeFile(filepath, compressed); // GPS-frei (re-encodiert)
+    console.log(`[upload] sharp ok → ${filename}`);
   } else if (!hasGps) {
     // sharp konnte das Bild nicht verarbeiten (z.B. HEIC ohne Codec), es enthält aber KEINE
     // GPS-Daten → das Original ist unbedenklich speicherbar. Die Zeit ist oben bereits erfasst.
     await writeFile(filepath, buffer);
+    console.log(`[upload] sharp failed, no GPS → raw saved as ${filename}`);
   } else {
     // Unverarbeitbar UND mit Standortdaten → niemals roh speichern (GPS-Leak, H4). Ablehnen.
+    console.log(`[upload] 422: sharp failed + GPS present (name=${file.name} size=${file.size})`);
     return NextResponse.json(
-      { error: "Bild mit Standortdaten konnte nicht bereinigt werden — bitte als JPEG hochladen." },
+      { error: "Foto konnte nicht verarbeitet werden (Standortdaten enthalten). Bitte in Safari öffnen oder Standortzugriff für die Kamera-App deaktivieren und erneut versuchen." },
       { status: 422 }
     );
   }

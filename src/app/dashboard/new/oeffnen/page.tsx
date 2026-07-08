@@ -19,10 +19,15 @@ export default async function NewOeffnenPage() {
   // gestern Abend heute noch mit und löst eine falsche Limit-Warnung aus. Muss zur
   // Strafbuch-Ableitung (buildStrafbuch, ebenfalls Kalendertag) passen.
   const dayStart = midnightInTZ(new Date(), tz);
-  const [activeSperrzeit, user, reinigungHeute] = await Promise.all([
+  const [activeSperrzeit, user, reinigungHeute, toiletteHeute] = await Promise.all([
     getActiveSperrzeit(userId),
-    prisma.user.findUnique({ where: { id: userId }, select: { reinigungErlaubt: true, reinigungMaxMinuten: true, reinigungMaxProTag: true, oeffnenGruendeConfig: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: {
+      reinigungErlaubt: true, reinigungMaxMinuten: true, reinigungMaxProTag: true,
+      toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true,
+      oeffnenGruendeConfig: true,
+    } }),
     prisma.entry.count({ where: { userId, type: "OEFFNEN", oeffnenGrund: "REINIGUNG", startTime: { gte: dayStart } } }),
+    prisma.entry.count({ where: { userId, type: "OEFFNEN", oeffnenGrund: "TOILETTE", startTime: { gte: dayStart } } }),
   ]);
 
   const tn = await getTranslations("newEntry");
@@ -41,12 +46,19 @@ export default async function NewOeffnenPage() {
           endetAt: activeSperrzeit?.endetAt?.toISOString() ?? null,
           unbefristet: !!activeSperrzeit && activeSperrzeit.endetAt === null,
           reinigungErlaubt: activeSperrzeit?.reinigungErlaubt ?? false,
+          toiletteErlaubt: activeSperrzeit?.toiletteErlaubt ?? false,
         }}
         reinigung={{
           erlaubt: user?.reinigungErlaubt ?? false,
           maxMinuten: user?.reinigungMaxMinuten ?? 15,
           maxProTag: user?.reinigungMaxProTag ?? 0,
           heuteAnzahl: reinigungHeute,
+        }}
+        toilette={{
+          erlaubt: user?.toiletteErlaubt ?? false,
+          maxMinuten: user?.toiletteMaxMinuten ?? 15,
+          maxProTag: user?.toiletteMaxProTag ?? 0,
+          heuteAnzahl: toiletteHeute,
         }}
       />
     </div>

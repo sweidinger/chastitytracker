@@ -42,9 +42,19 @@ model User {
   // Keyholder/Admin-Präferenz: eigene Karte in der Keyholder-Übersicht ausblenden (für Keyholder,
   // die keinen eigenen Tracker nutzen). Nur relevant, wenn die eigene Karte dort überhaupt erscheint.
   hideOwnTracker        Boolean                @default(false)
+  // Toiletten-Öffnungen: analog zu Reinigung (aber ohne Zeitfenster).
+  toiletteErlaubt       Boolean  @default(false)
+  toiletteMaxMinuten    Int      @default(15)
+  toiletteMaxProTag     Int      @default(0)
+  // Anal-Plug: Reinigung + Toilette analog zu KG, aber getrennte Einstellungen.
+  plugReinigungErlaubt    Boolean  @default(false)
+  plugReinigungMaxMinuten Int      @default(15)
+  plugReinigungMaxProTag  Int      @default(0)
+  // Plug-Toilette: immer erlaubt, unbegrenzte Anzahl — nur Max.-Dauer konfigurierbar.
+  plugToiletteMaxMinuten  Int      @default(15)
   // Pro-User anpassbare Auswahllisten als JSON-Array [{code,label?}] (TEXT). null = eingebaute
-  // Standardliste (Bestandsnutzer unverändert). Öffnungsgründe enthalten IMMER den geschützten
-  // Built-in "REINIGUNG" (Code fix, nur Label umbenennbar). Siehe reasonsService.ts.
+  // Standardliste (Bestandsnutzer unverändert). Öffnungsgründe enthalten IMMER die geschützten
+  // Built-ins "REINIGUNG" und "TOILETTE" (Code fix, nur Label umbenennbar). Siehe reasonsService.ts.
   orgasmusArtenConfig   String?
   oeffnenGruendeConfig  String?
   // Free-text keyholder rules the human admin sets for the MCP AI keyholder (soft guidance, read-only to the agent).
@@ -64,6 +74,10 @@ model User {
   nativePushTokens        NativePushToken[]
   passkeys                Passkey[]
   deviceCategories        DeviceCategory[]
+  aiKeyholderConfig       AiKeyholderConfig?
+  aiKeyholderMessages     AiKeyholderMessage[]
+  generatedMedia          GeneratedMedia[]
+  keyholderTasks          KeyholderTask[]
   boxEvents               BoxEvent[]
   boxStatuses             BoxStatus[]
   keyholderNotes          KeyholderNote[]
@@ -71,6 +85,8 @@ model User {
   healthHolds             HealthHold[]
   recurringContexts       RecurringContext[]
   appointments            Appointment[]
+  sessionAnforderungen    SessionAnforderung[]
+  tagesformen             Tagesform[]
 }
 
 // Gesundheits-Zurückhaltung (§8): ein Signal, dass aus Gesundheitsgründen (Migräne/Aura, Schlaf,
@@ -207,11 +223,18 @@ model DeviceCategory {
   trackingEnabled Boolean  @default(true)  // when false: inventory-only, no wear sessions
   requirePhoto    Boolean  @default(false) // when true: WEAR_BEGIN entries require an imageUrl
   allowVorgaben   Boolean  @default(true)  // when false: category cannot be linked to TrainingVorgaben
+  // Session-Kategorie (z.B. Dildo): kein Wear-Tracking, stattdessen zeitlich begrenzte Training-Sitzungen.
+  isSessionCategory  Boolean @default(false) // when true: SESSION_BEGIN/SESSION_END statt WEAR_BEGIN/END
+  maxSessionMinutes  Int     @default(30)    // Maximale Sitzungsdauer in Minuten
+  requiresVideo      Boolean @default(false) // when true: SESSION_END braucht videoUrl
+  orgasmusZiel       String  @default("KEINE") // KEINE | ERFORDERLICH | VERBOTEN
   sortOrder       Int      @default(0)
   createdAt       DateTime @default(now())
 
   devices  Device[]
   vorgaben TrainingVorgabe[]
+  verschlussAnforderungen VerschlussAnforderung[]
+  sessionAnforderungen    SessionAnforderung[]
 
   @@unique([userId, slug])
   @@index([userId])
@@ -283,6 +306,8 @@ model KontrollAnforderung {
   wirksamAb        DateTime?
   benachrichtigtAt DateTime? // wann Mail/Push raus ging (sofort beim Anlegen, oder per Poller)
   auto        Boolean   @default(false) // automatisch generiert (Auto-Kontrollen); manuelle = false
+  requireCode Boolean   @default(true)  // false = kein Frische-Code in E-Mail/Formular; nur Foto (ggf. mit Siegel)
+  device      String?   // "CAGE" | "PLUG" | null (null = KG-Kontrolle Legacy ohne Device-Angabe)
   entryId     String?   @unique
   entry       Entry?    @relation("KontrolleEntry", fields: [entryId], references: [id], onDelete: SetNull)
 
@@ -299,9 +324,12 @@ model VerschlussAnforderung {
   nachricht   String?
   endetAt     DateTime? // ANFORDERUNG: Frist zum Einschliessen; SPERRZEIT: darf nicht öffnen bis
   dauerH      Float?    // ANFORDERUNG only: Mindest-Tragedauer (h) – erzeugt nach Einschliessen automatisch SPERRZEIT
-  deviceId    String?
-  device      Device?   @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  deviceId         String?
+  device           Device?         @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  deviceCategoryId String?         // null = KG (backward compat); non-null = Plug oder andere non-KG Kategorie
+  deviceCategory   DeviceCategory? @relation(fields: [deviceCategoryId], references: [id], onDelete: SetNull)
   reinigungErlaubt Boolean @default(false) // SPERRZEIT: Reinigungsöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
+  toiletteErlaubt  Boolean @default(false) // SPERRZEIT: Toilettenöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
   createdAt   DateTime  @default(now())
   fulfilledAt DateTime? // ANFORDERUNG: gesetzt wenn User VERSCHLUSS erstellt
   withdrawnAt DateTime?
@@ -312,6 +340,26 @@ model VerschlussAnforderung {
 
   @@index([userId, art, withdrawnAt])
   @@index([wirksamAb])
+}
+
+// Keyholder-Aufforderung für eine Training-Sitzung (z.B. Dildo-Session).
+// Der Sub muss innerhalb der Frist eine SESSION_END mit sessionGoalAchieved=true erstellen.
+model SessionAnforderung {
+  id               String         @id @default(cuid())
+  userId           String
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceCategoryId String
+  deviceCategory   DeviceCategory @relation(fields: [deviceCategoryId], references: [id], onDelete: Cascade)
+  nachricht        String?        // optionale Anweisung der Keyholderin
+  endetAt          DateTime?      // Frist; null = keine Deadline
+  fulfilledAt      DateTime?      // gesetzt wenn SESSION_END die Anforderung erfüllt
+  withdrawnAt      DateTime?
+  sessionEndId     String?        // Entry-ID des erfüllenden SESSION_END
+  sessionEnd       Entry?         @relation("SessionAnforderungEntry", fields: [sessionEndId], references: [id], onDelete: SetNull)
+  createdAt        DateTime       @default(now())
+
+  @@index([userId])
+  @@index([userId, withdrawnAt, fulfilledAt])
 }
 
 // n:m relationship between admins and the users they supervise.
@@ -381,7 +429,7 @@ model StrafeRecord {
   id            String   @id @default(cuid())
   userId        String
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  offenseType   String   // "KONTROLLANFORDERUNG" | "OEFFNEN_ENTRY" | "REINIGUNG_LIMIT" | "FALSCHES_GERAET" | "ORGASMUS_ANWEISUNG"
+  offenseType   String   // "KONTROLLANFORDERUNG" | "OEFFNEN_ENTRY" | "REINIGUNG_LIMIT" | "FALSCHES_GERAET" | "ORGASMUS_ANWEISUNG" | "AI_KEYHOLDER"
   refId         String   @unique
   bestraftDatum DateTime // Urteilszeitpunkt (bei PUNISHED = Strafdatum)
   notiz         String?
@@ -518,11 +566,19 @@ model Entry {
   deviceCheck         String?
   deviceCheckNote     String?              // erkanntes Gerät (Name) oder null, wenn keins erkannt
   deviceCheckExpected String?              // erwartetes (verschlossenes) Gerät zur Check-Zeit
+  // OEFFNEN-Einträge (Reinigung/Toilette): war eine Erektion vorhanden? → automatischer StrafeRecord(EREKTION).
+  erektionGemeldet    Boolean              @default(false)
+  // SESSION_END-Einträge: Ziel (analer Orgasmus) erreicht? + Video-Beweis
+  sessionGoalAchieved Boolean?
+  videoUrl            String?
+  // PAUSE_BEGIN/PAUSE_END-Einträge: welches Gerät ist pausiert? "CAGE" | "PLUG"
+  pauseDevice         String?
   deviceId            String?
   device              Device?              @relation(fields: [deviceId], references: [id], onDelete: SetNull)
   createdAt           DateTime             @default(now())
-  kontrollAnforderung KontrollAnforderung? @relation("KontrolleEntry")
-  orgasmusAnforderung OrgasmusAnforderung? @relation("OrgasmusAnforderungEntry")
+  kontrollAnforderung  KontrollAnforderung?  @relation("KontrolleEntry")
+  orgasmusAnforderung  OrgasmusAnforderung?  @relation("OrgasmusAnforderungEntry")
+  sessionAnforderungen SessionAnforderung[]  @relation("SessionAnforderungEntry")
 
   @@index([userId])
   @@index([userId, type, startTime(sort: Desc)])
@@ -636,3 +692,146 @@ model OAuthRefreshToken {
   @@index([tokenHash])
   @@index([expiresAt])
 }
+
+// ── AI Keyholder ─────────────────────────────────────────────────────────────
+
+// Per-user configuration for the AI keyholder agent.
+// One row per user; created on first save in the admin settings.
+model AiKeyholderConfig {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  enabled              Boolean  @default(false)
+  // LLM backend
+  llmProvider          String   @default("anthropic") // "anthropic" | "ollama"
+  ollamaBaseUrl        String?  // e.g. "http://192.168.1.10:11434"
+  ollamaModel          String?  // e.g. "qwen2.5:32b"
+  // Persona / instructions
+  systemPrompt         String?  // dominant persona + rules for the AI keyholder
+  currentPersonaId     String?  // FK to AiPersona (set when a persona template is applied; cleared on manual edit)
+  currentPersona       AiPersona? @relation(fields: [currentPersonaId], references: [id], onDelete: SetNull)
+  // Autonomous action schedule — random interval
+  cronExpression       String?  // legacy / display only; actual scheduling uses randomInterval fields
+  lastRunAt            DateTime?
+  nextRunAt            DateTime? // when the next autonomous run is scheduled
+  randomIntervalMinMin Int?      // minimum wait between runs in minutes (default 15)
+  randomIntervalMinMax Int?      // maximum wait between runs in minutes (default 120)
+  // Anthropic API key override (AES-256-GCM encrypted, see src/lib/encrypt.ts)
+  // If set, takes precedence over the ANTHROPIC_API_KEY env var.
+  anthropicApiKeyEnc   String?
+  // Media generation (ComfyUI)
+  mediaEnabled         Boolean  @default(false)
+  comfyUiBaseUrl       String?  // e.g. "http://192.168.1.10:8188"
+  // JSON array of prompt-theme objects: [{ "theme": "bondage", "weight": 2 }, ...]
+  mediaPromptTemplates String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+// Chat messages between the user and the AI keyholder.
+// role "system" is used for autonomous-action log entries (not shown in chat, but
+// included as context when the LLM builds its next reply).
+model AiKeyholderMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   // "user" | "assistant" | "system"
+  content   String
+  // Optional: message references a piece of generated media (e.g. "hier ist dein Bild")
+  mediaId   String?
+  media     GeneratedMedia? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+
+  // Composite index covers the most common query: messages by user + role filter + time order
+  @@index([userId, role, createdAt(sort: Desc)])
+}
+
+// Images and videos pre-generated by ComfyUI for the AI keyholder to assign as tasks.
+model GeneratedMedia {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaType        String   // "image" | "video"
+  // "queued"      → waiting for a free generation slot
+  // "generating"  → ComfyUI job submitted, polling for result
+  // "ready"       → file saved, not yet shown to user
+  // "assigned"    → linked to a KeyholderTask
+  // "failed"      → ComfyUI returned an error
+  status           String   @default("queued")
+  prompt           String
+  negativePrompt   String?
+  width            Int?
+  height           Int?
+  // ComfyUI internal prompt_id — used to poll /history/{id} for completion
+  comfyPromptId    String?
+  // Relative path under uploads/ once generation is done
+  filePath         String?
+  assignedAt       DateTime? // set when a KeyholderTask is created from this media
+  failedReason     String?
+  createdAt        DateTime @default(now())
+
+  messages         AiKeyholderMessage[]
+  tasks            KeyholderTask[]
+
+  @@index([userId, status])
+}
+
+// Tasks the AI keyholder assigns to the user.
+// Currently supports VIEW_MEDIA (watch a video / look at an image) but
+// the type field is open for future task types (e.g. WRITE_ESSAY, WEAR_DURATION).
+model KeyholderTask {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           String   // "VIEW_MEDIA" | "WRITE_RESPONSE"
+  // The AI keyholder's message introducing / explaining the task
+  message        String
+  // Optional media attachment
+  mediaId        String?
+  media          GeneratedMedia? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  assignedAt     DateTime @default(now())
+  dueAt          DateTime?
+  // Completion
+  completedAt    DateTime?
+  // User's written response (required for VIEW_MEDIA + WRITE_RESPONSE tasks)
+  responseText   String?
+  // AI keyholder's reaction to the user's response (set after user completes the task)
+  aiReactionText String?
+  createdAt      DateTime @default(now())
+
+  // Combined index for the open-tasks query: userId + completedAt=null + assignedAt order
+  @@index([userId, completedAt, assignedAt(sort: Desc)])
+}
+
+// Reusable AI persona templates. When applied to a user's AiKeyholderConfig
+// the systemPrompt is copied (template semantics, not a live reference).
+model AiPersona {
+  id               String              @id @default(cuid())
+  name             String              @unique
+  description      String?
+  systemPrompt     String
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  keyholderConfigs AiKeyholderConfig[]
+}
+
+// Tägliche Selbsteinschätzung in 3 BDSM-relevanten Dimensionen (1–5).
+// Pro User und Tag genau ein Eintrag (UPSERT via userId+datum).
+model Tagesform {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Datum normiert auf Tagesbeginn (UTC-Mitternacht des Tages in User-Zeitzone)
+  datum      DateTime
+  // 1 = kaum / 5 = extrem
+  erregung   Int      // Erregung / Frustration durch Keuschheit
+  koerper    Int      // Körperliches Wohlbefinden / Tragekomfort
+  headspace  Int      // Mentale Verfassung / sub-space-Tiefe
+  notiz      String?  // optionale Freitext-Notiz
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, datum])
+  @@index([userId, datum(sort: Desc)])
+}
+

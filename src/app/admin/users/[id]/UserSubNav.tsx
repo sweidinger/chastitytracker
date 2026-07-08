@@ -6,9 +6,10 @@ import { useTranslations } from "next-intl";
 
 interface Props {
   userId: string;
+  isGlobalAdmin?: boolean;
 }
 
-export default function UserSubNav({ userId }: Props) {
+export default function UserSubNav({ userId, isGlobalAdmin = false }: Props) {
   const t = useTranslations("adminNav");
   const pathname = usePathname();
   const router = useRouter();
@@ -24,6 +25,8 @@ export default function UserSubNav({ userId }: Props) {
     { href: `${base}/strafbuch`, label: t("strafbuch_tab"), exact: false },
     { href: `${base}/geraete`, label: t("devices_tab"), exact: false },
     { href: `${base}/einstellungen`, label: t("user_settings_tab"), exact: false },
+    // AI-Keyholder-Konfiguration ist auf Global-Admins beschränkt
+    ...(isGlobalAdmin ? [{ href: `${base}/ai-keyholder`, label: t("ai_keyholder_tab"), exact: false }] : []),
   ];
 
   const active = tabs.find((tab) =>

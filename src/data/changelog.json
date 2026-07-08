@@ -1,5 +1,138 @@
 [
   {
+    "version": "4.64.4",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "feat", "text": "Plug-Toilette ist jetzt immer erlaubt und ohne Tageslimit — der Ein/Aus-Schalter und die 'Max. Öffnungen pro Tag'-Einstellung entfallen; nur die maximale Dauer bleibt konfigurierbar." },
+      { "type": "feat", "text": "AI-Keyholderin: expliziter Hinweis im Prompt, dass bei Limits maxPausesPerDay null bzw. 0 'unbegrenzte Anzahl' bedeutet und nicht 'keine Öffnungen'." }
+    ]
+  },
+  {
+    "version": "4.63.6",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "fix", "text": "AI-Keyholder: ReinigungView + ToiletteView haben jetzt ein explizites timeBound-Feld. timeBound=false bedeutet 'keine Zeitfenster konfiguriert → jederzeit erlaubt'. Zuvor interpretierte die KI windows=[] fälschlicherweise als 'Fenster unbekannt'." }
+    ]
+  },
+  {
+    "version": "4.63.5",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "feat", "text": "AI-Keyholder kennt jetzt alle Öffnungsregeln: Toiletten-Regeln (KG + Plug), Plug-Reinigungsregeln, toiletteErlaubt auf aktiver Sperrzeit, offene Session-Anforderungen und custom Orgasmus-Arten im Kontext-Snapshot." },
+      { "type": "feat", "text": "AI-Keyholder Chat: Strafbuch-Details (Vergehen, Urteile) werden jetzt auch im Chat-Prompt geladen — bisher nur im autonomen Run." }
+    ]
+  },
+  {
+    "version": "4.63.4",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "fix", "text": "AI-Keyholder: orgasmusVorgegebeneArt im autonomen Run-Prompt jetzt mit exakten Pflicht-Werten (null|\"Orgasmus\"|\"ruinierter Orgasmus\"|\"feuchter Traum\") statt generischem null|string." }
+    ]
+  },
+  {
+    "version": "4.63.3",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "fix", "text": "AI-Keyholder: create_orgasmus schlug fehl wenn orgasmusVorgegebeneArt gesetzt war. Ursache: KI-Prompt instruierte den falschen Kurzwert \"ruiniert\" statt des validen Vollwerts \"ruinierter Orgasmus\". Prompt in beiden Stellen (Chat + Autonomer Run) korrigiert." }
+    ]
+  },
+  {
+    "version": "4.63.2",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "fix", "text": "iPhone Frontkamera: Foto-Upload funktioniert jetzt zuverlässig. Fix 1: Datei-Bytes werden jetzt zwingend gepuffert, bevor das File-Input geleert wird — iOS gibt den Datei-Backing-Speicher sonst zu früh frei (Race Condition). Fix 2: compressImage nutzt jetzt createImageBitmap als Fallback für gespiegelte/Portrait-HEIC-Dateien, die im img-Element hängenbleiben. Timeout von 15 s auf 8 s reduziert." }
+    ]
+  },
+  {
+    "version": "4.63.1",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "fix", "text": "Dockerfile: Prisma Query-Engine-Binary wird jetzt aus dem Builder-Stage in den Runner kopiert. Dadurch schlägt prisma migrate deploy beim Containerstart nicht mehr fehl, weil versucht wird das Binary vom Internet zu laden (NAS hat keinen Zugang zu binaries.prisma.sh)." }
+    ]
+  },
+  {
+    "version": "4.63.0",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "ui", "text": "Dashboard: Tagesform-Widget erscheint jetzt oberhalb der Statistik statt ganz unten." },
+      { "type": "feat", "text": "AI Keyholderin: Kennt jetzt die Tagesform des Users (letzte 3 Tage). Niedrige Körperwerte (≤2) deaktivieren automatisch Sperrzeiten und Einschluss-Druck. Hohe Erregung (≥4) signalisiert eine gute Gelegenheit für Aufgaben. Sehr niedrige mentale Verfassung (1) schaltet die KI in einen sanften, straffreien Modus." }
+    ]
+  },
+  {
+    "version": "4.62.0",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "feat", "text": "Tagesform-Widget: Neues Dashboard-Widget zur täglichen Selbsteinschätzung in drei Dimensionen — 🔥 Erregung/Frustration, 💪 Körperliches Wohlbefinden, 🧠 Mentale Verfassung — je 1–5 Punkte, mit optionaler Notiz. Einmal täglich per Upsert speicherbar." },
+      { "type": "feat", "text": "Tagesform-Verlauf: Stats-Seite zeigt die letzten 14 Tage als kompaktes Dot-Grid mit farblicher Intensitäts-Codierung (blau, 5 Stufen) pro Dimension." },
+      { "type": "feat", "text": "Plug-Banner: «Plug tragen angefordert»-Box enthält jetzt einen Direkt-Link zur Wear-Begin-Seite mit vorausgewählter Plug-Kategorie — analog zu den Kontroll-Bannern." },
+      { "type": "fix", "text": "Admin-Übersicht: Verschluss- und Plug-Anforderungen werden jetzt getrennt ausgewiesen. Plug-Anforderungen erscheinen mit korrektem Label «Plug tragen angefordert» statt «Verschluss angefordert»." }
+    ]
+  },
+  {
+    "version": "4.61.0",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "feat", "text": "Plug-Banner: «Plug tragen angefordert»-Box enthält jetzt einen Direkt-Link zur Wear-Begin-Seite." },
+      { "type": "fix", "text": "Admin-Übersicht: Plug-Anforderungen werden mit korrektem Label angezeigt." }
+    ]
+  },
+  {
+    "version": "4.60.0",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "feat", "text": "Orgasmus-Ziel: Session-Kategorien können jetzt ein Ziel tragen (Kein Ziel / Orgasmus erforderlich / Orgasmus verboten). Im Formular erscheint ein farbiger Badge und die Ziel-Checkbox passt ihren Text entsprechend an." },
+      { "type": "feat", "text": "Admin Aktionen: Neuer Eintrag «Session anfordern» — der Keyholder kann den User direkt per Push + E-Mail auffordern, eine Session mit einer bestimmten Kategorie zu starten, optional mit Frist." },
+      { "type": "fix", "text": "AI Keyholderin sieht jetzt auch die Devices der Session-Kategorien im Kontext (nicht nur den Kategorienamen)." }
+    ]
+  },
+  {
+    "version": "4.59.0",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "feat", "text": "Session-Kategorie: Neue Gerätekategorie für Trainings-Sessions (Dildo/Toy ohne Schloss). Admins aktivieren Session-Tracking per Toggle, setzen Max-Dauer und ob Video-Beweis nötig ist." },
+      { "type": "feat", "text": "SESSION_BEGIN / SESSION_END: Neue Eintragstypen erfassen Start und Ende einer Trainings-Session mit optionalem Video-Upload (mp4/mov/webm) und Orgasmus-Ziel-Flag." },
+      { "type": "feat", "text": "Session-Formular: Dedizierte /dashboard/new/session-begin und /dashboard/new/session-end Seiten mit Echtzeit-Timer, Ziel-Checkbox, Video-Upload (sofortiger Upload, Vorschau) und Geräteauswahl." },
+      { "type": "feat", "text": "Dashboard: Session-Kategorien erscheinen als inaktive Karten (mit «nicht trainiert seit»-Dauer) und als aktive Session-Karten — getrennt von den KG-Wear-Kategorien." },
+      { "type": "feat", "text": "Admin: Session-Anforderung via POST /api/admin/session-anforderung — Keyholder kann den User per Push + E-Mail auffordern, eine Session zu starten, optional mit Frist." },
+      { "type": "feat", "text": "AI Keyholderin: Neue Aktion create_session_anforderung — die KI kann autonom oder aus dem Chat heraus Session-Anforderungen stellen. Erscheint als blaue «Session-Anforderung»-Event-Karte in der Chat-Timeline." },
+      { "type": "feat", "text": "Video-Upload: Neue /api/upload-video Route mit Magic-Byte-Validierung für mp4/mov/webm/m4v, max. 200 MB, auth-geschützte Auslieferung." }
+    ]
+  },
+  {
+    "version": "4.25.0",
+    "date": "2026-06-10",
+    "changes": [
+      { "type": "feat", "text": "AI Keyholderin: Die KI kann autonom Einschluss-Anforderungen stellen (create_anforderung) — mit konfigurierbarer Frist und Mindest-Tragedauer. Sendet E-Mail + Push an den User, erscheint sofort im Dashboard-Banner." },
+      { "type": "feat", "text": "AI Keyholderin: Die KI kann autonom Sperrzeiten setzen (create_sperrzeit) — der User darf sich für die gesetzte Dauer nicht öffnen. Sendet E-Mail + Push automatisch." },
+      { "type": "feat", "text": "AI Keyholderin: Einschluss-Anforderungen und Sperrzeiten erscheinen als farbige Event-Karten in der Keyholder-Chat-Timeline (rot für Anforderung, grün für Sperrzeit)." },
+      { "type": "ui", "text": "Keyholder-Chat: KI-erstellte VerschlussAnforderungen werden automatisch im bestehenden Dashboard-Banner angezeigt (keine separaten UI-Änderungen nötig)." }
+    ]
+  },
+  {
+    "version": "4.24.0",
+    "date": "2026-06-10",
+    "changes": [
+      { "type": "feat", "text": "AI Keyholderin: Admin-Status-Panel mit Live-Medien-Queue-Zählern (ausstehend/generierend/bereit/zugewiesen/fehlgeschlagen), autonomem Aktivitätslog, Medien-Thumbnails und Trigger-Buttons für media-poll und Einzel-Generierung." },
+      { "type": "feat", "text": "AI Keyholderin: Die KI kann autonom Foto-Kontrollen anfordern (create_kontrolle) — sendet automatisch E-Mail und Push-Notification mit Code und Frist an den User." },
+      { "type": "feat", "text": "AI Keyholderin: Die KI kann autonom Strafen verhängen (create_strafe) — erstellt StrafeRecord und informiert den User per Push und Chat." },
+      { "type": "feat", "text": "AI Keyholderin: Kontrolle- und Strafe-Events erscheinen als farbige Event-Karten in der Chat-Timeline (nicht als normale Nachrichten-Bubble)." },
+      { "type": "ui", "text": "Keyholder-Chat: Assistenten-Nachrichten rendern jetzt einfaches Markdown (fett, kursiv, Aufzählungslisten, Zeilenumbrüche)." },
+      { "type": "ui", "text": "Keyholder-Chat: Vollständige i18n-Unterstützung (de/en) — alle Strings via next-intl, keine hardcodierten Texte mehr." }
+    ]
+  },
+  {
+    "version": "4.23.0",
+    "date": "2026-06-10",
+    "changes": [
+      { "type": "feat", "text": "AI Keyholderin: Neue autonome KI-Keyholderin pro Benutzer — chatbasierte Oberfläche unter /dashboard/keyholder, Streaming-Antworten via SSE. Die KI kennt den aktuellen Einschluss-Status und Trainingsziele." },
+      { "type": "feat", "text": "AI Keyholderin: Unterstützt Anthropic Claude und lokale Ollama-Modelle (z.B. qwen2.5:32b auf Mac Mini M4) als KI-Backend — konfigurierbar pro Benutzer." },
+      { "type": "feat", "text": "AI Keyholderin: Autonomer Betrieb per konfigurierbarem Cron-Schedule — die KI agiert proaktiv, sendet Nachrichten und stellt Aufgaben ohne Nutzerinteraktion." },
+      { "type": "feat", "text": "AI Keyholderin: Aufgaben-System — die KI kann Aufgaben mit optionalem Medienbezug (ComfyUI) zuweisen, der Nutzer antwortet per Text, die KI reagiert auf die Antwort." },
+      { "type": "feat", "text": "AI Keyholderin: Admin-Konfiguration unter /admin/users/[id]/ai-keyholder — System-Prompt, LLM-Provider, Ollama-URL/Modell, Cron-Ausdruck, ComfyUI-URL und Medien-Themen einstellbar. «Jetzt ausführen»-Button für sofortigen autonomen Lauf." },
+      { "type": "feat", "text": "AI Keyholderin: Web-Push-Benachrichtigungen beim autonomen Lauf (sofern der Nutzer Push aktiviert hat)." }
+    ]
+  },
+  {
     "version": "4.48.0",
     "date": "2026-07-06",
     "changes": [

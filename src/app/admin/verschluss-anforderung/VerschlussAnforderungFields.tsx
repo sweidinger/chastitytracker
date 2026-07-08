@@ -83,6 +83,7 @@ export default function VerschlussAnforderungFields({
   const [minDauerH, setMinDauerH] = useState("24");
   const [deviceId, setDeviceId] = useState("");
   const [reinigungErlaubt, setReinigungErlaubt] = useState(false);
+  const [toiletteErlaubt, setToiletteErlaubt] = useState(false);
   // Terminierung: sofort (default), relative Verzögerung, oder absoluter Zeitpunkt.
   const [scheduleMode, setScheduleMode] = useState<"immediate" | "delay" | "datetime">("immediate");
   const [delayValue, setDelayValue] = useState("30");
@@ -129,6 +130,7 @@ export default function VerschlussAnforderungFields({
       }
       if (isSperrzeit || withMinDauer) {
         payload.reinigungErlaubt = reinigungErlaubt;
+        payload.toiletteErlaubt = toiletteErlaubt;
       }
 
       const res = await fetch("/api/admin/verschluss-anforderung", {
@@ -147,13 +149,23 @@ export default function VerschlussAnforderungFields({
   }
 
   const reinigungCheckbox = (
-    <div className="flex flex-col gap-1">
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input type="checkbox" checked={reinigungErlaubt} onChange={(e) => setReinigungErlaubt(e.target.checked)}
-          className="w-4 h-4" style={{ accentColor }} />
-        <span className="text-xs text-foreground-faint">{t("reinigungErlaubtLabel")}</span>
-      </label>
-      <span className="text-xs text-foreground-faint pl-6">{t("reinigungErlaubtHint")}</span>
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" checked={reinigungErlaubt} onChange={(e) => setReinigungErlaubt(e.target.checked)}
+            className="w-4 h-4" style={{ accentColor }} />
+          <span className="text-xs text-foreground-faint">{t("reinigungErlaubtLabel")}</span>
+        </label>
+        <span className="text-xs text-foreground-faint pl-6">{t("reinigungErlaubtHint")}</span>
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" checked={toiletteErlaubt} onChange={(e) => setToiletteErlaubt(e.target.checked)}
+            className="w-4 h-4" style={{ accentColor }} />
+          <span className="text-xs text-foreground-faint">{t("toiletteErlaubtLabel")}</span>
+        </label>
+        <span className="text-xs text-foreground-faint pl-6">{t("toiletteErlaubtHint")}</span>
+      </div>
     </div>
   );
 

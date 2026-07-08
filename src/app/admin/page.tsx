@@ -69,6 +69,7 @@ export default async function AdminPage() {
     }),
     prisma.verschlussAnforderung.findMany({
       where: { userId: { in: userIds }, art: "ANFORDERUNG", fulfilledAt: null, withdrawnAt: null },
+      select: { id: true, userId: true, nachricht: true, endetAt: true, wirksamAb: true, deviceCategoryId: true },
     }),
     getKeyholderSperrzeiten(userIds),
     getKeyholderOrgasmusAnforderungen(userIds),
@@ -106,12 +107,16 @@ export default async function AdminPage() {
     const offeneOrgasmusAnforderung = orgasmusAnfByUser.get(userId)?.[0] ?? null;
 
     const offeneKontrolle = userKontrollen.find(k => !isScheduled(k.wirksamAb)) ?? null;
-    const offeneVerschlussAnforderung = userAnforderungen.find(v => !isScheduled(v.wirksamAb)) ?? null;
+    // deviceCategoryId=null → KG Verschluss; non-null → Plug oder andere nicht-KG Kategorie
+    const kgAnforderungen = userAnforderungen.filter(v => v.deviceCategoryId == null);
+    const plugAnforderungen = userAnforderungen.filter(v => v.deviceCategoryId != null);
+    const offeneKgAnforderung = kgAnforderungen.find(v => !isScheduled(v.wirksamAb)) ?? null;
+    const offenePlugAnforderung = plugAnforderungen.find(v => !isScheduled(v.wirksamAb)) ?? null;
     const activeSperrzeit = userSperrzeiten.find(s => !isScheduled(s.wirksamAb)) ?? null;
 
     const scheduled = [
       ...userKontrollen.filter(k => isScheduled(k.wirksamAb)).map(k => ({ id: k.id, kind: "inspection" as const, wirksamAb: k.wirksamAb!, message: k.kommentar })),
-      ...userAnforderungen.filter(v => isScheduled(v.wirksamAb)).map(v => ({ id: v.id, kind: "lock_request" as const, wirksamAb: v.wirksamAb!, message: v.nachricht })),
+      ...userAnforderungen.filter(v => isScheduled(v.wirksamAb)).map(v => ({ id: v.id, kind: v.deviceCategoryId ? "plug_request" as const : "lock_request" as const, wirksamAb: v.wirksamAb!, message: v.nachricht })),
       ...userSperrzeiten.filter(s => isScheduled(s.wirksamAb)).map(s => ({ id: s.id, kind: "lock_period" as const, wirksamAb: s.wirksamAb!, message: s.nachricht })),
     ].sort((a, b) => a.wirksamAb.getTime() - b.wirksamAb.getTime());
 
@@ -119,12 +124,15 @@ export default async function AdminPage() {
       currentStatus: latestType,
       since: latestTime ?? null,
       offeneKontrolle: offeneKontrolle
-        ? { id: offeneKontrolle.id, deadline: offeneKontrolle.deadline, code: offeneKontrolle.code, kommentar: offeneKontrolle.kommentar, overdue: offeneKontrolle.deadline < now }
+        ? { id: offeneKontrolle.id, deadline: offeneKontrolle.deadline, code: offeneKontrolle.code || null, kommentar: offeneKontrolle.kommentar, overdue: offeneKontrolle.deadline < now }
         : null,
-      hasOffeneAnforderung: !!offeneVerschlussAnforderung,
+      hasOffeneAnforderung: !!offeneKgAnforderung,
       hasActiveSperrzeit: !!activeSperrzeit,
-      offeneAnforderung: offeneVerschlussAnforderung
-        ? { id: offeneVerschlussAnforderung.id, nachricht: offeneVerschlussAnforderung.nachricht, endetAt: offeneVerschlussAnforderung.endetAt, overdue: !!offeneVerschlussAnforderung.endetAt && offeneVerschlussAnforderung.endetAt < now }
+      offeneAnforderung: offeneKgAnforderung
+        ? { id: offeneKgAnforderung.id, nachricht: offeneKgAnforderung.nachricht, endetAt: offeneKgAnforderung.endetAt, overdue: !!offeneKgAnforderung.endetAt && offeneKgAnforderung.endetAt < now }
+        : null,
+      offenePlugAnforderung: offenePlugAnforderung
+        ? { id: offenePlugAnforderung.id, nachricht: offenePlugAnforderung.nachricht, endetAt: offenePlugAnforderung.endetAt, overdue: !!offenePlugAnforderung.endetAt && offenePlugAnforderung.endetAt < now }
         : null,
       activeSperrzeit: activeSperrzeit
         ? { id: activeSperrzeit.id, nachricht: activeSperrzeit.nachricht, endetAt: activeSperrzeit.endetAt }
@@ -254,6 +262,20 @@ export default async function AdminPage() {
                         withdrawAction={<WithdrawButton id={u.stats.offeneAnforderung.id} apiPath="/api/admin/verschluss-anforderung" titleKey="withdrawLockTitle" colorToken="sperrzeit" />}
                       />
                     )}
+                    {u.stats.offenePlugAnforderung && (
+                      <LockRequestBanner
+                        variant="compact"
+                        colorScheme="request"
+                        label={u.stats.offenePlugAnforderung.overdue ? t("plugWearOverdue") : t("plugWearRequested")}
+                        overdue={u.stats.offenePlugAnforderung.overdue}
+                        endetAt={u.stats.offenePlugAnforderung.endetAt}
+                        locale={dl}
+                        tz={rowTz}
+                        viewerTz={viewerTz}
+                        subTimePrefix={subLabel}
+                        withdrawAction={<WithdrawButton id={u.stats.offenePlugAnforderung.id} apiPath="/api/admin/verschluss-anforderung" titleKey="withdrawLockTitle" colorToken="sperrzeit" />}
+                      />
+                    )}
                     {u.stats.activeSperrzeit && (
                       <LockRequestBanner
                         variant="compact"
@@ -295,6 +317,7 @@ export default async function AdminPage() {
                         {u.stats.scheduled.map((s) => {
                           const kindLabel = s.kind === "inspection"
                             ? t("scheduledInspection")
+                            : s.kind === "plug_request" ? t("scheduledPlugRequest")
                             : s.kind === "lock_request" ? t("scheduledLockRequest") : t("scheduledLockPeriod");
                           const apiPath = s.kind === "inspection" ? "/api/admin/kontrollen" : "/api/admin/verschluss-anforderung";
                           const colorToken = s.kind === "inspection" ? "inspect" as const : "sperrzeit" as const;

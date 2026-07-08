@@ -67,13 +67,16 @@ export async function reinigungVerbrauchtHeute(userId: string, now: Date, tz = A
 /** Stabile MCP-Sicht der Reinigungs-(Cleaning-)Regeln. Eine Quelle für get_overview.reinigung (V1) und
  *  get_context.cleaning (V2): allowed = Öffnungen erlaubt; maxMinutesPerBreak = max Minuten je Öffnung;
  *  maxPausesPerDay = max Öffnungen/Tag (COUNT, null = unbegrenzt); usedToday = heute verbraucht;
+ *  timeBound = true wenn Reinigung nur in definierten Zeitfenstern erlaubt ist; false = keine Zeitbeschränkung (jederzeit erlaubt).
  *  windows = erlaubte Tages-Zeitfenster (leer = nicht zeitgebunden); windowOpenNow = aktuell offenes
- *  Fenster (until = dessen Ende HH:MM) oder null. */
+ *  Fenster (until = dessen Ende HH:MM) oder null (wenn timeBound=false → jederzeit offen). */
 export interface ReinigungView {
   allowed: boolean;
   maxMinutesPerBreak: number;
   maxPausesPerDay: number | null;
   usedToday: number;
+  /** false = keine Zeitfenster konfiguriert → Reinigung ist jederzeit erlaubt (windows ist leer, windowOpenNow immer null). */
+  timeBound: boolean;
   windows: ReinigungsFenster[];
   windowOpenNow: { until: string } | null;
 }
@@ -93,13 +96,16 @@ export interface ReinigungUserFields {
  *  übrigen tz-Callsites). */
 export function buildReinigungView(user: ReinigungUserFields, usedToday: number, now: Date, tz = APP_TZ): ReinigungView {
   const maxProTag = user.reinigungMaxProTag ?? 0;
-  const windowEnd = aktivesReinigungsFenster(user.reinigungsFenster, now, tz); // "HH:MM" oder null
+  const parsedWindows = parseReinigungsFenster(user.reinigungsFenster);
+  const timeBound = parsedWindows.length > 0;
+  const windowEnd = timeBound ? aktivesReinigungsFenster(user.reinigungsFenster, now, tz) : null;
   return {
     allowed: user.reinigungErlaubt ?? false,
     maxMinutesPerBreak: user.reinigungMaxMinuten ?? 15,
     maxPausesPerDay: maxProTag > 0 ? maxProTag : null,
     usedToday,
-    windows: parseReinigungsFenster(user.reinigungsFenster),
+    timeBound,
+    windows: parsedWindows,
     windowOpenNow: windowEnd ? { until: windowEnd } : null,
   };
 }

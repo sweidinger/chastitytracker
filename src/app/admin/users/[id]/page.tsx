@@ -149,6 +149,7 @@ export default async function AdminUserOverview({ params }: { params: Promise<{ 
             categoryIcon: s.categoryIcon,
             deviceName: s.deviceName,
             since: s.since.toISOString(),
+            imageUrl: s.imageUrl,
           }))}
           serverNow={now.toISOString()}
         />
@@ -157,7 +158,7 @@ export default async function AdminUserOverview({ params }: { params: Promise<{ 
       {offeneKontrolle && (
         <KontrolleBanner
           deadline={offeneKontrolle.deadline}
-          code={offeneKontrolle.code}
+          code={offeneKontrolle.code || null}
           kommentar={offeneKontrolle.kommentar}
           overdue={offeneKontrolle.deadline < now}
           variant="large"
@@ -243,7 +244,11 @@ export default async function AdminUserOverview({ params }: { params: Promise<{ 
 
       <SessionList pairs={pairs} orgasmusEntries={orgasmusEntries} tz={tz} orgasmusArtenConfig={user.orgasmusArtenConfig} oeffnenGruendeConfig={user.oeffnenGruendeConfig} />
 
-      {wearSessionRows.length > 0 && <WearSessionList sessions={wearSessionRows} />}
+      {wearSessionRows.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <WearSessionList sessions={wearSessionRows} />
+        </div>
+      )}
 
       {kontrollItems.length > 0 && (
         <Card padding="none" className="overflow-hidden">

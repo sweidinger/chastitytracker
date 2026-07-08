@@ -111,23 +111,45 @@ export function usePhotoUpload({
     setRotation(0);
     if (enableSealDetection) setSealState("idle");
     if (enableDeviceDetection) { setDeviceDetectionState("idle"); setDeviceSuggestion(null); }
-    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
-    const blobUrl = URL.createObjectURL(file);
+    // Read lastModified BEFORE any async yield (iOS Safari strips EXIF from uploads).
+    const clientExifTime = file.lastModified ? new Date(file.lastModified).toISOString() : null;
+
+    // Eagerly buffer file bytes before the first async yield.
+    // On iOS Safari, the File's backing data can be reclaimed after the file input is
+    // cleared (PhotoCapture does `e.target.value = ""` synchronously after calling onFile,
+    // which fires right as this function first suspends). Using a plain ArrayBuffer keeps
+    // the bytes alive in the JS heap regardless of the input element's state.
+    // This fixes selfie-camera uploads which iOS appears to mark reclaimable faster.
+    let safeFile: File = file;
+    try {
+      const bytes = await file.arrayBuffer();
+      safeFile = new File([bytes], file.name, { type: file.type, lastModified: file.lastModified });
+    } catch { /* keep original file — arrayBuffer() only fails on a truly dead file */ }
+
+    // Clear previous blob URL. On iOS, keeping a large decoded HEIC in the img element
+    // while the canvas starts on a new one can cause the WebContent process to OOM-crash.
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
+    }
+    setImagePreview("");
+    setImageUrl("");
+    imageUrlRef.current = "";
+
+    const blobUrl = URL.createObjectURL(safeFile);
     blobUrlRef.current = blobUrl;
     setImagePreview(blobUrl);
 
-    // Read lastModified BEFORE compression (iOS Safari strips EXIF)
-    const clientExifTime = file.lastModified ? new Date(file.lastModified).toISOString() : null;
-    const compressed = await compressImage(file).catch(() => file);
+    const compressed = await compressImage(safeFile).catch(() => safeFile);
 
-    function abortUpload() {
+    function abortUpload(serverMsg?: string) {
       URL.revokeObjectURL(blobUrl);
       blobUrlRef.current = null;
       setImagePreview("");
       setImageUrl("");
       imageUrlRef.current = "";
       setImageExifTime("");
-      setUploadError(uploadErrorText ? uploadErrorText() : "Upload failed");
+      setUploadError(serverMsg ?? (uploadErrorText ? uploadErrorText() : "Upload failed"));
       setUploading(false);
     }
 
@@ -143,11 +165,19 @@ export function usePhotoUpload({
     }
 
     if (!res.ok) {
-      abortUpload();
+      // Show actual server error message so user knows what went wrong
+      const errData = await res.json().catch(() => null) as { error?: string } | null;
+      abortUpload(errData?.error ?? undefined);
       return;
     }
 
-    const data = await res.json() as { url: string; exifTime?: string };
+    let data: { url: string; exifTime?: string };
+    try {
+      data = await res.json() as { url: string; exifTime?: string };
+    } catch {
+      abortUpload();
+      return;
+    }
 
     setImageUrl(data.url);
     imageUrlRef.current = data.url;
@@ -167,7 +197,10 @@ export function usePhotoUpload({
     }
     setUploading(false);
 
-    await Promise.all([
+    // Fire-and-forget: detection is non-blocking. Awaiting here would keep handleFile
+    // alive after setUploading(false), causing a race condition if the user immediately
+    // tries to replace the photo (second handleFile starts while first is still awaiting).
+    void Promise.all([
       enableSealDetection ? runSealDetection(data.url, 0) : Promise.resolve(),
       enableDeviceDetection ? runDeviceDetection(data.url) : Promise.resolve(),
     ]);

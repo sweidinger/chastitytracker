@@ -13,9 +13,9 @@ type EditorRow = ReasonEntry & { _k?: string };
 /**
  * Admin-Editor für eine anpassbare Auswahlliste (Orgasmus-Arten ODER Öffnungsgründe) eines Subs.
  * Zeilen: umbenennen (Label-Override; leer = eingebautes i18n-Label als Placeholder), hinzufügen,
- * entfernen, sortieren. Der geschützte Code (`protectedCode`, = REINIGUNG bei Öffnungsgründen) kann
- * nicht entfernt, nur umbenannt werden. Nach jedem Speichern wird der State aus der server-
- * normalisierten Antwort re-seedet (u.a. frisch vergebene Custom-Codes → keine Duplikate).
+ * entfernen, sortieren. Geschützte Codes (`protectedCodes`, z.B. REINIGUNG + TOILETTE bei
+ * Öffnungsgründen) können nicht entfernt, nur umbenannt werden. Nach jedem Speichern wird der State
+ * aus der server-normalisierten Antwort re-seedet (u.a. frisch vergebene Custom-Codes → keine Duplikate).
  */
 export default function ReasonsEditor({
   userId,
@@ -23,12 +23,15 @@ export default function ReasonsEditor({
   initial,
   builtinLabels,
   protectedCode,
+  protectedCodes,
 }: {
   userId: string;
   configKey: "orgasmusArtenConfig" | "oeffnenGruendeConfig";
   initial: ReasonEntry[];
   builtinLabels: Record<string, string>;
+  /** @deprecated use protectedCodes */
   protectedCode?: string;
+  protectedCodes?: readonly string[];
 }) {
   const t = useTranslations("admin");
   const tc = useTranslations("common");
@@ -98,7 +101,8 @@ export default function ReasonsEditor({
   return (
     <div className="flex flex-col gap-2">
       {rows.map((r, i) => {
-        const locked = !!protectedCode && r.code === protectedCode;
+        const lockedSet = protectedCodes ?? (protectedCode ? [protectedCode] : []);
+        const locked = lockedSet.includes(r.code);
         return (
           <div key={r.code || r._k} className="flex items-center gap-1.5">
             <div className="flex flex-col">

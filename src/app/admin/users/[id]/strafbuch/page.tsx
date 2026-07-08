@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { toDateLocale, formatDateTimeDual, formatDate, APP_TZ } from "@/lib/utils";
 import { buildStrafbuch, type StrafbuchControlOffense } from "@/lib/strafbuch";
 import { getLocale, getTranslations } from "next-intl/server";
-import StrafbuchClient, { type KontrollRow, type UnerlaubteOeffnungRow, type StrafeRecordData, type ReinigungLimitRow } from "./StrafbuchClient";
+import StrafbuchClient, { type KontrollRow, type UnerlaubteOeffnungRow, type StrafeRecordData, type ReinigungLimitRow, type ErektionRow } from "./StrafbuchClient";
 
 export default async function StrafbuchPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -29,6 +29,13 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
   const reinigungLimitVergehen: ReinigungLimitRow[] = sb.reinigungLimitViolations.map((v) => ({
     entryId: v.entryId,
     startTimeStr: v.startTime ? fmtDual(v.startTime) : "–",
+    note: v.note,
+  }));
+
+  const erektionVergehen: ErektionRow[] = sb.erektionViolations.map((v) => ({
+    entryId: v.entryId,
+    startTimeStr: v.startTime ? fmtDual(v.startTime) : "–",
+    oeffnenGrund: v.oeffnenGrund,
     note: v.note,
   }));
 
@@ -97,6 +104,8 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
     strafbuchGesamt: t("strafbuchGesamt"),
     strafbuchReinigungLimit: t("strafbuchReinigungLimit"),
     strafbuchReinigungLimitDate: t("strafbuchReinigungLimitDate"),
+    strafbuchErektion: t("strafbuchErektion"),
+    strafbuchErektionDate: t("strafbuchErektionDate"),
     strafbuchVerwerfen: t("strafbuchVerwerfen"),
     strafbuchVerworfenBadge: t("strafbuchVerworfenBadge"),
     strafbuchBegruendung: t("strafbuchBegruendung"),
@@ -117,6 +126,7 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
       zuSpaet={zuSpaet}
       abgelehnt={abgelehnt}
       reinigungLimitVergehen={reinigungLimitVergehen}
+      erektionVergehen={erektionVergehen}
       strafeRecords={strafeRecords}
       labels={labels}
     />

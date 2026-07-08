@@ -17,7 +17,10 @@ export interface CreateVerschlussAnforderungParams {
   /** ANFORDERUNG only: min wearing duration (h) → inherited by the auto-created SPERRZEIT on lock. */
   dauerH?: number | null;
   deviceId?: string | null;
+  /** Non-KG category (e.g. Plug). When set: uses wear-state instead of KG lock-state. */
+  deviceCategoryId?: string | null;
   reinigungErlaubt?: boolean;
+  toiletteErlaubt?: boolean;
   /** Verzögerte Auslösung in Minuten (>0). Fehlt/0 = sofort (sofern kein wirksamAbAt). */
   delayMinutes?: number | null;
   /** Absoluter Versandzeitpunkt (ISO-String oder Date). Hat Vorrang vor delayMinutes. */
@@ -33,7 +36,8 @@ export interface CreateVerschlussAnforderungParams {
 export async function createVerschlussAnforderung(
   params: CreateVerschlussAnforderungParams,
 ): Promise<ServiceResult<{ id: string; scheduledFor: string | null }>> {
-  const { userId, art, nachricht, endetAt, fristH, dauerH, deviceId, reinigungErlaubt, delayMinutes, wirksamAbAt } = params;
+  const { userId, art, nachricht, endetAt, fristH, dauerH, deviceId, deviceCategoryId, reinigungErlaubt, toiletteErlaubt, delayMinutes, wirksamAbAt } = params;
+  const isPlugCategory = !!deviceCategoryId;
 
   if (!userId) return { ok: false, status: 400, error: "userId fehlt" };
   if (art !== "ANFORDERUNG" && art !== "SPERRZEIT") {
@@ -42,7 +46,8 @@ export async function createVerschlussAnforderung(
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return { ok: false, status: 404, error: "User nicht gefunden" };
-  if (art === "ANFORDERUNG" && !user.email) {
+  const smtpConfigured = !!(process.env.SMTP_HOST && process.env.SMTP_USER);
+  if (smtpConfigured && art === "ANFORDERUNG" && !isPlugCategory && !user.email) {
     return { ok: false, status: 400, error: "User hat keine E-Mail-Adresse" };
   }
 
@@ -82,25 +87,37 @@ export async function createVerschlussAnforderung(
   let anforderung;
   try {
     anforderung = await prisma.$transaction(async (tx) => {
-      const latest = await tx.entry.findFirst({
-        where: { userId, type: { in: ["VERSCHLUSS", "OEFFNEN"] } },
-        orderBy: { startTime: "desc" },
-      });
-      const isLocked = latest?.type === "VERSCHLUSS";
+      if (isPlugCategory) {
+        // Plug: Zustand über WEAR_BEGIN/WEAR_END bestimmen statt KG VERSCHLUSS/OEFFNEN
+        const latestWear = await tx.entry.findFirst({
+          where: { userId, type: { in: ["WEAR_BEGIN", "WEAR_END"] }, device: { categoryId: deviceCategoryId } },
+          orderBy: { startTime: "desc" },
+        });
+        const isWearing = latestWear?.type === "WEAR_BEGIN";
+        if (art === "ANFORDERUNG" && isWearing) throw Object.assign(new Error(), { _code: "ALREADY_WEARING_PLUG" });
+        if (art === "SPERRZEIT" && !isWearing) throw Object.assign(new Error(), { _code: "NOT_WEARING_PLUG" });
+      } else {
+        // KG: Zustand über VERSCHLUSS/OEFFNEN bestimmen
+        const latest = await tx.entry.findFirst({
+          where: { userId, type: { in: ["VERSCHLUSS", "OEFFNEN"] } },
+          orderBy: { startTime: "desc" },
+        });
+        const isLocked = latest?.type === "VERSCHLUSS";
+        if (art === "ANFORDERUNG" && isLocked) throw Object.assign(new Error(), { _code: "ALREADY_LOCKED" });
+        if (art === "SPERRZEIT" && !isLocked) throw Object.assign(new Error(), { _code: "NOT_LOCKED" });
+      }
 
-      if (art === "ANFORDERUNG" && isLocked) throw Object.assign(new Error(), { _code: "ALREADY_LOCKED" });
-      if (art === "SPERRZEIT" && !isLocked) throw Object.assign(new Error(), { _code: "NOT_LOCKED" });
-
+      // Bestehende offene Einträge des gleichen art + deviceCategoryId zurückziehen
       await tx.verschlussAnforderung.updateMany({
-        where: { userId, art, fulfilledAt: null, withdrawnAt: null },
+        where: { userId, art, deviceCategoryId: deviceCategoryId ?? null, fulfilledAt: null, withdrawnAt: null },
         data: { withdrawnAt: new Date() },
       });
 
-      // reinigungErlaubt: SPERRZEIT always, ANFORDERUNG only with dauerH (inherited by auto-created SPERRZEIT)
+      // reinigungErlaubt/toiletteErlaubt: SPERRZEIT always, ANFORDERUNG only with dauerH (inherited by auto-created SPERRZEIT)
       const effectiveDauerH = art === "ANFORDERUNG" ? (dauerH || null) : null;
-      const effectiveReinigung = Boolean(
-        reinigungErlaubt && (art === "SPERRZEIT" || effectiveDauerH !== null),
-      );
+      const sperrzeitContext = art === "SPERRZEIT" || effectiveDauerH !== null;
+      const effectiveReinigung = Boolean(reinigungErlaubt && sperrzeitContext && !isPlugCategory);
+      const effectiveToilette = Boolean(toiletteErlaubt && sperrzeitContext && !isPlugCategory);
 
       return tx.verschlussAnforderung.create({
         data: {
@@ -109,8 +126,10 @@ export async function createVerschlussAnforderung(
           nachricht: nachricht?.trim() || null,
           endetAt: endetAtDate,
           dauerH: effectiveDauerH,
-          deviceId: art === "ANFORDERUNG" ? (deviceId || null) : null,
+          deviceId: (art === "ANFORDERUNG" && !isPlugCategory) ? (deviceId || null) : null,
+          deviceCategoryId: deviceCategoryId || null,
           reinigungErlaubt: effectiveReinigung,
+          toiletteErlaubt: effectiveToilette,
           wirksamAb,
           benachrichtigtAt: wirksamAb ? null : now, // sofort = jetzt benachrichtigt; geplant = Poller
         },
@@ -120,12 +139,14 @@ export async function createVerschlussAnforderung(
     const code = (e as { _code?: string })?._code;
     if (code === "ALREADY_LOCKED") return { ok: false, status: 400, error: "User ist bereits verschlossen" };
     if (code === "NOT_LOCKED") return { ok: false, status: 400, error: "User ist nicht verschlossen" };
+    if (code === "ALREADY_WEARING_PLUG") return { ok: false, status: 400, error: "Plug wird bereits getragen" };
+    if (code === "NOT_WEARING_PLUG") return { ok: false, status: 400, error: "Plug wird nicht getragen" };
     throw e;
   }
 
   // Sofort benachrichtigen; bei geplanter Auslösung übernimmt der Poller bei Fälligkeit.
   if (!wirksamAb) {
-    await sendVerschlussAnforderungNotifications({ userId, user, art, nachricht, endetAtDate, dauerH });
+    await sendVerschlussAnforderungNotifications({ userId, user, art, nachricht, endetAtDate, dauerH, isPlugCategory });
   }
 
   return { ok: true, data: { id: anforderung.id, scheduledFor: wirksamAb?.toISOString() ?? null } };
@@ -141,8 +162,9 @@ export async function sendVerschlussAnforderungNotifications(opts: {
   nachricht?: string | null;
   endetAtDate: Date | null;
   dauerH?: number | null;
+  isPlugCategory?: boolean;
 }) {
-  const { userId, user, art, nachricht, endetAtDate, dauerH } = opts;
+  const { userId, user, art, nachricht, endetAtDate, dauerH, isPlugCategory } = opts;
   const nachrichtHtml = nachricht?.trim()
     ? `<div style="background:#fef9c3;border:1px solid #fde047;border-radius:10px;padding:14px 18px;margin:16px 0"><p style="margin:0 0 4px 0;font-size:13px;font-weight:bold;color:#713f12">Nachricht des Admins:</p><p style="margin:0;font-size:15px;color:#422006">${escHtml(nachricht.trim())}</p></div>`
     : "";
@@ -151,41 +173,36 @@ export async function sendVerschlussAnforderungNotifications(opts: {
     const bisHtml = endetAtDate
       ? `<p><strong>Gesperrt bis:</strong> ${formatDateTime(endetAtDate)}</p>`
       : `<p><strong>Dauer:</strong> Unbefristet</p>`;
-    await sendMail(
-      user.email,
-      "KG-Tracker – Sperrzeit gesetzt",
-      dashboardEmailHtml("Sperrzeit gesetzt",
-        `<p>Hallo ${escHtml(user.username)},</p>
-        <p>Der Admin hat eine Sperrzeit gesetzt. Du darfst dich in dieser Zeit nicht öffnen.</p>
-        ${nachrichtHtml}
-        ${bisHtml}`),
-    );
+    const subject = isPlugCategory ? "KG-Tracker – Plug Sperrdauer gesetzt" : "KG-Tracker – Sperrzeit gesetzt";
+    const title = isPlugCategory ? "Plug Sperrdauer gesetzt" : "Sperrzeit gesetzt";
+    const body = isPlugCategory
+      ? `<p>Hallo ${escHtml(user.username)},</p><p>Der Admin hat eine Sperrdauer für den Anal-Plug gesetzt. Du darfst ihn in dieser Zeit nicht ablegen.</p>`
+      : `<p>Hallo ${escHtml(user.username)},</p><p>Der Admin hat eine Sperrzeit gesetzt. Du darfst dich in dieser Zeit nicht öffnen.</p>`;
+    await sendMail(user.email, subject, dashboardEmailHtml(title, `${body}${nachrichtHtml}${bisHtml}`));
   }
 
   if (art === "ANFORDERUNG" && user.email) {
     const deadlineHtml = endetAtDate
-      ? `<p><strong>Bitte einschliessen bis:</strong> ${formatDateTime(endetAtDate)}</p>`
+      ? `<p><strong>${isPlugCategory ? "Bitte anlegen bis" : "Bitte einschliessen bis"}:</strong> ${formatDateTime(endetAtDate)}</p>`
       : "";
-    const dauerHtml = dauerH
+    const dauerHtml = dauerH && !isPlugCategory
       ? `<p><strong>Mindest-Tragedauer nach Einschliessen:</strong> ${dauerH >= 24 ? `${Math.floor(dauerH / 24)}T ${dauerH % 24 > 0 ? `${dauerH % 24}h` : ""}`.trim() : `${dauerH}h`}</p>`
       : "";
-    await sendMail(
-      user.email,
-      "KG-Tracker – Einschliessen angefordert",
-      dashboardEmailHtml("Einschliessen angefordert",
-        `<p>Hallo ${escHtml(user.username)},</p>
-        <p>Der Admin hat dich aufgefordert, dich einzuschliessen.</p>
-        ${nachrichtHtml}
-        ${deadlineHtml}
-        ${dauerHtml}`),
-    );
+    const subject = isPlugCategory ? "KG-Tracker – Plug anlegen angefordert" : "KG-Tracker – Einschliessen angefordert";
+    const title = isPlugCategory ? "Anal-Plug anlegen angefordert" : "Einschliessen angefordert";
+    const body = isPlugCategory
+      ? `<p>Hallo ${escHtml(user.username)},</p><p>Der Admin hat dich aufgefordert, den Anal-Plug anzulegen.</p>`
+      : `<p>Hallo ${escHtml(user.username)},</p><p>Der Admin hat dich aufgefordert, dich einzuschliessen.</p>`;
+    await sendMail(user.email, subject, dashboardEmailHtml(title, `${body}${nachrichtHtml}${deadlineHtml}${dauerHtml}`));
   }
 
   // Push (fire-and-forget)
-  const pushTitle = art === "ANFORDERUNG" ? "Bitte einschliessen" : "Sperrzeit gesetzt";
+  const pushTitle = art === "ANFORDERUNG"
+    ? (isPlugCategory ? "Anal-Plug anlegen" : "Bitte einschliessen")
+    : (isPlugCategory ? "Plug Sperrdauer gesetzt" : "Sperrzeit gesetzt");
   const pushParts: string[] = [];
   if (art === "ANFORDERUNG") {
-    pushParts.push("Der Admin fordert dich auf, dich einzuschliessen.");
+    pushParts.push(isPlugCategory ? "Der Admin fordert dich auf, den Anal-Plug anzulegen." : "Der Admin fordert dich auf, dich einzuschliessen.");
     if (endetAtDate) pushParts.push(`Frist: ${formatDateTime(endetAtDate)}`);
   } else {
     pushParts.push(endetAtDate ? `Bis: ${formatDateTime(endetAtDate)}` : "Unbefristet");

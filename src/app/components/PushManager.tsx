@@ -103,16 +103,23 @@ export default function PushManager() {
           if (permission === "denied") setPushState("denied");
           return;
         }
-        const { key } = await fetch("/api/push/vapid-public-key").then((r) => r.json());
+        const vapidRes = await fetch("/api/push/vapid-public-key");
+        const vapidJson = await vapidRes.json();
+        if (!vapidRes.ok || !vapidJson.key) {
+          throw new Error(`vapid-fetch-${vapidRes.status}: ${JSON.stringify(vapidJson)}`);
+        }
         const sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(key),
+          applicationServerKey: urlBase64ToUint8Array(vapidJson.key),
         });
-        await fetch("/api/push/subscribe", {
+        const subRes = await fetch("/api/push/subscribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(sub.toJSON()),
         });
+        if (!subRes.ok) {
+          throw new Error(`subscribe-${subRes.status}: ${await subRes.text()}`);
+        }
       } else {
         const sub = await reg.pushManager.getSubscription();
         if (sub) {
@@ -125,9 +132,10 @@ export default function PushManager() {
         }
       }
     } catch (err) {
-      console.error("[PushManager]", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[PushManager]", msg);
       setSubscribed(!enable); // revert bei Fehler
-      toast.error(t("pushRegisterFailed"));
+      toast.error(`${t("pushRegisterFailed")} (${msg.slice(0, 80)})`);
     } finally {
       setSaving(false);
     }

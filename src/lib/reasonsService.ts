@@ -50,7 +50,9 @@ export interface ResolvedReason { code: string; label: string }
 
 const MAX_ENTRIES = 12;
 const LABEL_MAX = 40;
-/** Öffnungsgrund, an dem echte Logik hängt — immer vorhanden, Code eingefroren. */
+/** Öffnungsgründe, an denen echte Logik hängt — immer vorhanden, Codes eingefroren. */
+export const PROTECTED_OPENING_CODES = ["REINIGUNG", "TOILETTE"] as const;
+/** @deprecated use PROTECTED_OPENING_CODES */
 export const PROTECTED_OPENING_CODE = "REINIGUNG";
 /** Custom-Codes folgen diesem Muster (server-generiert). */
 const CUSTOM_CODE_RE = /^c_[0-9a-f]{8,}$/;
@@ -131,9 +133,14 @@ export function parseReasonConfig(raw: unknown, kind: ReasonKind): ReasonEntry[]
     out.push(label ? { code, label } : { code });
   }
 
-  // REINIGUNG-Invariante: für Öffnungsgründe immer vorhanden (Label erhalten, sonst vorne re-injizieren).
-  if (kind === "opening" && !used.has(PROTECTED_OPENING_CODE)) {
-    out.unshift({ code: PROTECTED_OPENING_CODE });
+  // Geschützte Öffnungsgründe: immer vorhanden (Label erhalten, sonst vorne re-injizieren).
+  if (kind === "opening") {
+    for (const protectedCode of [...PROTECTED_OPENING_CODES].reverse()) {
+      if (!used.has(protectedCode)) {
+        out.unshift({ code: protectedCode });
+        used.add(protectedCode);
+      }
+    }
   }
 
   return out.length > 0 ? out : defaultConfig(kind);
