@@ -24,6 +24,8 @@ const I18N_KEY: Record<NotificationEventType, string> = {
   KONTROLLE_ANGEFORDERT: "notifyKontrolleAngefordert",
   WEAR_BEGIN_ANY: "notifyWearBeginAny",
   WEAR_END_ANY: "notifyWearEndAny",
+  PAUSE_BEGIN_ANY: "notifyPauseBeginAny",
+  PAUSE_END_ANY: "notifyPauseEndAny",
 };
 
 /** Visual grouping in the matrix — one section per concept. */
@@ -31,6 +33,7 @@ const GROUPS: { titleKey: string; events: readonly NotificationEventType[] }[] =
   { titleKey: "notifyGroupKg", events: ["VERSCHLUSS", "OEFFNUNG_IMMER", "OEFFNUNG_VERBOTEN", "KONTROLLE_FREIWILLIG", "KONTROLLE_ANGEFORDERT"] },
   { titleKey: "notifyGroupOrgasmus", events: ["ORGASMUS"] },
   { titleKey: "notifyGroupWear", events: ["WEAR_BEGIN_ANY", "WEAR_END_ANY"] },
+  { titleKey: "notifyGroupPause", events: ["PAUSE_BEGIN_ANY", "PAUSE_END_ANY"] },
 ];
 
 export default function NotificationToggles({ userId }: { userId: string }) {
