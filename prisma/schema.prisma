@@ -352,6 +352,10 @@ model SessionAnforderung {
   deviceCategory   DeviceCategory @relation(fields: [deviceCategoryId], references: [id], onDelete: Cascade)
   nachricht        String?        // optionale Anweisung der Keyholderin
   endetAt          DateTime?      // Frist; null = keine Deadline
+  minMinuten       Int?           // Mindest-/Zieldauer der Session in Minuten (null = keine)
+  requireVideo     Boolean        @default(false) // Nachweis (Video/Foto) beim Beenden verpflichtend
+  wirksamAb        DateTime?      // geplante Auslösung; bis dahin inaktiv/unsichtbar
+  deviceId         String?        // bestimmtes Gerät der Kategorie (null = beliebiges Gerät)
   fulfilledAt      DateTime?      // gesetzt wenn SESSION_END die Anforderung erfüllt
   withdrawnAt      DateTime?
   sessionEndId     String?        // Entry-ID des erfüllenden SESSION_END

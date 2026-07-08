@@ -26,7 +26,10 @@ export async function getActiveSessionAnforderung(
       fulfilledAt: null,
       withdrawnAt: null,
       ...(deviceCategoryId ? { deviceCategoryId } : {}),
-      OR: [{ endetAt: null }, { endetAt: { gte: now } }],
+      AND: [
+        { OR: [{ endetAt: null }, { endetAt: { gte: now } }] },
+        { OR: [{ wirksamAb: null }, { wirksamAb: { lte: now } }] },
+      ],
     },
     orderBy: { createdAt: "desc" },
     include: {
@@ -43,7 +46,10 @@ export async function getAllActiveSessionAnforderungen(userId: string) {
       userId,
       fulfilledAt: null,
       withdrawnAt: null,
-      OR: [{ endetAt: null }, { endetAt: { gte: now } }],
+      AND: [
+        { OR: [{ endetAt: null }, { endetAt: { gte: now } }] },
+        { OR: [{ wirksamAb: null }, { wirksamAb: { lte: now } }] },
+      ],
     },
     orderBy: { createdAt: "desc" },
     include: {

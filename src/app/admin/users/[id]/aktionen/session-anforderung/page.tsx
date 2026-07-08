@@ -13,7 +13,10 @@ export default async function AdminSessionAnforderungPage({ params }: { params: 
   const sessionCategories = await prisma.deviceCategory.findMany({
     where: { userId: id, isSessionCategory: true },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-    select: { id: true, name: true, maxSessionMinutes: true },
+    select: {
+      id: true, name: true, maxSessionMinutes: true, requiresVideo: true,
+      devices: { where: { archivedAt: null }, orderBy: { name: "asc" }, select: { id: true, name: true } },
+    },
   });
 
   if (sessionCategories.length === 0) {
