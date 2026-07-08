@@ -43,8 +43,9 @@ export async function buildCategoryWearGoals(
         userId,
         gueltigAb: { lte: now },
         OR: [{ gueltigBis: null }, { gueltigBis: { gte: now } }],
+        // Kategorie-Zuordnung erfolgt weiter unten über getNonKgTrackingCategories (schliesst KG via slug aus).
+        // KEIN isBuiltIn-Filter: die Plug-Kategorie ist ebenfalls built-in, ihre Vorgabe muss berücksichtigt werden.
         categoryId: { not: null },
-        category: { isBuiltIn: false },
       },
       orderBy: { gueltigAb: "desc" },
       select: { categoryId: true, gueltigAb: true, gueltigBis: true, minProTagH: true, minProWocheH: true, minProMonatH: true, minProJahrH: true },
