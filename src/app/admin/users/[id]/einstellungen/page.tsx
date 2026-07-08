@@ -44,7 +44,7 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
     prisma.deviceCategory.findMany({
       where: { userId: id, OR: [{ isBuiltIn: true }, { allowVorgaben: true }] },
       orderBy: [{ isBuiltIn: "desc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
-      select: { id: true, name: true },
+      select: { id: true, name: true, isBuiltIn: true },
     }),
     getKeyholdersOfUser(id),
     prisma.aiKeyholderConfig.findUnique({ where: { userId: id }, select: { enabled: true, currentPersona: { select: { name: true } } } }),
