@@ -36,6 +36,8 @@ interface Props {
   tz?: string;
   /** ISO-Zeitstempel einer aktiven Cage-Pause (PAUSE_BEGIN ohne PAUSE_END). */
   activeCagePauseSince?: string | null;
+  /** Name des getragenen KG-Geräts (null = keins gewählt → Unterzeile ausgeblendet). */
+  deviceName?: string | null;
 }
 
 export default async function LaufendeSessionCard({
@@ -54,6 +56,7 @@ export default async function LaufendeSessionCard({
   jahrH,
   tz = APP_TZ,
   activeCagePauseSince = null,
+  deviceName = null,
 }: Props) {
   const t = await getTranslations("dashboard");
   const tCommon = await getTranslations("common");
@@ -83,6 +86,7 @@ export default async function LaufendeSessionCard({
           <div className="flex-1 min-w-0">
             <p className="text-xs font-semibold uppercase tracking-widest opacity-60 mb-0.5">{t("sessionTitle")}</p>
             <p className="text-2xl font-bold leading-tight">{t("locked")}</p>
+            {deviceName && <p className="text-xs opacity-70 mt-0.5 truncate">{deviceName}</p>}
             <p className="text-xs opacity-60 mt-1">
               {t("sessionSince")} {sessionStartStr}
             </p>

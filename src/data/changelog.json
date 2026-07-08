@@ -1,5 +1,12 @@
 [
   {
+    "version": "4.66.1",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "ui", "text": "KG-Session-Karte zeigt jetzt auch den Gerätenamen unter „Verschlossen“ (analog zur Plug-Karte), sofern ein Gerät gewählt wurde." }
+    ]
+  },
+  {
     "version": "4.66.0",
     "date": "2026-07-08",
     "changes": [

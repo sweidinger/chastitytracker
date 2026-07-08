@@ -93,6 +93,9 @@ export default async function DashboardPage() {
     ? { type: latest.type as "VERSCHLUSS" | "OEFFNEN", since: latest.startTime.toISOString() }
     : null;
 
+  // KG-Gerätename der aktiven Verschluss-Session (für die große KG-Karte)
+  const cageDeviceName = latest?.type === "VERSCHLUSS" ? (latest.device?.name ?? null) : null;
+
   // ── Build kontroll items for session events ──
   const kontrollItems = buildKontrolleItems(alleAnforderungen, entries.filter(e => e.type === "PRUEFUNG"), now);
   const pairs = buildPairs(entries, kontrollItems, reinigung);
@@ -233,6 +236,7 @@ export default async function DashboardPage() {
             jahrH={jahrH}
             tz={tz}
             activeCagePauseSince={activeCagePause?.startTime.toISOString() ?? null}
+            deviceName={cageDeviceName}
           />
         </div>
       )}
