@@ -11,7 +11,8 @@ import {
   type ReinigungSettings,
 } from "@/lib/utils";
 import { proratedVorgabeTargets } from "@/lib/goalFulfillment";
-import { buildSessionEvents } from "@/lib/sessionHelpers";
+import { buildSessionEvents, buildPlugSessionEvents } from "@/lib/sessionHelpers";
+import { buildCategoryWearGoals } from "@/lib/categoryGoals";
 import { getActiveVorgabe, getActiveSperrzeit, getActiveWearSessions, getNonKgTrackingCategories, getSessionCategories, getActiveOrgasmusAnforderung, getActivePlugAnforderung, getActivePlugSperrzeit, aktiveKontrolleWhere, activeVerschlussAnforderungWhere } from "@/lib/queries";
 import { getActiveSessionsAllCategories } from "@/lib/sessionService";
 import { plugCategoryId } from "@/lib/deviceCategories";
@@ -21,6 +22,7 @@ import { effectiveOrgasmusArten, resolveReasonLabel, resolveOrgasmusArtDisplay }
 import { getTranslations, getLocale } from "next-intl/server";
 import DashboardClient, { type DashboardProps } from "./DashboardClient";
 import LaufendeSessionCard from "./LaufendeSessionCard";
+import LaufendePlugSessionCard from "./LaufendePlugSessionCard";
 import SessionList from "./SessionList";
 import WearSessionList from "./WearSessionList";
 import ActiveWearSessions from "./ActiveWearSessions";
@@ -108,6 +110,37 @@ export default async function DashboardPage() {
   const { tagH, wocheH, monatH, jahrH } = calculateWearingHoursByRange(entries, now, reinigung);
 
   const wearSessionRows = buildWearSessionRows(allNonKgCategories, entries, now, dl);
+
+  // ── Aktive PLUG-Session → große Karte (analog KG) ──
+  const activePlugSession = flagOn ? (wearSessions.find((s) => s.categoryId === plugCatId) ?? null) : null;
+  let plugCardData: {
+    session: typeof activePlugSession & object;
+    events: ReturnType<typeof buildPlugSessionEvents>;
+    plugPausedMs: number;
+    goalRow: Awaited<ReturnType<typeof buildCategoryWearGoals>>[number] | null;
+  } | null = null;
+  if (activePlugSession) {
+    const plugStart = activePlugSession.since;
+    const plugPauses = entries
+      .filter((e) => (e.type === "PAUSE_BEGIN" || e.type === "PAUSE_END") && e.pauseDevice === "PLUG" && e.startTime >= plugStart)
+      .map((e) => ({ type: e.type, startTime: e.startTime, imageUrl: e.imageUrl, note: e.note, oeffnenGrund: e.oeffnenGrund }));
+    const plugKontrollItems = buildKontrolleItems(alleAnforderungen.filter((k) => k.device === "PLUG"), [], now);
+    const plugEvents = buildPlugSessionEvents(plugStart, plugPauses, plugKontrollItems, dl);
+    // Bereits abgeschlossene Pausen-ms (aktive offene Pause zählt PauseAwareTimer separat)
+    let plugPausedMs = 0;
+    let ob: Date | null = null;
+    for (const p of [...plugPauses].sort((a, b) => a.startTime.getTime() - b.startTime.getTime())) {
+      if (p.type === "PAUSE_BEGIN") ob = p.startTime;
+      else if (p.type === "PAUSE_END" && ob) { plugPausedMs += p.startTime.getTime() - ob.getTime(); ob = null; }
+    }
+    const goalRows = await buildCategoryWearGoals(userId, now, entries);
+    plugCardData = {
+      session: activePlugSession,
+      events: plugEvents,
+      plugPausedMs,
+      goalRow: goalRows.find((r) => r.categoryId === plugCatId) ?? null,
+    };
+  }
 
   // ── Serialize for client ──
   const kontrolleOverdue = offeneKontrolle ? offeneKontrolle.deadline < now : false;
@@ -203,9 +236,38 @@ export default async function DashboardPage() {
           />
         </div>
       )}
+      {plugCardData && (
+        <div className="w-full max-w-2xl mx-auto px-4 pt-2 pb-2">
+          <LaufendePlugSessionCard
+            sessionStart={plugCardData.session.since}
+            interruptionPausedMs={plugCardData.plugPausedMs}
+            now={now}
+            events={plugCardData.events}
+            categoryName={plugCardData.session.categoryName}
+            categoryColor={plugCardData.session.categoryColor}
+            categoryIcon={plugCardData.session.categoryIcon}
+            deviceName={plugCardData.session.deviceName}
+            activePlugPauseSince={activePlugPause?.startTime.toISOString() ?? null}
+            goal={plugCardData.goalRow ? {
+              minProTagH: plugCardData.goalRow.goalDayH,
+              minProWocheH: plugCardData.goalRow.goalWeekH,
+              minProMonatH: plugCardData.goalRow.goalMonthH,
+              minProJahrH: plugCardData.goalRow.goalYearH,
+            } : null}
+            tagH={plugCardData.goalRow?.tagH ?? 0}
+            wocheH={plugCardData.goalRow?.wocheH ?? 0}
+            monatH={plugCardData.goalRow?.monatH ?? 0}
+            jahrH={plugCardData.goalRow?.jahrH ?? 0}
+            sperrzeitEndetAt={activePlugSperrzeit?.endetAt ?? null}
+            sperrzeitUnbefristet={!!activePlugSperrzeit && activePlugSperrzeit.endetAt === null}
+            sperrzeitNachricht={activePlugSperrzeit?.nachricht ?? null}
+            tz={tz}
+          />
+        </div>
+      )}
       <ActiveWearSessions
         sessions={[
-          ...wearSessions.map((s) => {
+          ...wearSessions.filter((s) => !(plugCardData && s.categoryId === plugCatId)).map((s) => {
             const isPlug = s.categoryId === plugCatId;
             return {
               categoryId: s.categoryId,
