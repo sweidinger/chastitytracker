@@ -44,7 +44,7 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
     prisma.deviceCategory.findMany({
       where: { userId: id, OR: [{ isBuiltIn: true }, { allowVorgaben: true }] },
       orderBy: [{ isBuiltIn: "desc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
-      select: { id: true, name: true, isBuiltIn: true },
+      select: { id: true, name: true, isBuiltIn: true, slug: true },
     }),
     getKeyholdersOfUser(id),
     prisma.aiKeyholderConfig.findUnique({ where: { userId: id }, select: { enabled: true, currentPersona: { select: { name: true } } } }),
@@ -191,12 +191,13 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
         </div>
         {vorgaben.length > 0 && (() => {
           // Group by category — built-in (KG) first, then user-defined order, orphans last.
-          // KG-Vorgaben haben categoryId = null → gehören zur KG-Built-in-Kategorie (nicht "Ohne Kategorie").
-          const kgCat = categories.find((c) => c.isBuiltIn) ?? null;
+          // Legacy-KG-Vorgaben haben categoryId = null → gehören zur KG-Kategorie (nicht "Ohne Kategorie").
+          // Nur die KG-Kategorie (slug "kg"), NICHT jede built-in (Plug ist ebenfalls built-in).
+          const kgCat = categories.find((c) => c.slug === "kg") ?? null;
           const groups = categories
             .map((c) => ({
               category: c,
-              vorgaben: vorgaben.filter((v) => v.categoryId === c.id || (c.isBuiltIn && v.categoryId == null)),
+              vorgaben: vorgaben.filter((v) => v.categoryId === c.id || (c.slug === "kg" && v.categoryId == null)),
             }))
             .filter((g) => g.vorgaben.length > 0);
           // Echte Waisen nur, wenn keine KG-Kategorie existiert (Edge Case).
