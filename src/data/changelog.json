@@ -1,5 +1,12 @@
 [
   {
+    "version": "4.66.2",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "fix", "text": "Admin-Vorgaben: KG-Trainingsvorgaben (ohne Geräte-Kategorie) werden jetzt korrekt unter der KG-Kategorie gruppiert statt unter „Ohne Kategorie“." }
+    ]
+  },
+  {
     "version": "4.66.1",
     "date": "2026-07-08",
     "changes": [

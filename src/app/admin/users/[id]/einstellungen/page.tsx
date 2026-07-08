@@ -191,13 +191,16 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
         </div>
         {vorgaben.length > 0 && (() => {
           // Group by category — built-in (KG) first, then user-defined order, orphans last.
+          // KG-Vorgaben haben categoryId = null → gehören zur KG-Built-in-Kategorie (nicht "Ohne Kategorie").
+          const kgCat = categories.find((c) => c.isBuiltIn) ?? null;
           const groups = categories
             .map((c) => ({
               category: c,
-              vorgaben: vorgaben.filter((v) => v.categoryId === c.id),
+              vorgaben: vorgaben.filter((v) => v.categoryId === c.id || (c.isBuiltIn && v.categoryId == null)),
             }))
             .filter((g) => g.vorgaben.length > 0);
-          const orphans = vorgaben.filter((v) => !v.categoryId);
+          // Echte Waisen nur, wenn keine KG-Kategorie existiert (Edge Case).
+          const orphans = vorgaben.filter((v) => !v.categoryId && !kgCat);
           const showHeaders = categories.length > 1 && groups.length + (orphans.length > 0 ? 1 : 0) > 1;
           const renderRow = (v: (typeof vorgaben)[number]) => (
             <VorgabeRow
@@ -212,7 +215,7 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
               jahrH={v.minProJahrH}
               notiz={v.notiz}
               categories={categories}
-              categoryName={showHeaders ? null : (categories.find((c) => c.id === v.categoryId)?.name ?? null)}
+              categoryName={showHeaders ? null : (v.categoryId ? (categories.find((c) => c.id === v.categoryId)?.name ?? null) : (kgCat?.name ?? null))}
               initialValues={{
                 gueltigAb: toDateInput(v.gueltigAb),
                 gueltigBis: v.gueltigBis ? toDateInput(v.gueltigBis) : "",
