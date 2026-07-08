@@ -1,5 +1,13 @@
 [
   {
+    "version": "4.67.0",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "feat", "text": "Kontrollen pro Gerät (Cage/Plug): können jetzt gleichzeitig aktiv sein. Eine neue Kontrolle zieht nur die des gleichen Geräts zurück; die Voraussetzung ist gerätespezifisch (Cage verschlossen / Plug getragen)." },
+      { "type": "fix", "text": "Aktive Kontrollen werden jetzt als getrennte Banner mit Geräte-Label (Käfig/Plug) angezeigt; das Erfassen-Formular zeigt das Gerät ebenfalls. Plug-Kontrollen erscheinen in der Plug-Karte statt in der Cage-Timeline." }
+    ]
+  },
+  {
     "version": "4.66.3",
     "date": "2026-07-08",
     "changes": [

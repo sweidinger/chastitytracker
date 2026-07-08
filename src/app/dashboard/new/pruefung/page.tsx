@@ -6,8 +6,8 @@ import { generateKontrollCode, getLatestKgEntry, sealRequiredForCode } from "@/l
 import { getTranslations } from "next-intl/server";
 import { nowDatetimeLocal, APP_TZ } from "@/lib/utils";
 
-export default async function NewPruefungPage({ searchParams }: { searchParams: Promise<{ code?: string; kommentar?: string }> }) {
-  const [{ code, kommentar }, session] = await Promise.all([searchParams, auth()]);
+export default async function NewPruefungPage({ searchParams }: { searchParams: Promise<{ code?: string; kommentar?: string; device?: string }> }) {
+  const [{ code, kommentar, device }, session] = await Promise.all([searchParams, auth()]);
   const userId = session?.user?.id;
   const tz = session?.user?.timezone ?? APP_TZ;
 
@@ -29,10 +29,15 @@ export default async function NewPruefungPage({ searchParams }: { searchParams: 
   const sealRequired = sealRequiredForCode(effectiveCode, latest ?? null);
   const tn = await getTranslations("newEntry");
   const tf = await getTranslations("inspectionForm");
+  const tdash = await getTranslations("dashboard");
+  const deviceLabel = device === "PLUG" ? tdash("deviceLabelPlug") : device === "CAGE" ? tdash("deviceLabelCage") : null;
   return (
     <div className="w-full max-w-2xl mx-auto px-4 py-6">
       <Link href="/dashboard" className="text-sm text-foreground-faint hover:text-foreground-muted transition">{tn("back")}</Link>
-      <h1 className="text-xl font-bold text-foreground mt-1 mb-6">{tf("title")}</h1>
+      <h1 className="text-xl font-bold text-foreground mt-1 mb-6">
+        {tf("title")}
+        {deviceLabel && <span className="text-foreground-muted font-normal"> · {deviceLabel}</span>}
+      </h1>
       <PruefungForm tz={tz} nowDefault={nowDatetimeLocal(tz)} initialCode={effectiveCode} initialKommentar={kommentar} sealRequired={sealRequired} mobileDesktopMode={dbUser?.mobileDesktopUpload ?? false} />
     </div>
   );

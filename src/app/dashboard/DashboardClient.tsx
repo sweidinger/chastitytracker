@@ -15,14 +15,15 @@ export interface DashboardProps {
   currentStatus: { type: "VERSCHLUSS" | "OEFFNEN"; since: string } | null;
   hasEntries: boolean;
 
-  // Kontrolle
-  offeneKontrolle: {
+  // Kontrolle — je Gerät (CAGE/PLUG) kann eine aktiv sein
+  offeneKontrollen: {
     deadline: string;
     code: string | null;
     kommentar: string | null;
     overdue: boolean;
     href: string;
-  } | null;
+    device: "CAGE" | "PLUG";
+  }[];
 
   // Verschluss-Anforderung
   offeneVerschlussAnf: {
@@ -97,7 +98,7 @@ export default function DashboardClient(props: DashboardProps) {
   const {
     currentStatus,
     hasEntries,
-    offeneKontrolle,
+    offeneKontrollen,
     offeneVerschlussAnf,
     activeSperrzeit,
     offenePlugAnf,
@@ -213,18 +214,20 @@ export default function DashboardClient(props: DashboardProps) {
       )}
 
       {/* ── Alert Banners ── */}
-      {offeneKontrolle && (
+      {offeneKontrollen.map((k) => (
         <KontrolleBanner
-          deadline={new Date(offeneKontrolle.deadline)}
-          code={offeneKontrolle.code}
-          kommentar={offeneKontrolle.kommentar}
-          overdue={offeneKontrolle.overdue}
+          key={k.device}
+          deadline={new Date(k.deadline)}
+          code={k.code}
+          kommentar={k.kommentar}
+          overdue={k.overdue}
           variant="large"
-          href={offeneKontrolle.href}
+          href={k.href}
           openLabel={t("inspectionRequired")}
+          deviceLabel={t(k.device === "PLUG" ? "deviceLabelPlug" : "deviceLabelCage")}
           tz={tz}
         />
-      )}
+      ))}
 
       {lockRequestBanner}
 
