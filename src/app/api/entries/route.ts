@@ -83,6 +83,7 @@ export async function POST(req: NextRequest) {
 
       // SESSION_BEGIN / SESSION_END: validate against active session state for this category
       let sessionCategoryId: string | null = null;
+      let sessionBeginTime: Date | null = null;
       if (type === "SESSION_BEGIN" || type === "SESSION_END") {
         if (!deviceId) throw Object.assign(new Error(), { _code: "SESSION_DEVICE_REQUIRED" });
         const dev = await tx.device.findUnique({
@@ -103,6 +104,7 @@ export async function POST(req: NextRequest) {
           if (dev.category.requiresVideo && !videoUrl) {
             throw Object.assign(new Error(), { _code: "SESSION_VIDEO_REQUIRED" });
           }
+          sessionBeginTime = active.startTime;
         }
       }
 
@@ -334,11 +336,20 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // SessionAnforderung als erfüllt markieren wenn SESSION_END erfasst wird.
+      // SessionAnforderung als erfüllt markieren wenn SESSION_END erfasst wird — aber nur, wenn
+      // Mindestdauer erreicht, ggf. Video/Foto vorhanden und (falls gesetzt) das richtige Gerät genutzt.
       if (type === "SESSION_END" && sessionCategoryId) {
         const offeneSessionAnf = await getActiveSessionAnforderung(session.user.id, sessionCategoryId, tx);
         if (offeneSessionAnf) {
-          await fulfillSessionAnforderung(offeneSessionAnf.id, created.id, tx);
+          const durMin = sessionBeginTime
+            ? (new Date(startTime).getTime() - sessionBeginTime.getTime()) / 60000
+            : 0;
+          const minOk = !offeneSessionAnf.minMinuten || durMin >= offeneSessionAnf.minMinuten;
+          const videoOk = !offeneSessionAnf.requireVideo || !!videoUrl;
+          const deviceOk = !offeneSessionAnf.deviceId || offeneSessionAnf.deviceId === deviceId;
+          if (minOk && videoOk && deviceOk) {
+            await fulfillSessionAnforderung(offeneSessionAnf.id, created.id, tx);
+          }
         }
       }
 

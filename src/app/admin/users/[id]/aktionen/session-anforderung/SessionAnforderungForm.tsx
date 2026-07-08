@@ -15,6 +15,8 @@ interface SessionCategory {
   id: string;
   name: string;
   maxSessionMinutes: number;
+  requiresVideo: boolean;
+  devices: { id: string; name: string }[];
 }
 
 export default function SessionAnforderungForm({
@@ -32,9 +34,22 @@ export default function SessionAnforderungForm({
   const [categoryId, setCategoryId] = useState(categories[0]?.id ?? "");
   const [deadlineHours, setDeadlineHours] = useState("4");
   const [hasDeadline, setHasDeadline] = useState(true);
+  const [minMinuten, setMinMinuten] = useState("");
+  const [delayMinutes, setDelayMinutes] = useState("");
+  const [deviceId, setDeviceId] = useState("");
+  const [requireVideo, setRequireVideo] = useState(categories[0]?.requiresVideo ?? false);
   const [nachricht, setNachricht] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const selectedCategory = categories.find((c) => c.id === categoryId) ?? null;
+  const categoryRequiresVideo = selectedCategory?.requiresVideo ?? false;
+
+  function handleCategoryChange(id: string) {
+    setCategoryId(id);
+    setDeviceId("");
+    setRequireVideo(categories.find((c) => c.id === id)?.requiresVideo ?? false);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -49,11 +64,17 @@ export default function SessionAnforderungForm({
         userId,
         deviceCategoryId: categoryId,
         nachricht: nachricht.trim() || undefined,
+        requireVideo,
       };
       if (hasDeadline) {
         const h = parseFloat(deadlineHours);
         if (!isNaN(h) && h > 0) payload.deadlineHours = h;
       }
+      const mm = parseInt(minMinuten, 10);
+      if (!isNaN(mm) && mm > 0) payload.minMinuten = mm;
+      const dm = parseInt(delayMinutes, 10);
+      if (!isNaN(dm) && dm > 0) payload.delayMinutes = dm;
+      if (deviceId) payload.deviceId = deviceId;
       const res = await fetch("/api/admin/session-anforderung", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -84,9 +105,59 @@ export default function SessionAnforderungForm({
         <Select
           label={t("sessionAnforderungCategory")}
           value={categoryId}
-          onChange={(e) => setCategoryId(e.target.value)}
+          onChange={(e) => handleCategoryChange(e.target.value)}
           options={categories.map((c) => ({ value: c.id, label: `${c.name} (max. ${c.maxSessionMinutes} Min.)` }))}
         />
+
+        {/* Mindestdauer + bestimmtes Gerät */}
+        <div className="flex flex-wrap gap-3">
+          <div className="w-36">
+            <Input
+              label={t("sessionAnforderungMinLabel")}
+              type="number"
+              value={minMinuten}
+              onChange={(e) => setMinMinuten(e.target.value)}
+              min={1}
+              max={selectedCategory?.maxSessionMinutes ?? 120}
+              placeholder="—"
+            />
+          </div>
+          <div className="w-24">
+            <Input
+              label={t("sessionAnforderungDelayLabel")}
+              type="number"
+              value={delayMinutes}
+              onChange={(e) => setDelayMinutes(e.target.value)}
+              min={0}
+              placeholder="0"
+            />
+          </div>
+        </div>
+
+        {selectedCategory && selectedCategory.devices.length > 0 && (
+          <Select
+            label={t("sessionAnforderungDeviceLabel")}
+            value={deviceId}
+            onChange={(e) => setDeviceId(e.target.value)}
+            options={[{ value: "", label: t("sessionAnforderungDeviceAny") }, ...selectedCategory.devices.map((d) => ({ value: d.id, label: d.name }))]}
+          />
+        )}
+
+        {/* Nachweis-Pflicht */}
+        <div className="flex items-center gap-2">
+          <input
+            id="requireVideo"
+            type="checkbox"
+            checked={requireVideo}
+            disabled={categoryRequiresVideo}
+            onChange={(e) => setRequireVideo(e.target.checked)}
+            className="size-4 rounded border-border accent-foreground disabled:opacity-50"
+          />
+          <label htmlFor="requireVideo" className="text-sm text-foreground-muted select-none cursor-pointer">
+            {t("sessionAnforderungRequireVideo")}
+            {categoryRequiresVideo && <span className="text-xs text-foreground-faint ml-1">({t("sessionAnforderungRequireVideoForced")})</span>}
+          </label>
+        </div>
 
         {/* Deadline */}
         <div className="flex flex-col gap-2">

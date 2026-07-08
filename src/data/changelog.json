@@ -1,5 +1,12 @@
 [
   {
+    "version": "4.69.0",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "feat", "text": "„Session anfordern\" verfeinert: Mindestdauer, Nachweis-Pflicht (Video/Foto), geplante Auslösung („erst ab …\") und bestimmtes Gerät der Kategorie wählbar. Eine Session erfüllt die Anforderung nur, wenn Mindestdauer erreicht, ggf. Nachweis vorhanden und (falls gesetzt) das richtige Gerät genutzt wurde." }
+    ]
+  },
+  {
     "version": "4.68.0",
     "date": "2026-07-08",
     "changes": [
