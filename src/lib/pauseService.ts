@@ -60,6 +60,39 @@ export function pauseSettingsForDevice(
   }
 }
 
+/** Pause-Grund (Reinigung/Toilette) mit den konfigurierten Limits für das jeweilige Gerät. */
+export interface PauseReasonOption {
+  grund: "REINIGUNG" | "TOILETTE";
+  /** Max. Dauer dieser Pause in Minuten (aus den Einstellungen). */
+  maxMinuten: number;
+  /** Max. Anzahl pro Tag; 0 = unbegrenzt. */
+  maxProTag: number;
+}
+
+/** User-Felder für die Pause-Grund-Ableitung (Reinigung/Toilette, KG + Plug). */
+export interface PauseReasonUserFields {
+  reinigungErlaubt: boolean; reinigungMaxMinuten: number; reinigungMaxProTag: number;
+  toiletteErlaubt: boolean; toiletteMaxMinuten: number; toiletteMaxProTag: number;
+  plugReinigungErlaubt: boolean; plugReinigungMaxMinuten: number; plugReinigungMaxProTag: number;
+  plugToiletteMaxMinuten: number;
+}
+
+/** Liefert die für ein Gerät erlaubten Pause-Gründe inkl. Limits.
+ *  KG: Reinigung/Toilette je nach *Erlaubt*-Flag. Plug: Reinigung wenn aktiviert,
+ *  Toilette IMMER (unbegrenzt) — analog zur Öffnungs-Logik. */
+export function pauseReasonsForDevice(user: PauseReasonUserFields, device: PauseDevice): PauseReasonOption[] {
+  const out: PauseReasonOption[] = [];
+  if (device === "CAGE") {
+    if (user.reinigungErlaubt) out.push({ grund: "REINIGUNG", maxMinuten: user.reinigungMaxMinuten, maxProTag: user.reinigungMaxProTag });
+    if (user.toiletteErlaubt) out.push({ grund: "TOILETTE", maxMinuten: user.toiletteMaxMinuten, maxProTag: user.toiletteMaxProTag });
+  } else {
+    if (user.plugReinigungErlaubt) out.push({ grund: "REINIGUNG", maxMinuten: user.plugReinigungMaxMinuten, maxProTag: user.plugReinigungMaxProTag });
+    // Plug-Toilette ist immer erlaubt & unbegrenzt
+    out.push({ grund: "TOILETTE", maxMinuten: user.plugToiletteMaxMinuten, maxProTag: 0 });
+  }
+  return out;
+}
+
 /** Aktiver Pause-Eintrag (PAUSE_BEGIN ohne passendes PAUSE_END), oder null. */
 export async function getActivePause(
   userId: string,

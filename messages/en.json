@@ -521,6 +521,10 @@
     "wearEnd": "Wear end",
     "wearBeginShort": "Begin",
     "wearEndShort": "End",
+    "pauseBegin": "Pause",
+    "pauseEnd": "Pause end",
+    "deviceCageShort": "Cage",
+    "devicePlugShort": "Plug",
     "longestSession": "Longest session",
     "avgSession": "Avg session",
     "totalAllTime": "Total",
@@ -1324,7 +1328,11 @@
     "submitBegin": "Start pause",
     "submitEnd": "End pause",
     "pauseStarted": "Pause started",
-    "pauseEnded": "Pause ended"
+    "pauseEnded": "Pause ended",
+    "reasonLabel": "Reason",
+    "reasonRequired": "Please choose a reason (cleaning/toilet)",
+    "reasonMaxHint": "Max. {min} min",
+    "reasonPerDayHint": "max. {count}×/day"
   },
   "tagesform": {
     "title": "Daily Form",

@@ -13,11 +13,13 @@ import RotatableImagePreview from "@/app/components/RotatableImagePreview";
 import useToast from "@/app/hooks/useToast";
 import { usePhotoUpload } from "@/app/hooks/usePhotoUpload";
 import { toDatetimeLocal, fromDatetimeLocal, formatElapsedMs } from "@/lib/utils";
-import type { PauseDevice } from "@/lib/pauseService";
+import type { PauseDevice, PauseReasonOption } from "@/lib/pauseService";
 
 interface Props {
   kind: "begin" | "end";
   device: PauseDevice;
+  /** Erlaubte Pause-Gründe (Reinigung/Toilette) mit Limits — nur für die "begin"-Ansicht. */
+  reasons?: PauseReasonOption[];
   /** ISO string of when the current pause started (END form only — shows elapsed duration). */
   activePauseSince?: string | null;
   tz: string;
@@ -25,17 +27,22 @@ interface Props {
   mobileDesktopMode?: boolean;
 }
 
-export default function PauseForm({ kind, device, activePauseSince, tz, nowDefault, mobileDesktopMode }: Props) {
+export default function PauseForm({ kind, device, reasons = [], activePauseSince, tz, nowDefault, mobileDesktopMode }: Props) {
   const t = useTranslations("pauseForm");
   const tCommon = useTranslations("common");
+  const tOpen = useTranslations("openForm");
   const router = useRouter();
   const toast = useToast();
   const locale = useLocale();
 
   const [startTime, setStartTime] = useState(nowDefault);
   const [note, setNote] = useState("");
+  const [grund, setGrund] = useState<"REINIGUNG" | "TOILETTE" | "">(reasons.length === 1 ? reasons[0].grund : "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const showReasons = kind === "begin" && reasons.length > 0;
+  const selectedReason = reasons.find((r) => r.grund === grund) ?? null;
 
   const {
     imageUrl, imageExifTime, imagePreview,
@@ -59,6 +66,10 @@ export default function PauseForm({ kind, device, activePauseSince, tz, nowDefau
       setError(t("photoRequired"));
       return;
     }
+    if (showReasons && !grund) {
+      setError(t("reasonRequired"));
+      return;
+    }
 
     setSaving(true);
     try {
@@ -72,6 +83,7 @@ export default function PauseForm({ kind, device, activePauseSince, tz, nowDefau
           imageUrl: imageUrl || null,
           imageExifTime: imageExifTime || null,
           note: note.trim() || null,
+          oeffnenGrund: kind === "begin" && grund ? grund : null,
         }),
       });
       if (!res.ok) {
@@ -110,6 +122,33 @@ export default function PauseForm({ kind, device, activePauseSince, tz, nowDefau
           max={toDatetimeLocal(new Date(), tz)}
         />
       </Card>
+
+      {/* Reason selection (begin only) — Reinigung / Toilette per settings */}
+      {showReasons && (
+        <Card padding="default">
+          <p className="text-sm font-medium text-foreground mb-2">
+            {t("reasonLabel")}<span className="text-warn ml-1">*</span>
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {reasons.map((r) => (
+              <button
+                key={r.grund}
+                type="button"
+                onClick={() => setGrund(r.grund)}
+                className={`px-4 py-2 rounded-xl text-sm font-medium border transition ${grund === r.grund ? "bg-btn-primary text-white border-transparent" : "bg-surface-raised text-foreground border-border hover:bg-background-hover"}`}
+              >
+                {tOpen(r.grund === "REINIGUNG" ? "grundReinigung" : "grundToilette")}
+              </button>
+            ))}
+          </div>
+          {selectedReason && (
+            <p className="text-xs text-foreground-faint mt-2">
+              {t("reasonMaxHint", { min: selectedReason.maxMinuten })}
+              {selectedReason.maxProTag > 0 ? ` · ${t("reasonPerDayHint", { count: selectedReason.maxProTag })}` : ""}
+            </p>
+          )}
+        </Card>
+      )}
 
       {/* Photo section */}
       <Card padding="default">

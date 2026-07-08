@@ -1,5 +1,13 @@
 [
   {
+    "version": "4.65.0",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "feat", "text": "Pause (KG & Plug) mit Grund-Auswahl (Reinigung/Toilette): nur erlaubte Gründe je Gerät, Maximaldauer und Tageslimit je Grund aus den Einstellungen; Überzug erzeugt weiterhin eine Strafe an der Grund-Dauer." },
+      { "type": "fix", "text": "Pause-Einträge wurden in der Liste fälschlich als „Verschluss\" angezeigt — jetzt korrekt „Pause\"/„Pause Ende\" inkl. Gerät (KG/Plug) und Grund." }
+    ]
+  },
+  {
     "version": "4.64.4",
     "date": "2026-07-08",
     "changes": [

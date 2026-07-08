@@ -112,6 +112,8 @@ export const TYPE_STATS_KEYS: Record<string, string> = {
   ORGASMUS: "orgasm",
   WEAR_BEGIN: "wearBegin",
   WEAR_END: "wearEnd",
+  PAUSE_BEGIN: "pauseBegin",
+  PAUSE_END: "pauseEnd",
 };
 
 /** Hex colors for HTML email templates (no Tailwind/CSS vars available in email) */
@@ -129,6 +131,8 @@ export const TYPE_COLORS: Record<string, string> = {
   ORGASMUS: "text-[var(--color-orgasm)]",
   WEAR_BEGIN: "text-foreground-muted",
   WEAR_END: "text-foreground-muted",
+  PAUSE_BEGIN: "text-foreground-muted",
+  PAUSE_END: "text-foreground-muted",
 };
 
 // ── Notification event types (shared by API + admin UI) ─────────────────────
