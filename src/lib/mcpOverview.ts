@@ -624,6 +624,8 @@ export interface StrafbuchOverview {
   wrongDeviceViolations: ({ time: string | null; note: string | null; deviceName: string | null } & OffenseJudgment)[];
   /** Mandatory orgasm directives (ANWEISUNG) whose window ended without a matching orgasm. */
   missedOrgasmInstructions: ({ windowEndedAt: string; message: string | null; requiredType: string | null } & OffenseJudgment)[];
+  /** Session-Anforderungen deren Frist ohne erfüllende Session ablief. */
+  missedSessions: ({ windowEndedAt: string; message: string | null; categoryName: string | null } & OffenseJudgment)[];
   /** Openings (Reinigung or Toilette) where an erection was reported. */
   erektionViolations: ({ time: string | null; oeffnenGrund: string | null; note: string | null } & OffenseJudgment)[];
 }
@@ -708,6 +710,12 @@ export async function mcpStrafbuch(username: string, opts: McpFormatOptions = {}
       message: m.nachricht,
       requiredType: m.requiredArt,
       ...judge("missed_orgasm", m.id),
+    })),
+    missedSessions: sb.missedSessions.map((m) => ({
+      windowEndedAt: fmt(m.endetAt),
+      message: m.nachricht,
+      categoryName: m.categoryName,
+      ...judge("missed_session", m.id),
     })),
     erektionViolations: sb.erektionViolations.map((v) => ({
       time: v.startTime ? fmt(v.startTime) : null,

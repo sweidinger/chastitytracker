@@ -20,6 +20,7 @@ export type OffenseCanonicalType =
   | "cleaning_limit"
   | "wrong_device"
   | "missed_orgasm"
+  | "missed_session"
   | "erektion";
 
 const STORED_TYPE: Record<OffenseCanonicalType, string> = {
@@ -29,6 +30,7 @@ const STORED_TYPE: Record<OffenseCanonicalType, string> = {
   cleaning_limit: "REINIGUNG_LIMIT",
   wrong_device: "FALSCHES_GERAET",
   missed_orgasm: "ORGASMUS_ANWEISUNG",
+  missed_session: "SESSION_VERSAEUMT",
   erektion: "EREKTION",
 };
 
@@ -52,6 +54,7 @@ export function collectDetectedOffenses(sb: StrafbuchData): DetectedOffense[] {
     ...sb.wrongDeviceViolations.map((v) => mk("wrong_device", v.entryId, v.startTime)),
     ...sb.erektionViolations.map((v) => mk("erektion", v.entryId, v.startTime)),
     ...sb.missedOrgasmInstructions.map((m) => mk("missed_orgasm", m.id, m.endetAt)),
+    ...sb.missedSessions.map((m) => mk("missed_session", m.id, m.endetAt)),
   ];
 }
 
