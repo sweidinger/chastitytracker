@@ -1,5 +1,13 @@
 [
   {
+    "version": "4.70.0",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "ui", "text": "Einstellungen: Reinigung + Toilette für den Käfig sind jetzt in einer gemeinsamen Box zusammengefasst (analog zur Plug-Box)." },
+      { "type": "feat", "text": "Plug-Reinigung: tägliche Zeitfenster konfigurierbar (wie beim Käfig). Sind Fenster gesetzt, ist eine Plug-Reinigungspause nur innerhalb dieser Fenster möglich." }
+    ]
+  },
+  {
     "version": "4.69.1",
     "date": "2026-07-08",
     "changes": [

@@ -96,34 +96,39 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
         </SettingsSection>
       )}
 
-      {/* Reinigung */}
-      <SettingsSection title={t("sectionReinigung")} description={t("sectionReinigungDesc")} bodyPadded>
-        <ReinigungToggle
-          userId={user.id}
-          initialErlaubt={user.reinigungErlaubt}
-          initialMaxMinuten={user.reinigungMaxMinuten}
-          initialMaxProTag={user.reinigungMaxProTag}
-          initialFenster={parseReinigungsFenster(user.reinigungsFenster)}
-        />
+      {/* Käfig — Reinigung + Toilette in einer Box */}
+      <SettingsSection title={t("sectionCage")} description={t("sectionCageDesc")} bodyPadded>
+        <div className="flex flex-col gap-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-foreground-faint mb-2">{t("sectionReinigung")}</p>
+            <ReinigungToggle
+              userId={user.id}
+              initialErlaubt={user.reinigungErlaubt}
+              initialMaxMinuten={user.reinigungMaxMinuten}
+              initialMaxProTag={user.reinigungMaxProTag}
+              initialFenster={parseReinigungsFenster(user.reinigungsFenster)}
+            />
+          </div>
+          <div className="border-t border-border-subtle pt-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-foreground-faint mb-2">{t("sectionToilette")}</p>
+            <ToiletteToggle
+              userId={user.id}
+              initialErlaubt={user.toiletteErlaubt}
+              initialMaxMinuten={user.toiletteMaxMinuten}
+              initialMaxProTag={user.toiletteMaxProTag}
+            />
+          </div>
+        </div>
       </SettingsSection>
 
-      {/* Toilette */}
-      <SettingsSection title={t("sectionToilette")} description={t("sectionToiletteDesc")} bodyPadded>
-        <ToiletteToggle
-          userId={user.id}
-          initialErlaubt={user.toiletteErlaubt}
-          initialMaxMinuten={user.toiletteMaxMinuten}
-          initialMaxProTag={user.toiletteMaxProTag}
-        />
-      </SettingsSection>
-
-      {/* Anal-Plug */}
+      {/* Anal-Plug — Reinigung + Toilette */}
       <SettingsSection title={t("sectionPlug")} description={t("sectionPlugDesc")} bodyPadded>
         <PlugToggle
           userId={user.id}
           initialReinigungErlaubt={user.plugReinigungErlaubt}
           initialReinigungMaxMinuten={user.plugReinigungMaxMinuten}
           initialReinigungMaxProTag={user.plugReinigungMaxProTag}
+          initialReinigungsFenster={parseReinigungsFenster(user.plugReinigungsFenster)}
           initialToiletteMaxMinuten={user.plugToiletteMaxMinuten}
         />
       </SettingsSection>
