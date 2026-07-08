@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Lock, LockOpen } from "lucide-react";
+import { Lock } from "lucide-react";
 import { useTranslations } from "next-intl";
-import TimerDisplay from "@/app/components/TimerDisplay";
 import EmptyState from "@/app/components/EmptyState";
 import KontrolleBanner from "@/app/components/KontrolleBanner";
 import LockRequestBanner from "@/app/components/LockRequestBanner";
@@ -115,7 +114,6 @@ export default function DashboardClient(props: DashboardProps) {
   } = props;
 
   const isLocked = currentStatus?.type === "VERSCHLUSS";
-  const isOpen = !isLocked;
 
   const tagH = useLiveHours(baseTagH, serverNow, isLocked);
   const wocheH = useLiveHours(baseWocheH, serverNow, isLocked);
@@ -187,31 +185,7 @@ export default function DashboardClient(props: DashboardProps) {
   return (
     <main className="flex-1 w-full max-w-2xl mx-auto px-4 py-6 flex flex-col gap-5">
 
-      {/* ── Status Hero (only when OPEN — when locked, LaufendeSessionCard handles this) ── */}
-      {isOpen && (
-        <div className="rounded-2xl overflow-hidden border border-unlock-border">
-          <div className="px-5 py-4 text-white bg-gradient-to-br from-sky-600 to-sky-500">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0 bg-white/10">
-                <LockOpen size={28} strokeWidth={2} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-widest opacity-60">
-                  {t("openSince")}
-                </p>
-                {currentStatus && (
-                  <TimerDisplay
-                    targetDate={currentStatus.since}
-                    mode="countup"
-                    format="long"
-                    className="!text-white text-2xl font-bold"
-                  />
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Status-Hero (offener Zustand) wird jetzt oben in page.tsx gerendert. */}
 
       {/* ── Alert Banners ── */}
       {offeneKontrollen.map((k) => (

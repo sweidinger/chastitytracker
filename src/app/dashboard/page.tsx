@@ -28,7 +28,9 @@ import WearSessionList from "./WearSessionList";
 import ActiveWearSessions from "./ActiveWearSessions";
 import CategoriesPromoCard from "./CategoriesPromoCard";
 import CategoryGoalsToday from "./CategoryGoalsToday";
-import InactiveCategories from "./InactiveCategories";
+import CategoryGoalsLive from "./CategoryGoalsLive";
+import TimerDisplay from "@/app/components/TimerDisplay";
+import { LockOpen } from "lucide-react";
 import TagesformWidget from "@/app/components/TagesformWidget";
 
 export default async function DashboardPage() {
@@ -123,6 +125,23 @@ export default async function DashboardPage() {
     : [];
 
   const { tagH, wocheH, monatH, jahrH } = calculateWearingHoursByRange(entries, now, reinigung);
+
+  // Cage offen → separate Trainingsvorgabe-Box (gleicher Stil wie Kategorie-Ziele), nur im offenen Zustand.
+  const cageOpen = currentStatus?.type === "OEFFNEN";
+  const cageProrated = activeVorgabe ? proratedVorgabeTargets(activeVorgabe, now, tz) : null;
+  const cageHasGoal = !!cageProrated && (cageProrated.minProTagH != null || cageProrated.minProWocheH != null || cageProrated.minProMonatH != null || cageProrated.minProJahrH != null);
+  const cageGoalRow = (cageOpen && cageHasGoal && cageProrated) ? {
+    categoryId: "kg",
+    name: t("deviceLabelCage"),
+    color: "cat-steel",
+    icon: "Lock",
+    tagH, wocheH, monatH, jahrH,
+    goalDayH: cageProrated.minProTagH,
+    goalWeekH: cageProrated.minProWocheH,
+    goalMonthH: cageProrated.minProMonatH,
+    goalYearH: cageProrated.minProJahrH,
+    active: false,
+  } : null;
 
   const wearSessionRows = buildWearSessionRows(allNonKgCategories, entries, now, dl);
 
@@ -236,6 +255,28 @@ export default async function DashboardPage() {
       <div className="w-full max-w-2xl mx-auto px-4 pt-6">
         <h1 className="text-xl font-bold text-foreground">{t("userTitle", { name: username })}</h1>
       </div>
+      {cageOpen && currentStatus && (
+        <div className="w-full max-w-2xl mx-auto px-4 pt-4">
+          <div className="rounded-2xl overflow-hidden border border-unlock-border">
+            <div className="px-5 py-4 text-white bg-gradient-to-br from-sky-600 to-sky-500">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0 bg-white/10">
+                  <LockOpen size={28} strokeWidth={2} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-widest opacity-60">
+                    {t("openSince")} · {t("deviceLabelCage")}
+                  </p>
+                  <TimerDisplay targetDate={currentStatus.since} mode="countup" format="long" className="!text-white text-2xl font-bold" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {cageGoalRow && (
+        <CategoryGoalsLive rows={[cageGoalRow]} serverNow={now.toISOString()} />
+      )}
       {activePair && rawSessionEvents.length > 0 && (
         <div className="w-full max-w-2xl mx-auto px-4 pt-6 pb-2">
           <LaufendeSessionCard
@@ -321,31 +362,6 @@ export default async function DashboardPage() {
       />
       {flagOn && <CategoriesPromoCard show={allNonKgCategories.length === 0} />}
       {flagOn && <CategoryGoalsToday userId={userId} activeWearSessions={wearSessions} />}
-      <InactiveCategories
-        categories={[
-          ...allNonKgCategories
-            .filter((c) => !wearSessions.some((s) => s.categoryId === c.id))
-            .map((c) => {
-              const wearPairs = buildWearPairs(entries, now, { types: WEAR_PAIR, categoryId: c.id });
-              const completedPairs = wearPairs.filter(p => p.end.getTime() !== now.getTime());
-              const lastEnd = completedPairs.at(-1)?.end ?? null;
-              return { ...c, notWornSinceMs: lastEnd ? now.getTime() - lastEnd.getTime() : null };
-            }),
-          ...allSessionCategories
-            .filter((c) => !activeSessionSessions.some((s) => s.categoryId === c.id))
-            .map((c) => {
-              // Find last SESSION_END for this category to compute pause duration
-              const lastSessionEnd = entries
-                .filter(e => e.type === "SESSION_END" && e.device?.categoryId === c.id)
-                .sort((a, b) => b.startTime.getTime() - a.startTime.getTime())[0] ?? null;
-              return {
-                ...c,
-                notWornSinceMs: lastSessionEnd ? now.getTime() - lastSessionEnd.startTime.getTime() : null,
-                isSessionCategory: true as const,
-              };
-            }),
-        ]}
-      />
       <div className="w-full max-w-2xl mx-auto px-4 pb-2">
         <TagesformWidget />
       </div>
