@@ -28,6 +28,8 @@ export interface SessionEventData {
   kombiniertePillCls: string | null;
   orgasmusArt: string | null;
   pauseDurationStr?: string | null;
+  /** Überschreibt das "reinigung"-Pill-Label (z.B. „Toilette" bei einer Plug-Toilettenpause). */
+  reinigungPillLabel?: string | null;
   timeCorrected?: boolean;
   timeCorrectedSystemStr?: string | null;
   /** VERSCHLUSS only: the device worn (null = none selected). */
@@ -98,7 +100,7 @@ export default function SessionEventRow({ ev, icon }: { ev: SessionEventData; ic
   if (ev.type === "reinigung") {
     const reinigungPill = (
       <span className="inline-flex items-center gap-1 text-xs font-semibold text-sky-600 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-full">
-        <LockOpen size={10} />{t("sessionReinigung")}
+        <LockOpen size={10} />{ev.reinigungPillLabel ?? t("sessionReinigung")}
       </span>
     );
 

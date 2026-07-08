@@ -1,5 +1,12 @@
 [
   {
+    "version": "4.66.0",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "ui", "text": "Aktive Plug-Session wird jetzt als große Karte dargestellt (wie die KG-Session): Header in Kategorie-Farbe mit Icon, Gerätename, großem Live-Timer + Pause, Ziel-Fortschritt und Event-Timeline (Pausen mit Grund + Kontrollen mit denselben Status-Pills wie bei KG)." }
+    ]
+  },
+  {
     "version": "4.65.0",
     "date": "2026-07-08",
     "changes": [

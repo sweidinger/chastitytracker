@@ -17,6 +17,8 @@ export interface SessionEvent {
   orgasmusArt?: string | null;
   pauseDurationStr?: string | null;
   submittedAt?: Date | null;
+  /** Für "reinigung"-Events (Plug-Pausen): der konkrete Grund (REINIGUNG/TOILETTE) für ein korrektes Pill-Label. */
+  reinigungGrund?: string | null;
 }
 
 type ActivePair = {
@@ -89,4 +91,59 @@ export function buildSessionEvents(
       pauseDurationStr: formatDuration(intr.oeffnen.startTime, intr.verschluss.startTime, dl),
     })),
   ].sort((a, b) => a.time.getTime() - b.time.getTime());
+}
+
+type PlugPauseIn = { type: string; startTime: Date; imageUrl: string | null; note: string | null; oeffnenGrund: string | null };
+type PlugKontrolleIn = {
+  entryId: string | null; time: Date; imageUrl: string | null; note: string | null; deadline: Date | null;
+  kommentar: string | null; code: string | null; anforderungStatus: string | null; verifikationStatus: string | null; submittedAt: Date | null;
+};
+
+/** Baut die SessionEvent-Liste für die aktive PLUG-Session: abgeschlossene Pausen (Reinigung/Toilette,
+ *  als "reinigung"-Events mit korrektem Grund-Label) + PLUG-Kontrollen (gleiche Pills wie KG). */
+export function buildPlugSessionEvents(
+  sessionStart: Date,
+  plugPauses: PlugPauseIn[],
+  plugKontrollen: PlugKontrolleIn[],
+  dl: string,
+): SessionEvent[] {
+  const events: SessionEvent[] = [];
+  const sorted = plugPauses
+    .filter((p) => p.startTime >= sessionStart)
+    .slice()
+    .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+  let openBegin: PlugPauseIn | null = null;
+  for (const p of sorted) {
+    if (p.type === "PAUSE_BEGIN") openBegin = p;
+    else if (p.type === "PAUSE_END" && openBegin) {
+      events.push({
+        type: "reinigung" as const,
+        time: openBegin.startTime,
+        imageUrl: p.imageUrl ?? openBegin.imageUrl,
+        imageExifTime: null,
+        note: openBegin.note ?? p.note,
+        entryId: null,
+        pauseDurationStr: formatDuration(p.startTime, openBegin.startTime, dl),
+        reinigungGrund: openBegin.oeffnenGrund,
+      });
+      openBegin = null;
+    }
+  }
+  for (const k of plugKontrollen.filter((k) => k.entryId !== null && k.time >= sessionStart)) {
+    events.push({
+      type: "kontrolle" as const,
+      time: k.time,
+      imageUrl: k.imageUrl,
+      imageExifTime: null,
+      note: k.note,
+      entryId: k.entryId,
+      deadline: k.deadline,
+      kontrolleKommentar: k.kommentar,
+      kontrolleCode: k.code,
+      kontrolleAnforderungStatus: k.anforderungStatus,
+      kontrolleVerifikationStatus: k.verifikationStatus,
+      submittedAt: k.submittedAt,
+    });
+  }
+  return events.sort((a, b) => a.time.getTime() - b.time.getTime());
 }
