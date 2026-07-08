@@ -5,6 +5,9 @@ import type { PrismaTx } from "@/lib/queries";
  *  validation, and admin UI to identify "the KG category" reliably regardless of name. */
 export const KG_BUILTIN_SLUG = "kg";
 
+/** Stable slug for the built-in Anal-Plug category. */
+export const PLUG_BUILTIN_SLUG = "plug";
+
 /** Default visual identity for the built-in KG category (per UI Designer spec). */
 const KG_BUILTIN_COLOR = "cat-steel";
 const KG_BUILTIN_ICON = "Lock";
@@ -33,6 +36,35 @@ export async function ensureKgCategory(userId: string, tx?: PrismaTx): Promise<v
       isBuiltIn: true,
       trackingEnabled: true,
       sortOrder: 0,
+    },
+  });
+}
+
+/** Builds the deterministic ID used for Anal-Plug built-in categories. */
+export function plugCategoryId(userId: string): string {
+  return `plugcat_${userId}`;
+}
+
+const PLUG_BUILTIN_COLOR = "cat-plum";
+const PLUG_BUILTIN_ICON = "Anchor";
+
+/** Idempotently creates the user's Anal-Plug built-in category if missing.
+ *  Mirrors ensureKgCategory — call alongside it from every user-creation path. */
+export async function ensurePlugCategory(userId: string, tx?: PrismaTx): Promise<void> {
+  const client = tx ?? prisma;
+  await client.deviceCategory.upsert({
+    where: { id: plugCategoryId(userId) },
+    update: {},
+    create: {
+      id: plugCategoryId(userId),
+      userId,
+      name: "Anal-Plug",
+      slug: PLUG_BUILTIN_SLUG,
+      color: PLUG_BUILTIN_COLOR,
+      icon: PLUG_BUILTIN_ICON,
+      isBuiltIn: true,
+      trackingEnabled: true,
+      sortOrder: 1,
     },
   });
 }

@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Lock, LockOpen, ClipboardCheck, Droplets, Bell, ChevronRight } from "lucide-react";
+import { Lock, LockOpen, ClipboardCheck, Droplets, Bell, ChevronRight, Anchor, PlayCircle } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { assertKeyholderOrAdmin } from "@/lib/authGuards";
-import { getIsLocked, getActiveSperrzeit, getActiveWearSessions } from "@/lib/queries";
+import { getIsLocked, getActiveSperrzeit, getActiveWearSessions, getActivePlugAnforderung, getActivePlugSperrzeit } from "@/lib/queries";
 import { deviceCategoriesEnabled } from "@/lib/constants";
 import { categoryStyle } from "@/lib/categoryConstants";
+import { plugCategoryId } from "@/lib/deviceCategories";
 import CategoryIconRender from "@/app/components/CategoryIcon";
 import { getTranslations } from "next-intl/server";
 
@@ -21,27 +22,50 @@ export default async function AktionenPage({ params }: { params: Promise<{ id: s
   if (!user) redirect("/admin");
 
   const flagOn = deviceCategoriesEnabled();
-  const [isLocked, offeneAnforderung, activeSperrzeit, categories, activeWear] = await Promise.all([
+  const plugCatId = plugCategoryId(id);
+  const [isLocked, latestKgEntry, offeneAnforderung, activeSperrzeit, categories, activeWear, offenePlugAnforderung, activePlugSperrzeit, sessionCategories] = await Promise.all([
     getIsLocked(id),
+    prisma.entry.findFirst({
+      where: { userId: id, type: { in: ["VERSCHLUSS", "OEFFNEN"] } },
+      orderBy: { startTime: "desc" },
+      select: { type: true, kontrollCode: true },
+    }),
     prisma.verschlussAnforderung.findFirst({
-      where: { userId: id, art: "ANFORDERUNG", fulfilledAt: null, withdrawnAt: null },
+      where: { userId: id, art: "ANFORDERUNG", deviceCategoryId: null, fulfilledAt: null, withdrawnAt: null },
     }),
     getActiveSperrzeit(id),
     flagOn
       ? prisma.deviceCategory.findMany({
-          where: { userId: id, isBuiltIn: false },
+          where: { userId: id, slug: { not: "kg" }, trackingEnabled: true },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-          select: { id: true, name: true, color: true, icon: true },
+          select: { id: true, name: true, color: true, icon: true, slug: true },
         })
       : Promise.resolve([]),
     flagOn ? getActiveWearSessions(id) : Promise.resolve([]),
+    flagOn ? getActivePlugAnforderung(id, plugCatId) : Promise.resolve(null),
+    flagOn ? getActivePlugSperrzeit(id, plugCatId) : Promise.resolve(null),
+    flagOn
+      ? prisma.deviceCategory.findMany({
+          where: { userId: id, isSessionCategory: true },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          select: { id: true, name: true },
+        })
+      : Promise.resolve([]),
   ]);
+  type CategoryRow = { id: string; name: string; color: string | null; icon: string | null; slug: string };
   const activeByCategory = new Map(activeWear.map((s) => [s.categoryId, s]));
 
   const hasEmail = !!user.email;
   const hasOffeneAnforderung = !!offeneAnforderung;
   const hasActiveSperrzeit = !!activeSperrzeit;
+  const hasPlug = (categories as CategoryRow[]).some((c) => c.slug === "plug");
+  const hasSessionCategories = sessionCategories.length > 0;
+  const plugActiveSession = activeByCategory.get(plugCatId);
+  const isWearingPlug = !!plugActiveSession;
+  const hasOffenePlugAnforderung = !!offenePlugAnforderung;
+  const hasActivePlugSperrzeit = !!activePlugSperrzeit;
 
+  // Kontrolle erlaubt wenn KG verschlossen (mit oder ohne Code; requireCode wählbar im Formular)
   const canKontrolle = hasEmail && isLocked;
 
   return (
@@ -54,7 +78,7 @@ export default async function AktionenPage({ params }: { params: Promise<{ id: s
           {/* Kontrolle anfordern */}
           {canKontrolle ? (
             <Link
-              href={`/admin/users/${id}/aktionen/kontrolle`}
+              href={`/admin/users/${id}/aktionen/kontrolle${hasPlug ? "?plug=1" : ""}`}
               className="flex items-center gap-4 px-5 py-4 rounded-t-2xl hover:bg-surface-raised transition active:scale-[0.98]"
             >
               <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "var(--color-inspect-bg)" }}>
@@ -148,10 +172,27 @@ export default async function AktionenPage({ params }: { params: Promise<{ id: s
             </div>
           )}
 
+          {/* Session anfordern */}
+          {hasSessionCategories && (
+            <Link
+              href={`/admin/users/${id}/aktionen/session-anforderung`}
+              className="flex items-center gap-4 px-5 py-4 hover:bg-surface-raised transition active:scale-[0.98]"
+            >
+              <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "var(--color-request-bg)" }}>
+                <PlayCircle size={20} strokeWidth={2} style={{ color: "var(--color-request)" }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground">{t("requestSession")}</p>
+                <p className="text-xs text-foreground-faint">{t("requestSessionHint")}</p>
+              </div>
+              <ChevronRight size={16} className="text-foreground-faint flex-shrink-0" />
+            </Link>
+          )}
+
           {/* Orgasmus anfordern */}
           <Link
             href={`/admin/users/${id}/aktionen/orgasmus-anforderung`}
-            className="flex items-center gap-4 px-5 py-4 rounded-b-2xl hover:bg-surface-raised transition active:scale-[0.98]"
+            className={`flex items-center gap-4 px-5 py-4 ${!hasPlug ? "rounded-b-2xl" : ""} hover:bg-surface-raised transition active:scale-[0.98]`}
           >
             <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "var(--color-orgasm-bg)" }}>
               <Droplets size={20} strokeWidth={2} style={{ color: "var(--color-orgasm)" }} />
@@ -162,6 +203,70 @@ export default async function AktionenPage({ params }: { params: Promise<{ id: s
             </div>
             <ChevronRight size={16} className="text-foreground-faint flex-shrink-0" />
           </Link>
+
+          {/* Plug tragen anfordern (nur wenn Plug vorhanden) */}
+          {hasPlug && !isWearingPlug && !hasOffenePlugAnforderung && (
+            <Link
+              href={`/admin/users/${id}/aktionen/plug-anforderung`}
+              className="flex items-center gap-4 px-5 py-4 rounded-b-2xl hover:bg-surface-raised transition active:scale-[0.98]"
+            >
+              <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "var(--color-request-bg)" }}>
+                <Anchor size={20} strokeWidth={2} style={{ color: "var(--color-request)" }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground">{t("requestWearPlug")}</p>
+                <p className="text-xs text-foreground-faint">{t("requestWearPlugHint")}</p>
+              </div>
+              <ChevronRight size={16} className="text-foreground-faint flex-shrink-0" />
+            </Link>
+          )}
+
+          {/* Plug Sperrdauer setzen (wenn Plug getragen wird) */}
+          {hasPlug && isWearingPlug && !hasActivePlugSperrzeit && (
+            <Link
+              href={`/admin/users/${id}/aktionen/plug-anforderung`}
+              className="flex items-center gap-4 px-5 py-4 rounded-b-2xl hover:bg-surface-raised transition active:scale-[0.98]"
+            >
+              <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "var(--color-sperrzeit-bg)" }}>
+                <Anchor size={20} strokeWidth={2} style={{ color: "var(--color-sperrzeit)" }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground">{t("setPlugWearDuration")}</p>
+                <p className="text-xs text-foreground-faint">{t("setPlugWearDurationHint")}</p>
+              </div>
+              <ChevronRight size={16} className="text-foreground-faint flex-shrink-0" />
+            </Link>
+          )}
+
+          {/* Plug Sperrdauer bearbeiten (aktive Sperrdauer vorhanden) */}
+          {hasPlug && isWearingPlug && hasActivePlugSperrzeit && (
+            <Link
+              href={`/admin/users/${id}/aktionen/plug-anforderung`}
+              className="flex items-center gap-4 px-5 py-4 rounded-b-2xl hover:bg-surface-raised transition active:scale-[0.98]"
+            >
+              <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "var(--color-sperrzeit-bg)" }}>
+                <Anchor size={20} strokeWidth={2} style={{ color: "var(--color-sperrzeit)" }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground">{t("editPlugWearDuration")}</p>
+                <p className="text-xs text-foreground-faint">{t("editPlugWearDurationHint")}</p>
+              </div>
+              <ChevronRight size={16} className="text-foreground-faint flex-shrink-0" />
+            </Link>
+          )}
+
+          {/* Disabled: Plug getragen, aber offene Anforderung */}
+          {hasPlug && hasOffenePlugAnforderung && !isWearingPlug && (
+            <div className="flex items-center gap-4 px-5 py-4 rounded-b-2xl opacity-40 cursor-not-allowed">
+              <div className="w-10 h-10 rounded-2xl flex items-center justify-center bg-surface-raised flex-shrink-0">
+                <Anchor size={20} strokeWidth={2} className="text-foreground-faint" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground-muted">{t("requestWearPlug")}</p>
+                <p className="text-xs text-foreground-faint">{t("plugAlreadyHasAnforderung")}</p>
+              </div>
+            </div>
+          )}
 
         </div>
       </div>
@@ -256,14 +361,14 @@ export default async function AktionenPage({ params }: { params: Promise<{ id: s
           </Link>
 
           {/* Per-Category wear actions */}
-          {categories.map((c, i) => {
+          {(categories as CategoryRow[]).map((c, i) => {
             const active = activeByCategory.get(c.id);
             const isLast = i === categories.length - 1;
             const href = active
               ? `/admin/users/${id}/aktionen/wear-end?category=${c.id}`
               : `/admin/users/${id}/aktionen/wear-begin?category=${c.id}`;
             const subLabel = active ? `${tw("endShort")} · ${active.deviceName}` : tw("titleBegin");
-            const style = categoryStyle(c.color);
+            const style = categoryStyle(c.color ?? "#6366f1");
             return (
               <Link
                 key={c.id}
@@ -274,7 +379,7 @@ export default async function AktionenPage({ params }: { params: Promise<{ id: s
                   className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0"
                   style={{ backgroundColor: style.backgroundColor, color: style.color }}
                 >
-                  <CategoryIconRender name={c.icon} className="size-5" />
+                  <CategoryIconRender name={c.icon ?? ""} className="size-5" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-foreground">{c.name}</p>

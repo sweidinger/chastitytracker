@@ -1,6 +1,7 @@
 import { Lock, Droplets } from "lucide-react";
 import { APP_TZ, formatDayTimeDual } from "@/lib/utils";
 import type { ComponentType, ReactNode } from "react";
+import Link from "next/link";
 import SperrzeitRemaining from "./SperrzeitRemaining";
 
 type ColorScheme = "request" | "sperrzeit" | "orgasm";
@@ -70,6 +71,8 @@ interface LargeProps {
   nachricht?: string | null;
   /** Pre-formatted date string for endetAt display */
   endetAtLabel?: string | null;
+  /** Optional action button rendered below the banner content */
+  action?: { label: string; href: string };
 }
 
 type Props = CompactProps | LargeProps;
@@ -102,7 +105,7 @@ export default function LockRequestBanner(props: Props) {
   }
 
   // Large variant (dashboard)
-  const { colorScheme, label, nachricht, endetAtLabel } = props;
+  const { colorScheme, label, nachricht, endetAtLabel, action } = props;
   const c = COLORS[colorScheme];
   const Icon = SCHEME_ICON[colorScheme];
 
@@ -114,6 +117,14 @@ export default function LockRequestBanner(props: Props) {
       </div>
       {nachricht && <p className={`text-sm ${c.accent}`}>{nachricht}</p>}
       {endetAtLabel && <p className={`text-xs ${c.accent}`}>{endetAtLabel}</p>}
+      {action && (
+        <Link
+          href={action.href}
+          className={`mt-1 self-start text-xs font-semibold px-3 py-1.5 rounded-lg border ${c.border} ${c.accent} hover:opacity-80 transition-opacity`}
+        >
+          {action.label} →
+        </Link>
+      )}
     </div>
   );
 }

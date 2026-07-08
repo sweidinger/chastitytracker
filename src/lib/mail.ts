@@ -15,12 +15,20 @@ const transporter = nodemailer.createTransport({
 });
 
 export async function sendMail(to: string, subject: string, html: string) {
-  await transporter.sendMail({
-    from: process.env.SMTP_FROM,
-    to,
-    subject,
-    html,
-  });
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+    console.log(`[mail] SMTP not configured, skipping mail to ${to}: ${subject}`);
+    return;
+  }
+  try {
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM,
+      to,
+      subject,
+      html,
+    });
+  } catch (err) {
+    console.error(`[mail] Failed to send mail to ${to} ("${subject}"):`, err);
+  }
 }
 
 /** Standard-E-Mail-Layout mit „Zum Dashboard"-Button. Geteilt von allen Benachrichtigungen. */

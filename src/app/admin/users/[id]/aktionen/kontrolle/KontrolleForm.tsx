@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import ActionModal from "@/app/components/ActionModal";
 import KontrolleFields from "@/app/admin/kontrolle/KontrolleFields";
 
-export default function KontrolleForm({ userId }: { userId: string }) {
+export default function KontrolleForm({ userId, hasPlug }: { userId: string; hasPlug?: boolean }) {
   const t = useTranslations("admin");
   const router = useRouter();
   const close = () => router.push(`/admin/users/${userId}/aktionen`);
@@ -19,7 +19,7 @@ export default function KontrolleForm({ userId }: { userId: string }) {
       icon={<Bell size={20} strokeWidth={2} style={{ color: "var(--color-inspect)" }} />}
       iconBg="var(--color-inspect-bg)"
     >
-      <KontrolleFields userId={userId} onSuccess={close} />
+      <KontrolleFields userId={userId} hasPlug={hasPlug} onSuccess={close} />
     </ActionModal>
   );
 }

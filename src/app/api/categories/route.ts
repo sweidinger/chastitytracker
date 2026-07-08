@@ -58,6 +58,10 @@ export async function GET(req: NextRequest) {
       trackingEnabled: true,
       requirePhoto: true,
       allowVorgaben: true,
+      isSessionCategory: true,
+      maxSessionMinutes: true,
+      requiresVideo: true,
+      orgasmusZiel: true,
       sortOrder: true,
       createdAt: true,
       _count: { select: { devices: true, vorgaben: true } },
@@ -75,6 +79,10 @@ export async function GET(req: NextRequest) {
       trackingEnabled: c.trackingEnabled,
       requirePhoto: c.requirePhoto,
       allowVorgaben: c.allowVorgaben,
+      isSessionCategory: c.isSessionCategory,
+      maxSessionMinutes: c.maxSessionMinutes,
+      requiresVideo: c.requiresVideo,
+      orgasmusZiel: c.orgasmusZiel,
       sortOrder: c.sortOrder,
       createdAt: c.createdAt.toISOString(),
       deviceCount: c._count.devices,
@@ -92,7 +100,8 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { name, color, icon, sortOrder, trackingEnabled, requirePhoto, allowVorgaben } = body;
+  const { name, color, icon, sortOrder, trackingEnabled, requirePhoto, allowVorgaben,
+          isSessionCategory, maxSessionMinutes, requiresVideo, orgasmusZiel } = body;
 
   let userId = session.user.id;
   if (body.userId && body.userId !== session.user.id) {
@@ -111,6 +120,8 @@ export async function POST(req: NextRequest) {
   const slugError = validateCategoryInput({ slug });
   if (slugError) return NextResponse.json({ error: slugError.error }, { status: 400 });
 
+  const isSession = typeof isSessionCategory === "boolean" ? isSessionCategory : false;
+
   const created = await prisma.deviceCategory.create({
     data: {
       userId,
@@ -119,9 +130,14 @@ export async function POST(req: NextRequest) {
       color: (color as string | undefined) ?? DEFAULT_USER_CATEGORY_COLOR,
       icon: (icon as string | undefined) ?? DEFAULT_USER_CATEGORY_ICON,
       isBuiltIn: false,
-      trackingEnabled: typeof trackingEnabled === "boolean" ? trackingEnabled : true,
-      requirePhoto: typeof requirePhoto === "boolean" ? requirePhoto : false,
+      // Session-Kategorien tracken keine Tragezeiten; trackingEnabled irrelevant, wird false gesetzt
+      trackingEnabled: isSession ? false : (typeof trackingEnabled === "boolean" ? trackingEnabled : true),
+      requirePhoto: isSession ? false : (typeof requirePhoto === "boolean" ? requirePhoto : false),
       allowVorgaben: typeof allowVorgaben === "boolean" ? allowVorgaben : true,
+      isSessionCategory: isSession,
+      maxSessionMinutes: typeof maxSessionMinutes === "number" ? Math.max(1, Math.min(120, maxSessionMinutes)) : 30,
+      requiresVideo: typeof requiresVideo === "boolean" ? requiresVideo : false,
+      orgasmusZiel: isSession && typeof orgasmusZiel === "string" && ["KEINE","ERFORDERLICH","VERBOTEN"].includes(orgasmusZiel) ? orgasmusZiel : "KEINE",
       sortOrder: typeof sortOrder === "number" ? sortOrder : 0,
     },
   });

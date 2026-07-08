@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, ClipboardList, Plus, BarChart2 } from "lucide-react";
+import { Home, ClipboardList, Plus, BarChart2, Bot } from "lucide-react";
 import { useTranslations } from "next-intl";
 import ViewTransitionLink from "@/app/components/ViewTransitionLink";
 import UpdateAvailableIndicator from "@/app/components/UpdateAvailableIndicator";
@@ -15,9 +15,10 @@ interface BottomNavProps {
   isLocked?: boolean;
   onNewEntry?: () => void;
   version?: string;
+  aiKeyholderEnabled?: boolean;
 }
 
-export default function BottomNav({ isAdmin, isKeyholder, onNewEntry, version }: BottomNavProps) {
+export default function BottomNav({ isAdmin, isKeyholder, onNewEntry, version, aiKeyholderEnabled }: BottomNavProps) {
   const t = useTranslations("nav");
   const pathname = usePathname();
 
@@ -26,6 +27,7 @@ export default function BottomNav({ isAdmin, isKeyholder, onNewEntry, version }:
     { href: "/dashboard/eintraege", icon: ClipboardList, label: t("entries"), exact: false },
     { href: "#new", icon: Plus, label: t("new"), action: true },
     { href: "/dashboard/stats", icon: BarChart2, label: t("stats"), exact: false },
+    ...(aiKeyholderEnabled ? [{ href: "/dashboard/keyholder", icon: Bot, label: t("aiKeyholder"), exact: false }] : []),
     ...adminNavEntry({ isAdmin, isKeyholder, adminLabel: t("admin"), keyholderLabel: t("keyholder") }),
   ];
 

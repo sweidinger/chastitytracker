@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdminApi } from "@/lib/authGuards";
 import bcrypt from "bcryptjs";
-import { ensureKgCategory } from "@/lib/deviceCategories";
+import { ensureKgCategory, ensurePlugCategory } from "@/lib/deviceCategories";
 import { ensureNotificationPreferences } from "@/lib/notificationPrefs";
 
 export const DEMO_USERNAME = "DemoUser";
@@ -25,6 +25,7 @@ export async function POST() {
     data: { username: DEMO_USERNAME, passwordHash, role: "user" },
   });
   await ensureKgCategory(user.id);
+  await ensurePlugCategory(user.id);
   await ensureNotificationPreferences(user.id);
 
   const now = new Date();

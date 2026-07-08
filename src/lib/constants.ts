@@ -8,11 +8,15 @@ export const LOCALES_LONG = [
   { value: "en", label: "English" },
 ] as const;
 
-export const VALID_TYPES = ["VERSCHLUSS", "OEFFNEN", "PRUEFUNG", "ORGASMUS", "WEAR_BEGIN", "WEAR_END"] as const;
+export const VALID_TYPES = ["VERSCHLUSS", "OEFFNEN", "PRUEFUNG", "ORGASMUS", "WEAR_BEGIN", "WEAR_END", "SESSION_BEGIN", "SESSION_END", "PAUSE_BEGIN", "PAUSE_END"] as const;
 /** Entry types restricted to KG (the built-in DeviceCategory). */
 export const KG_ENTRY_TYPES: ReadonlySet<string> = new Set(["VERSCHLUSS", "OEFFNEN"]);
 /** Entry types for non-KG DeviceCategories (Plug, Collar, ...). Require deviceId. */
 export const WEAR_ENTRY_TYPES: ReadonlySet<string> = new Set(["WEAR_BEGIN", "WEAR_END"]);
+/** Entry types for session categories (Dildo, Vibrator, ...). Require deviceId from a session category. */
+export const SESSION_ENTRY_TYPES: ReadonlySet<string> = new Set(["SESSION_BEGIN", "SESSION_END"]);
+/** Entry types for pause tracking (applies to both KG/Cage and Plug). pauseDevice="CAGE"|"PLUG". */
+export const PAUSE_ENTRY_TYPES: ReadonlySet<string> = new Set(["PAUSE_BEGIN", "PAUSE_END"]);
 /** Feature flag: gate WEAR_BEGIN/WEAR_END entry creation + categories UI.
  *  Default ON. Setze `ENABLE_DEVICE_CATEGORIES=false` um KG-only-Verhalten zu erzwingen
  *  (z.B. fuer eine Instanz die das Feature noch nicht ausrollen will).
@@ -86,12 +90,13 @@ export type OrgasmusAnforderungArt = typeof ORGASMUS_ANFORDERUNG_ARTEN[number];
 export function orgasmusAnforderungArtLabel(art: OrgasmusAnforderungArt, t: (key: string) => string): string {
   return art === "ANWEISUNG" ? t("orgasmReqModeAnweisung") : t("orgasmReqModeGelegenheit");
 }
-export const OEFFNEN_GRUENDE = ["REINIGUNG", "KEYHOLDER", "NOTFALL", "ANDERES"] as const;
+export const OEFFNEN_GRUENDE = ["REINIGUNG", "TOILETTE", "KEYHOLDER", "NOTFALL", "ANDERES"] as const;
 export type OeffnenGrund = typeof OEFFNEN_GRUENDE[number];
 
 /** Maps OEFFNEN_GRUENDE values to openForm i18n keys */
 export const GRUND_I18N_KEYS: Record<typeof OEFFNEN_GRUENDE[number], string> = {
   REINIGUNG: "grundReinigung",
+  TOILETTE: "grundToilette",
   KEYHOLDER: "grundKeyholder",
   NOTFALL: "grundNotfall",
   ANDERES: "grundAnderes",
@@ -230,7 +235,7 @@ export function validateEntryPayload(
   if (!type || !VALID_TYPES.includes(type as (typeof VALID_TYPES)[number])) {
     return { error: "Ungültiger Typ", status: 400 };
   }
-  if (WEAR_ENTRY_TYPES.has(type) && !deviceCategoriesEnabled()) {
+  if ((WEAR_ENTRY_TYPES.has(type) || SESSION_ENTRY_TYPES.has(type)) && !deviceCategoriesEnabled()) {
     return { error: "Device-Kategorien sind nicht aktiviert", status: 400 };
   }
   if (type === "OEFFNEN") {

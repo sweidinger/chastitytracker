@@ -15,18 +15,20 @@ import Textarea from "@/app/components/Textarea";
 import Button from "@/app/components/Button";
 import Card from "@/app/components/Card";
 import Sheet from "@/app/components/Sheet";
-import type { OeffnenPayload, ReinigungConfig, SperrzeitState, SubmitResult } from "./types";
+import type { OeffnenPayload, ReinigungConfig, ToiletteConfig, SperrzeitState, SubmitResult } from "./types";
 
 interface Props {
   initial?: { startTime: string; note?: string | null; oeffnenGrund?: string | null };
   /** Owner-scoped, display-ready opening reasons (built-in defaults when the owner has no custom config).
-   *  REINIGUNG is always present (its code is frozen); only its label may be customized. */
+   *  REINIGUNG + TOILETTE are excluded in create mode (replaced by PAUSE_BEGIN/END flow);
+   *  they remain selectable in edit mode for backward compatibility with existing entries. */
   grundOptions: ResolvedReason[];
   maxTime?: string;
   tz: string;
   nowDefault: string;
   sperrzeit?: SperrzeitState;
   reinigung?: ReinigungConfig;
+  toilette?: ToiletteConfig;
   isEdit?: boolean;
   submitFn: (payload: OeffnenPayload) => Promise<SubmitResult>;
   onSuccess?: () => void;
@@ -37,7 +39,7 @@ interface Props {
 }
 
 export default function OeffnenFormCore({
-  initial, grundOptions, maxTime, tz, nowDefault, sperrzeit, reinigung,
+  initial, grundOptions, maxTime, tz, nowDefault, sperrzeit, reinigung, toilette,
   isEdit = false, submitFn, onSuccess, onCancel, submitVariant = "semantic", submitLabel, defaultGrund,
 }: Props) {
   const t = useTranslations("openForm");
@@ -47,10 +49,15 @@ export default function OeffnenFormCore({
   const sperrzeitEndetAt = sperrzeit?.endetAt ?? null;
   const sperrzeitUnbefristet = sperrzeit?.unbefristet ?? false;
   const sperrzeitReinigungErlaubt = sperrzeit?.reinigungErlaubt ?? false;
+  const sperrzeitToiletteErlaubt = sperrzeit?.toiletteErlaubt ?? false;
   const reinigungErlaubt = reinigung?.erlaubt ?? false;
   const reinigungMaxMinuten = reinigung?.maxMinuten ?? 15;
   const reinigungMaxProTag = reinigung?.maxProTag ?? 0;
   const reinigungHeuteAnzahl = reinigung?.heuteAnzahl ?? 0;
+  const toiletteErlaubt = toilette?.erlaubt ?? false;
+  const toiletteMaxMinuten = toilette?.maxMinuten ?? 15;
+  const toiletteMaxProTag = toilette?.maxProTag ?? 0;
+  const toiletteHeuteAnzahl = toilette?.heuteAnzahl ?? 0;
 
   const [startTime, setStartTime] = useState(toDatetimeLocal(initial?.startTime, tz) || nowDefault);
   const [grund, setGrund] = useState<OeffnenGrund | "">((initial?.oeffnenGrund as OeffnenGrund) ?? defaultGrund ?? "");
@@ -58,14 +65,17 @@ export default function OeffnenFormCore({
   const [showWarning, setShowWarning] = useState(false);
   const [showReinigungLimitWarning, setShowReinigungLimitWarning] = useState(false);
   const [forcedReinigung, setForcedReinigung] = useState(false);
+  const [erektionGemeldet, setErektionGemeldet] = useState(false);
   const { saving, error, setError, submit } = useEntrySubmit<OeffnenPayload>(submitFn, onSuccess);
 
   const isReinigungLimitReached = !initial && reinigungMaxProTag > 0 && grund === "REINIGUNG" && reinigungHeuteAnzahl >= reinigungMaxProTag;
+  const isToiletteLimitReached = !initial && toiletteMaxProTag > 0 && grund === "TOILETTE" && toiletteHeuteAnzahl >= toiletteMaxProTag;
   const isGesperrt = sperrzeitUnbefristet || !!(sperrzeitEndetAt && new Date(sperrzeitEndetAt) > new Date());
-  // Eine REINIGUNG-Öffnung verletzt die Sperre NICHT, wenn sowohl der User als auch DIESE Sperrzeit
-  // Reinigung erlauben (spiegelt die Strafbuch-Regel) — dann keine „Öffnen nicht erlaubt"-Warnung.
+  // REINIGUNG/TOILETTE-Öffnungen verletzen die Sperre NICHT, wenn beide Seiten es erlauben.
   const istErlaubteReinigungsOeffnung = grund === "REINIGUNG" && reinigungErlaubt && sperrzeitReinigungErlaubt;
-  const isGesperrtBlockiert = isGesperrt && !istErlaubteReinigungsOeffnung;
+  const istErlaubteToiletteOeffnung = grund === "TOILETTE" && toiletteErlaubt && sperrzeitToiletteErlaubt;
+  const isGesperrtBlockiert = isGesperrt && !istErlaubteReinigungsOeffnung && !istErlaubteToiletteOeffnung;
+  const showErektionCheckbox = !isEdit && (grund === "REINIGUNG" || grund === "TOILETTE");
 
   async function doSave(forced = false) {
     const payload: OeffnenPayload = {
@@ -75,6 +85,7 @@ export default function OeffnenFormCore({
       note: note.trim() || null,
     };
     if (forced) payload.forcedReinigung = true;
+    if (erektionGemeldet && showErektionCheckbox) payload.erektionGemeldet = true;
     await submit(payload);
   }
 
@@ -82,7 +93,7 @@ export default function OeffnenFormCore({
     e.preventDefault();
     if (!grund) { setError(t("grundRequired")); return; }
     if (!note.trim()) { setError(t("commentRequired")); return; }
-    if (isReinigungLimitReached) { setShowReinigungLimitWarning(true); return; }
+    if (isReinigungLimitReached || isToiletteLimitReached) { setShowReinigungLimitWarning(true); return; }
     if (isGesperrtBlockiert) { setShowWarning(true); return; }
     await doSave();
   }
@@ -94,7 +105,12 @@ export default function OeffnenFormCore({
     else doSave(true);
   }
 
-  const grundSelectOptions = grundOptions.map((r) => ({ value: r.code, label: r.label }));
+  // REINIGUNG + TOILETTE are removed from create-mode (replaced by PAUSE_BEGIN/END flow).
+  // In edit mode they remain selectable for backward compat with existing entries.
+  const HIDDEN_IN_CREATE = new Set(["REINIGUNG", "TOILETTE"]);
+  const grundSelectOptions = grundOptions
+    .filter((r) => isEdit || !HIDDEN_IN_CREATE.has(r.code))
+    .map((r) => ({ value: r.code, label: r.label }));
   // Bestandswert erhalten: ein entfernter/umbenannter Grund (nicht mehr in der Liste) wird als Option
   // ergänzt, damit ein reiner Zeit-Edit nicht an einem fehlenden Match scheitert.
   if (initial?.oeffnenGrund && !grundSelectOptions.some((o) => o.value === initial.oeffnenGrund)) {
@@ -133,14 +149,18 @@ export default function OeffnenFormCore({
             <AlertCircle size={28} className="flex-shrink-0 text-warn mt-0.5" />
             <div className="flex flex-col gap-1.5">
               <p className="font-bold text-foreground text-base leading-snug">
-                {grund === "REINIGUNG" ? t("modalTitleReinigung") : t("modalTitle")}
+                {grund === "REINIGUNG" ? t("modalTitleReinigung") : grund === "TOILETTE" ? t("modalTitleToilette") : t("modalTitle")}
               </p>
               <p className="text-sm text-foreground-muted">
                 {grund === "REINIGUNG" && reinigungErlaubt
                   ? t("modalSubtextReinigung", { minutes: reinigungMaxMinuten })
                   : grund === "REINIGUNG"
                     ? t("reinigungHintNoConfig")
-                    : t("modalSubtext")}
+                    : grund === "TOILETTE" && toiletteErlaubt
+                      ? t("toiletteHint", { minutes: toiletteMaxMinuten })
+                      : grund === "TOILETTE"
+                        ? t("toiletteHintNoConfig")
+                        : t("modalSubtext")}
               </p>
               <p className="text-xs text-sperrzeit font-semibold mt-1">
                 {sperrzeitUnbefristet
@@ -215,6 +235,23 @@ export default function OeffnenFormCore({
           </Card>
         )}
 
+        {grund === "TOILETTE" && (
+          <Card variant="semantic" semantic={isToiletteLimitReached ? "warn" : "inspect"} padding="compact">
+            <div className="flex flex-col gap-1">
+              <p className="text-xs text-inspect-text">
+                {toiletteErlaubt
+                  ? t("toiletteHint", { minutes: toiletteMaxMinuten })
+                  : t("toiletteHintNoConfig")}
+              </p>
+              {toiletteMaxProTag > 0 && (
+                <p className={`text-xs font-semibold ${isToiletteLimitReached ? "text-warn" : "text-inspect-text"}`}>
+                  {t("reinigungLimitHint", { count: toiletteHeuteAnzahl, max: toiletteMaxProTag })}
+                </p>
+              )}
+            </div>
+          </Card>
+        )}
+
         <Textarea
           label={tCommon("comment")}
           value={note}
@@ -223,6 +260,21 @@ export default function OeffnenFormCore({
           required
           placeholder={t("commentPlaceholder")}
         />
+
+        {showErektionCheckbox && (
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={erektionGemeldet}
+              onChange={(e) => setErektionGemeldet(e.target.checked)}
+              className="mt-0.5 w-4 h-4 shrink-0"
+            />
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium text-foreground">{t("erektionLabel")}</span>
+              <span className="text-xs text-foreground-muted">{t("erektionHint")}</span>
+            </div>
+          </label>
+        )}
 
         <FormError message={error} />
 

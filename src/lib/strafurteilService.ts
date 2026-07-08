@@ -19,7 +19,8 @@ export type OffenseCanonicalType =
   | "rejected_control"
   | "cleaning_limit"
   | "wrong_device"
-  | "missed_orgasm";
+  | "missed_orgasm"
+  | "erektion";
 
 const STORED_TYPE: Record<OffenseCanonicalType, string> = {
   unauthorized_opening: "OEFFNEN_ENTRY",
@@ -28,6 +29,7 @@ const STORED_TYPE: Record<OffenseCanonicalType, string> = {
   cleaning_limit: "REINIGUNG_LIMIT",
   wrong_device: "FALSCHES_GERAET",
   missed_orgasm: "ORGASMUS_ANWEISUNG",
+  erektion: "EREKTION",
 };
 
 export interface DetectedOffense {
@@ -48,6 +50,7 @@ export function collectDetectedOffenses(sb: StrafbuchData): DetectedOffense[] {
     ...sb.rejectedControls.map((k) => mk("rejected_control", k.id, k.entryStartTime ?? k.deadline)),
     ...sb.reinigungLimitViolations.map((v) => mk("cleaning_limit", v.entryId, v.startTime)),
     ...sb.wrongDeviceViolations.map((v) => mk("wrong_device", v.entryId, v.startTime)),
+    ...sb.erektionViolations.map((v) => mk("erektion", v.entryId, v.startTime)),
     ...sb.missedOrgasmInstructions.map((m) => mk("missed_orgasm", m.id, m.endetAt)),
   ];
 }

@@ -32,6 +32,10 @@ export interface CategoryRow {
   weeklyHours: number;
   requirePhoto: boolean;
   allowVorgaben: boolean;
+  isSessionCategory: boolean;
+  maxSessionMinutes: number;
+  requiresVideo: boolean;
+  orgasmusZiel: string;
 }
 
 interface Props {
@@ -271,11 +275,13 @@ function CategoryRowItem({
   const style = categoryStyle(c.color);
   // Per mockup #6: KG shows built-in features ("Foto-Pflicht · Siegel · Kontrollen"),
   // others show "ohne Foto-Pflicht" or "Inventar-only" if tracking disabled.
-  const featureLine = !c.trackingEnabled
-    ? t("featuresInventoryOnly")
-    : c.isBuiltIn
-      ? t("featuresKg")
-      : t("featuresWear");
+  const featureLine = c.isSessionCategory
+    ? t("featuresSession")
+    : !c.trackingEnabled
+      ? t("featuresInventoryOnly")
+      : c.isBuiltIn
+        ? t("featuresKg")
+        : t("featuresWear");
   return (
     <li>
       <Card>

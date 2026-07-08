@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import useToast from "@/app/hooks/useToast";
 import useOfflineQueue from "@/app/hooks/useOfflineQueue";
 import OeffnenFormCore from "@/app/entries/OeffnenFormCore";
-import type { OeffnenPayload, ReinigungConfig, SperrzeitState, SubmitResult } from "@/app/entries/types";
+import type { OeffnenPayload, ReinigungConfig, ToiletteConfig, SperrzeitState, SubmitResult } from "@/app/entries/types";
 import type { ResolvedReason } from "@/lib/reasonsService";
 
 interface Props {
@@ -16,10 +16,11 @@ interface Props {
   nowDefault: string;
   sperrzeit?: SperrzeitState;
   reinigung?: ReinigungConfig;
+  toilette?: ToiletteConfig;
   redirectTo?: string;
 }
 
-export default function OeffnenForm({ initial, grundOptions, maxTime, tz, nowDefault, sperrzeit, reinigung, redirectTo }: Props) {
+export default function OeffnenForm({ initial, grundOptions, maxTime, tz, nowDefault, sperrzeit, reinigung, toilette, redirectTo }: Props) {
   const tCommon = useTranslations("common");
   const tDash = useTranslations("dashboard");
   const router = useRouter();
@@ -58,6 +59,7 @@ export default function OeffnenForm({ initial, grundOptions, maxTime, tz, nowDef
       nowDefault={nowDefault}
       sperrzeit={sperrzeit}
       reinigung={reinigung}
+      toilette={toilette}
       isEdit={!!initial}
       submitFn={submitFn}
       onSuccess={onSuccess}

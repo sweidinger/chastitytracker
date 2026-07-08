@@ -27,17 +27,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const isKeyholder = (user as { controlsSubs?: boolean } | undefined)?.controlsSubs ?? false;
 
   const flagOn = deviceCategoriesEnabled();
-  const [isLocked, categories, activeWear] = await Promise.all([
+  const [isLocked, categories, activeWear, aiKeyholderCfg] = await Promise.all([
     userId ? getIsLocked(userId) : Promise.resolve(false),
     userId && flagOn
       ? prisma.deviceCategory.findMany({
-          where: { userId, isBuiltIn: false, trackingEnabled: true },
+          where: { userId, slug: { not: "kg" }, trackingEnabled: true },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           select: { id: true, name: true, color: true, icon: true },
         })
       : Promise.resolve([]),
     userId && flagOn ? getActiveWearSessions(userId) : Promise.resolve([]),
+    userId
+      ? prisma.aiKeyholderConfig.findUnique({ where: { userId }, select: { enabled: true } })
+      : Promise.resolve(null),
   ]);
+  const aiKeyholderEnabled = aiKeyholderCfg?.enabled ?? false;
   const activeByCategory = new Map(activeWear.map((s) => [s.categoryId, s]));
   const categoryRows: NewEntryCategoryRow[] = categories.map((c) => ({
     id: c.id,
@@ -59,6 +63,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         version={pkg.version}
         categoryRows={categoryRows}
         bildersafe={bildersafeEnabled()}
+        aiKeyholderEnabled={aiKeyholderEnabled}
       />
 
       {/* Content area: offset for sidebar on desktop, offset for bottom nav on mobile */}
@@ -76,6 +81,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         version={pkg.version}
         categoryRows={categoryRows}
         bildersafe={bildersafeEnabled()}
+        aiKeyholderEnabled={aiKeyholderEnabled}
       />
       <InstallBanner />
     </div>

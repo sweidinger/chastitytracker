@@ -56,3 +56,25 @@ dev.db-journal
 
 # APNs private key — never commit this
 *.p8
+
+# SMB filesystem artifacts (created by macOS/Samba when files are held open)
+.smbdelete*
+*.smbdelete*
+
+# Local dev artifacts
+apctest.output
+docker-compose.beta.yml
+scripts/build-local.sh
+scripts/gen-prisma.sh
+scripts/install-macmini.sh
+
+# Claude Code / Codex internal files
+.claude/
+.codex/
+AGENTS.md
+
+# generated code graph (local only)
+/graphify-out/
+
+# local NAS SSH key (never commit)
+.nas_key

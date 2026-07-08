@@ -6,6 +6,9 @@ import {
 } from "@/lib/utils";
 import { getActiveVorgabe, getActiveSperrzeit, getActiveWearSessions, getActiveOrgasmusAnforderung, aktiveKontrolleWhere } from "@/lib/queries";
 import { reinigungVerbrauchtHeute, buildReinigungView, type ReinigungView, type ReinigungUserFields } from "@/lib/reinigungService";
+import { buildToiletteView, type ToiletteView, type ToiletteUserFields, toiletteVerbrauchtHeute } from "@/lib/toiletteService";
+import { getAllActiveSessionAnforderungen } from "@/lib/sessionService";
+import { effectiveOrgasmusArten } from "@/lib/reasonsService";
 import { autoKontrolleSettingsFromUser, type AutoKontrolleSettings } from "@/lib/autoKontrolleService";
 import { buildCategoryWearGoals, hasAnyGoal } from "@/lib/categoryGoals";
 import { proratedVorgabeTargets } from "@/lib/goalFulfillment";
@@ -45,6 +48,8 @@ export interface TrackerOverview {
     since: string | null;
     currentDurationHours: number | null;
     deviceName: string | null;
+    /** true = aktiver VERSCHLUSS-Eintrag hat eine Siegel-Nummer eingetragen */
+    hasKontrollCode: boolean;
   };
   wearingHoursKg: { today: number; week: number; month: number };
   trainingGoalKg: (GoalProgress & { note: string | null }) | null;
@@ -55,6 +60,12 @@ export interface TrackerOverview {
    *  - usedToday = openings already used today (resets at CH midnight). maxMinutesPerBreak = max minutes per opening.
    *  A DEVICE CHANGE runs through this same cleaning path and consumes one opening. */
   reinigung: ReinigungView;
+  /** Toilet-pause rules for KG — when the user may briefly open the cage for toilet use without penalty. */
+  toilette: ToiletteView;
+  /** Cleaning rules for non-KG devices (Plug, etc.) — mirror of reinigung but for WEAR_END/WEAR_BEGIN cycles. */
+  plugReinigung: { allowed: boolean; maxMinutesPerBreak: number; maxPausesPerDay: number | null };
+  /** Toilet rules for non-KG devices — mirror of toilette but for Plug/Collar wear sessions. */
+  plugToilette: { allowed: boolean; maxMinutesPerBreak: number; maxPausesPerDay: number | null };
   /** Automatische Kontrollen: das System sendet selbsttätig pro Tag eine ZUFÄLLIGE Anzahl Kontrollen —
    *  gewürfelt aus [perDayMin, perDayMax] (perDayMin==perDayMax ⇒ fixe Anzahl), zufällig über den Tag
    *  verteilt (Frist nie im Schlaf-Fenster ruheVon–ruheBis, Erfüllungsdauer zufällig fristVon–fristBis
@@ -79,12 +90,16 @@ export interface TrackerOverview {
     verifikationStatus: string | null;
     deviceCheck: { status: string; detected: string | null; expected: string | null } | null;
   } | null;
-  /** reinigungErlaubt: true = eine Reinigungsöffnung bricht die Sperre nicht. deviceName: vorgegebenes Gerät (null = keines). */
-  activeSperrzeit: { endetAt: string | null; indefinite: boolean; remainingMinutes: number | null; message: string | null; reinigungErlaubt: boolean; deviceName: string | null } | null;
+  /** reinigungErlaubt/toiletteErlaubt: ob die Sperrzeit Reinigungs-/Toiletten-Öffnungen explizit erlaubt (bricht Sperre nicht). */
+  activeSperrzeit: { endetAt: string | null; indefinite: boolean; remainingMinutes: number | null; message: string | null; reinigungErlaubt: boolean; toiletteErlaubt: boolean; deviceName: string | null } | null;
   /** deviceName: das von der Anforderung verlangte Gerät (null = beliebig). reinigungErlaubt wird auf die erzeugte Sperrzeit vererbt. */
   openVerschlussAnforderung: { endetAt: string | null; overdue: boolean; remainingMinutes: number | null; message: string | null; dauerH: number | null; reinigungErlaubt: boolean; deviceName: string | null } | null;
   /** Open keyholder orgasm directive (request/opportunity) whose window has not yet ended. */
   openOrgasmusAnforderung: { art: string; beginntAt: string; endetAt: string; active: boolean; requiredType: string | null; message: string | null; remainingMinutes: number } | null;
+  /** Open session directives from admin/AI keyholder (deadline not passed, not fulfilled/withdrawn). */
+  openSessionAnforderungen: { categoryName: string; nachricht: string | null; endetAt: string | null; overdue: boolean; remainingMinutes: number | null }[];
+  /** Effective orgasm type codes valid for this user (built-ins + any custom types). Used to validate create_orgasmus vorgegebeneArt. */
+  orgasmusArten: string[];
   sessionSummary: {
     totalSessions: number; totalHours: number; avgHours: number;
     longestHours: number; shortestHours: number;
@@ -115,21 +130,38 @@ const goalProgress = (
 });
 
 /** Resolves a username to its id and Reinigung settings. Throws if the user does not exist.
- *  `reinigungUser` trägt die rohen User-Felder für buildReinigungView (geteilte Cleaning-Sicht). */
-async function loadUserContext(username: string): Promise<{ userId: string; timezone: string; reinigung: ReinigungSettings; reinigungUser: ReinigungUserFields; keyholderInstructions: string | null; autoKontrolle: AutoKontrolleSettings }> {
+ *  `reinigungUser` / `toiletteUser` / `plugUser` tragen die rohen User-Felder für die jeweiligen View-Builder. */
+async function loadUserContext(username: string) {
   const user = await prisma.user.findUnique({
     where: { username },
     select: {
-      id: true, timezone: true, reinigungErlaubt: true, reinigungMaxMinuten: true, reinigungMaxProTag: true, reinigungsFenster: true, mcpKeyholderInstructions: true,
+      id: true, timezone: true,
+      reinigungErlaubt: true, reinigungMaxMinuten: true, reinigungMaxProTag: true, reinigungsFenster: true,
+      mcpKeyholderInstructions: true,
       autoKontrolleAktiv: true, autoKontrollePerDayMin: true, autoKontrollePerDayMax: true, autoKontrolleRuheVon: true, autoKontrolleRuheBis: true, autoKontrolleFristVon: true, autoKontrolleFristBis: true,
+      // Toilette (KG)
+      toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true,
+      // Plug-Reinigung + Plug-Toilette (Toilette immer erlaubt/unbegrenzt → nur Max.-Dauer)
+      plugReinigungErlaubt: true, plugReinigungMaxMinuten: true, plugReinigungMaxProTag: true,
+      plugToiletteMaxMinuten: true,
+      // Custom Orgasmus-Arten
+      orgasmusArtenConfig: true,
     },
   });
   if (!user) throw new Error(`User not found: ${username}`);
   return {
     userId: user.id,
     timezone: user.timezone ?? APP_TZ,
-    reinigung: { erlaubt: user.reinigungErlaubt ?? false, maxMinuten: user.reinigungMaxMinuten ?? 15 },
-    reinigungUser: user,
+    reinigung: { erlaubt: user.reinigungErlaubt ?? false, maxMinuten: user.reinigungMaxMinuten ?? 15 } as ReinigungSettings,
+    reinigungUser: user as ReinigungUserFields,
+    toiletteUser: user as ToiletteUserFields,
+    plugUser: {
+      plugReinigungErlaubt: user.plugReinigungErlaubt,
+      plugReinigungMaxMinuten: user.plugReinigungMaxMinuten,
+      plugReinigungMaxProTag: user.plugReinigungMaxProTag,
+      plugToiletteMaxMinuten: user.plugToiletteMaxMinuten,
+    },
+    orgasmusArtenConfig: user.orgasmusArtenConfig,
     keyholderInstructions: user.mcpKeyholderInstructions ?? null,
     autoKontrolle: autoKontrolleSettingsFromUser(user),
   };
@@ -137,12 +169,12 @@ async function loadUserContext(username: string): Promise<{ userId: string; time
 
 /** Builds the overview for a user identified by username. Throws if the user does not exist. */
 export async function buildOverview(username: string, opts: McpFormatOptions = {}): Promise<TrackerOverview> {
-  const { userId, timezone, reinigung, reinigungUser, keyholderInstructions, autoKontrolle } = await loadUserContext(username);
+  const { userId, timezone, reinigung, reinigungUser, toiletteUser, plugUser, orgasmusArtenConfig, keyholderInstructions, autoKontrolle } = await loadUserContext(username);
   const now = new Date();
   const fmt = pickFmt(opts.iso, timezone);
   const minutesUntil = (d: Date) => Math.round((d.getTime() - now.getTime()) / 60_000);
 
-  const [entries, openKontrolle, activeVorgabe, activeSperrzeit, openAnf, activeWear, punishedCount, recentNotes, openOrgasmusAnf, cleaningUsedToday] = await Promise.all([
+  const [entries, openKontrolle, activeVorgabe, activeSperrzeit, openAnf, activeWear, punishedCount, recentNotes, openOrgasmusAnf, cleaningUsedToday, toiletteUsedToday, openSessionAnfs] = await Promise.all([
     prisma.entry.findMany({
       where: { userId },
       orderBy: { startTime: "desc" },
@@ -164,6 +196,8 @@ export async function buildOverview(username: string, opts: McpFormatOptions = {
     prisma.keyholderNote.findMany({ where: { userId }, orderBy: { createdAt: "desc" }, take: 8 }),
     getActiveOrgasmusAnforderung(userId, now),
     reinigungVerbrauchtHeute(userId, now, timezone),
+    toiletteVerbrauchtHeute(userId, now, timezone),
+    getAllActiveSessionAnforderungen(userId),
   ]);
 
   // Reuse the already-loaded entries for per-category wear hours (no second entries scan).
@@ -205,6 +239,8 @@ export async function buildOverview(username: string, opts: McpFormatOptions = {
       since: latest ? fmt(latest.startTime) : null,
       currentDurationHours,
       deviceName: isLocked ? (currentLock?.device?.name ?? null) : null,
+      /** true = VERSCHLUSS-Eintrag hat einen kontrollCode → Kontrolle kann angefordert werden */
+      hasKontrollCode: isLocked ? !!latest?.kontrollCode : false,
     },
     wearingHoursKg: { today: round1(tagH), week: round1(wocheH), month: round1(monatH) },
     trainingGoalKg: activeVorgabe ? (() => {
@@ -214,6 +250,17 @@ export async function buildOverview(username: string, opts: McpFormatOptions = {
       return { ...goalProgress(tagH, wocheH, monatH, t.minProTagH, t.minProWocheH, t.minProMonatH), note: activeVorgabe.notiz };
     })() : null,
     reinigung: buildReinigungView(reinigungUser, cleaningUsedToday, now, timezone),
+    toilette: buildToiletteView(toiletteUser, toiletteUsedToday),
+    plugReinigung: {
+      allowed: plugUser.plugReinigungErlaubt ?? false,
+      maxMinutesPerBreak: plugUser.plugReinigungMaxMinuten ?? 15,
+      maxPausesPerDay: (plugUser.plugReinigungMaxProTag ?? 0) > 0 ? (plugUser.plugReinigungMaxProTag ?? 0) : null,
+    },
+    plugToilette: {
+      allowed: true, // Plug-Toilette ist immer erlaubt
+      maxMinutesPerBreak: plugUser.plugToiletteMaxMinuten ?? 15,
+      maxPausesPerDay: null, // unbegrenzt
+    },
     autoKontrolle: {
       aktiv: autoKontrolle.aktiv,
       perDayMin: autoKontrolle.perDayMin,
@@ -251,6 +298,7 @@ export async function buildOverview(username: string, opts: McpFormatOptions = {
       remainingMinutes: activeSperrzeit.endetAt ? minutesUntil(activeSperrzeit.endetAt) : null,
       message: activeSperrzeit.nachricht,
       reinigungErlaubt: activeSperrzeit.reinigungErlaubt,
+      toiletteErlaubt: activeSperrzeit.toiletteErlaubt,
       deviceName: activeSperrzeit.device?.name ?? null,
     } : null,
     openVerschlussAnforderung: openAnf ? {
@@ -280,6 +328,14 @@ export async function buildOverview(username: string, opts: McpFormatOptions = {
       lastOrgasmAt: lastOrgasmus ? fmt(lastOrgasmus.startTime) : null,
       orgasmFreeHours: lastOrgasmus ? msToHours(now.getTime() - lastOrgasmus.startTime.getTime()) : null,
     } : null,
+    openSessionAnforderungen: openSessionAnfs.map((s) => ({
+      categoryName: s.deviceCategory?.name ?? "?",
+      nachricht: s.nachricht,
+      endetAt: s.endetAt ? fmt(s.endetAt) : null,
+      overdue: s.endetAt ? s.endetAt < now : false,
+      remainingMinutes: s.endetAt ? minutesUntil(s.endetAt) : null,
+    })),
+    orgasmusArten: effectiveOrgasmusArten(orgasmusArtenConfig).map((e) => e.code),
     penalties: { punishedCount },
     activeWearSessions: activeWear.map((s) => ({
       category: s.categoryName,
@@ -568,6 +624,8 @@ export interface StrafbuchOverview {
   wrongDeviceViolations: ({ time: string | null; note: string | null; deviceName: string | null } & OffenseJudgment)[];
   /** Mandatory orgasm directives (ANWEISUNG) whose window ended without a matching orgasm. */
   missedOrgasmInstructions: ({ windowEndedAt: string; message: string | null; requiredType: string | null } & OffenseJudgment)[];
+  /** Openings (Reinigung or Toilette) where an erection was reported. */
+  erektionViolations: ({ time: string | null; oeffnenGrund: string | null; note: string | null } & OffenseJudgment)[];
 }
 
 /** Builds the Strafbuch snapshot for the user. Throws if the user does not exist. */
@@ -650,6 +708,12 @@ export async function mcpStrafbuch(username: string, opts: McpFormatOptions = {}
       message: m.nachricht,
       requiredType: m.requiredArt,
       ...judge("missed_orgasm", m.id),
+    })),
+    erektionViolations: sb.erektionViolations.map((v) => ({
+      time: v.startTime ? fmt(v.startTime) : null,
+      oeffnenGrund: v.oeffnenGrund,
+      note: v.note,
+      ...judge("erektion", v.entryId),
     })),
   };
 }

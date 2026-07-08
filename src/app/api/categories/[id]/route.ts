@@ -27,7 +27,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!category) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const body = await req.json();
-  const { name, color, icon, sortOrder, trackingEnabled, requirePhoto, allowVorgaben } = body;
+  const { name, color, icon, sortOrder, trackingEnabled, requirePhoto, allowVorgaben,
+          isSessionCategory, maxSessionMinutes, requiresVideo, orgasmusZiel } = body;
 
   const validationError = validateCategoryInput({ name, color, icon });
   if (validationError) return NextResponse.json({ error: validationError.error }, { status: 400 });
@@ -37,9 +38,19 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (color !== undefined) data.color = color;
   if (icon !== undefined) data.icon = icon;
   if (sortOrder !== undefined && typeof sortOrder === "number") data.sortOrder = sortOrder;
-  if (trackingEnabled !== undefined && typeof trackingEnabled === "boolean") data.trackingEnabled = trackingEnabled;
-  if (requirePhoto !== undefined && typeof requirePhoto === "boolean") data.requirePhoto = requirePhoto;
+  if (!category.isBuiltIn) {
+    if (isSessionCategory !== undefined && typeof isSessionCategory === "boolean") {
+      data.isSessionCategory = isSessionCategory;
+      // Session-Kategorien tracken keine Wear-Sessions
+      if (isSessionCategory) { data.trackingEnabled = false; data.requirePhoto = false; }
+    }
+    if (trackingEnabled !== undefined && typeof trackingEnabled === "boolean" && !data.isSessionCategory) data.trackingEnabled = trackingEnabled;
+    if (requirePhoto !== undefined && typeof requirePhoto === "boolean" && !data.isSessionCategory) data.requirePhoto = requirePhoto;
+  }
   if (allowVorgaben !== undefined && typeof allowVorgaben === "boolean") data.allowVorgaben = allowVorgaben;
+  if (maxSessionMinutes !== undefined && typeof maxSessionMinutes === "number") data.maxSessionMinutes = Math.max(1, Math.min(120, maxSessionMinutes));
+  if (requiresVideo !== undefined && typeof requiresVideo === "boolean") data.requiresVideo = requiresVideo;
+  if (orgasmusZiel !== undefined && typeof orgasmusZiel === "string" && ["KEINE","ERFORDERLICH","VERBOTEN"].includes(orgasmusZiel)) data.orgasmusZiel = orgasmusZiel;
 
   const updated = await prisma.deviceCategory.update({ where: { id }, data });
   return NextResponse.json(updated);

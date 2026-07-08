@@ -7,13 +7,16 @@ import {
   toDateLocale, calculateWearingHoursByRange,
   getMidnightToday, getWeekStart, getMonthStart,
   buildWearSessionRows,
-  buildWearPairs, wearingHoursFromPairs, WEAR_PAIR, APP_TZ,
+  buildWearPairs, WEAR_PAIR, APP_TZ,
   type ReinigungSettings,
 } from "@/lib/utils";
 import { proratedVorgabeTargets } from "@/lib/goalFulfillment";
 import { buildSessionEvents } from "@/lib/sessionHelpers";
-import { getActiveVorgabe, getActiveSperrzeit, getActiveWearSessions, getNonKgTrackingCategories, getActiveOrgasmusAnforderung, aktiveKontrolleWhere, activeVerschlussAnforderungWhere } from "@/lib/queries";
+import { getActiveVorgabe, getActiveSperrzeit, getActiveWearSessions, getNonKgTrackingCategories, getSessionCategories, getActiveOrgasmusAnforderung, getActivePlugAnforderung, getActivePlugSperrzeit, aktiveKontrolleWhere, activeVerschlussAnforderungWhere } from "@/lib/queries";
+import { getActiveSessionsAllCategories } from "@/lib/sessionService";
+import { plugCategoryId } from "@/lib/deviceCategories";
 import { deviceCategoriesEnabled } from "@/lib/constants";
+import { getActivePause } from "@/lib/pauseService";
 import { effectiveOrgasmusArten, resolveReasonLabel, resolveOrgasmusArtDisplay } from "@/lib/reasonsService";
 import { getTranslations, getLocale } from "next-intl/server";
 import DashboardClient, { type DashboardProps } from "./DashboardClient";
@@ -24,6 +27,7 @@ import ActiveWearSessions from "./ActiveWearSessions";
 import CategoriesPromoCard from "./CategoriesPromoCard";
 import CategoryGoalsToday from "./CategoryGoalsToday";
 import InactiveCategories from "./InactiveCategories";
+import TagesformWidget from "@/app/components/TagesformWidget";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -40,7 +44,8 @@ export default async function DashboardPage() {
 
   // ── Parallel data fetch ──
   const flagOn = deviceCategoriesEnabled();
-  const [entries, alleAnforderungen, activeVorgabe, offeneVerschlussAnf, activeSperrzeit, userSettings, wearSessions, allNonKgCategories, deviceCount, offeneOrgasmusAnf] = await Promise.all([
+  const plugCatId = plugCategoryId(userId);
+  const [entries, alleAnforderungen, activeVorgabe, offeneVerschlussAnf, activeSperrzeit, userSettings, wearSessions, allNonKgCategories, allSessionCategories, activeSessionSessions, deviceCount, offeneOrgasmusAnf, offenePlugAnf, activePlugSperrzeit, activeCagePause, activePlugPause] = await Promise.all([
     prisma.entry.findMany({
       where: { userId },
       orderBy: { startTime: "desc" },
@@ -50,16 +55,23 @@ export default async function DashboardPage() {
     prisma.kontrollAnforderung.findMany({ where: { userId, ...aktiveKontrolleWhere(now) }, orderBy: { createdAt: "desc" }, include: { entry: true } }),
     getActiveVorgabe(userId, now),
     // Zeitversetzt geplante Anforderungen (wirksamAb in der Zukunft) bleiben für den Sub unsichtbar.
+    // KG only: deviceCategoryId = null
     prisma.verschlussAnforderung.findFirst({
-      where: { userId, art: "ANFORDERUNG", fulfilledAt: null, withdrawnAt: null, ...activeVerschlussAnforderungWhere(now) },
+      where: { userId, art: "ANFORDERUNG", deviceCategoryId: null, fulfilledAt: null, withdrawnAt: null, ...activeVerschlussAnforderungWhere(now) },
       include: { device: { select: { name: true } } },
     }),
     getActiveSperrzeit(userId),
     prisma.user.findUnique({ where: { id: userId }, select: { reinigungErlaubt: true, reinigungMaxMinuten: true, orgasmusArtenConfig: true, oeffnenGruendeConfig: true } }),
     flagOn ? getActiveWearSessions(userId) : Promise.resolve([]),
     flagOn ? getNonKgTrackingCategories(userId) : Promise.resolve([]),
+    flagOn ? getSessionCategories(userId) : Promise.resolve([]),
+    flagOn ? getActiveSessionsAllCategories(userId) : Promise.resolve([]),
     prisma.device.count({ where: { userId, archivedAt: null } }),
     getActiveOrgasmusAnforderung(userId, now),
+    flagOn ? getActivePlugAnforderung(userId, plugCatId) : Promise.resolve(null),
+    flagOn ? getActivePlugSperrzeit(userId, plugCatId) : Promise.resolve(null),
+    getActivePause(userId, "CAGE"),
+    flagOn ? getActivePause(userId, "PLUG") : Promise.resolve(null),
   ]);
   const userHasDevices = deviceCount > 0;
 
@@ -99,8 +111,9 @@ export default async function DashboardPage() {
 
   // ── Serialize for client ──
   const kontrolleOverdue = offeneKontrolle ? offeneKontrolle.deadline < now : false;
+  const kontrolleCode = offeneKontrolle?.code || null; // "" → null when requireCode=false
   const kontrolleHref = offeneKontrolle
-    ? `/dashboard/new/pruefung?code=${offeneKontrolle.code}${offeneKontrolle.kommentar ? `&kommentar=${encodeURIComponent(offeneKontrolle.kommentar)}` : ""}`
+    ? `/dashboard/new/pruefung${kontrolleCode ? `?code=${kontrolleCode}${offeneKontrolle.kommentar ? `&kommentar=${encodeURIComponent(offeneKontrolle.kommentar)}` : ""}` : offeneKontrolle.kommentar ? `?kommentar=${encodeURIComponent(offeneKontrolle.kommentar)}` : ""}`
     : "";
 
   const anfOverdue = offeneVerschlussAnf ? (offeneVerschlussAnf.endetAt ? offeneVerschlussAnf.endetAt < now : false) : false;
@@ -115,7 +128,7 @@ export default async function DashboardPage() {
 
     offeneKontrolle: offeneKontrolle ? {
       deadline: offeneKontrolle.deadline.toISOString(),
-      code: offeneKontrolle.code,
+      code: kontrolleCode,
       kommentar: offeneKontrolle.kommentar,
       overdue: kontrolleOverdue,
       href: kontrolleHref,
@@ -133,6 +146,19 @@ export default async function DashboardPage() {
       endetAt: activeSperrzeit.endetAt?.toISOString() ?? null,
       nachricht: activeSperrzeit.nachricht,
       endetAtLabel: activeSperrzeit.endetAt ? t("openingForbiddenUntil", { date: formatDateTime(activeSperrzeit.endetAt, dl, tz) }) : null,
+    } : null,
+
+    offenePlugAnf: offenePlugAnf ? {
+      endetAt: offenePlugAnf.endetAt?.toISOString() ?? null,
+      nachricht: offenePlugAnf.nachricht,
+      endetAtLabel: offenePlugAnf.endetAt ? t("plugWearRequestUntil", { date: formatDateTime(offenePlugAnf.endetAt, dl, tz) }) : null,
+      categoryId: plugCatId,
+    } : null,
+
+    activePlugSperrzeit: activePlugSperrzeit ? {
+      endetAt: activePlugSperrzeit.endetAt?.toISOString() ?? null,
+      nachricht: activePlugSperrzeit.nachricht,
+      endetAtLabel: activePlugSperrzeit.endetAt ? t("plugWearDurationUntil", { date: formatDateTime(activePlugSperrzeit.endetAt, dl, tz) }) : null,
     } : null,
 
     offeneOrgasmusAnf: offeneOrgasmusAnf ? {
@@ -173,34 +199,73 @@ export default async function DashboardPage() {
             monatH={monatH}
             jahrH={jahrH}
             tz={tz}
+            activeCagePauseSince={activeCagePause?.startTime.toISOString() ?? null}
           />
         </div>
       )}
       <ActiveWearSessions
-        sessions={wearSessions.map((s) => ({
-          categoryId: s.categoryId,
-          categoryName: s.categoryName,
-          categoryColor: s.categoryColor,
-          categoryIcon: s.categoryIcon,
-          deviceName: s.deviceName,
-          since: s.since.toISOString(),
-        }))}
+        sessions={[
+          ...wearSessions.map((s) => {
+            const isPlug = s.categoryId === plugCatId;
+            return {
+              categoryId: s.categoryId,
+              categoryName: s.categoryName,
+              categoryColor: s.categoryColor,
+              categoryIcon: s.categoryIcon,
+              deviceName: s.deviceName,
+              since: s.since.toISOString(),
+              imageUrl: s.imageUrl,
+              endHref: `/dashboard/new/wear-end?category=${s.categoryId}`,
+              ...(isPlug ? {
+                activePauseSince: activePlugPause?.startTime.toISOString() ?? null,
+                pauseStartHref: "/dashboard/new/pause-start?device=PLUG",
+                pauseEndHref: "/dashboard/new/pause-end?device=PLUG",
+              } : {}),
+            };
+          }),
+          ...activeSessionSessions.map((s) => ({
+            categoryId: s.categoryId,
+            categoryName: s.categoryName,
+            categoryColor: s.categoryColor,
+            categoryIcon: s.categoryIcon,
+            deviceName: s.deviceName,
+            since: s.since.toISOString(),
+            imageUrl: null,
+            endHref: `/dashboard/new/session-end?category=${s.categoryId}`,
+          })),
+        ]}
         serverNow={now.toISOString()}
       />
       {flagOn && <CategoriesPromoCard show={allNonKgCategories.length === 0} />}
       {flagOn && <CategoryGoalsToday userId={userId} activeWearSessions={wearSessions} />}
       <InactiveCategories
-        categories={allNonKgCategories
-          .filter((c) => !wearSessions.some((s) => s.categoryId === c.id))
-          .map((c) => ({
-            ...c,
-            todayHours: wearingHoursFromPairs(
-              buildWearPairs(entries, now, { types: WEAR_PAIR, categoryId: c.id }),
-              getMidnightToday(now, tz),
-              now,
-            ),
-          }))}
+        categories={[
+          ...allNonKgCategories
+            .filter((c) => !wearSessions.some((s) => s.categoryId === c.id))
+            .map((c) => {
+              const wearPairs = buildWearPairs(entries, now, { types: WEAR_PAIR, categoryId: c.id });
+              const completedPairs = wearPairs.filter(p => p.end.getTime() !== now.getTime());
+              const lastEnd = completedPairs.at(-1)?.end ?? null;
+              return { ...c, notWornSinceMs: lastEnd ? now.getTime() - lastEnd.getTime() : null };
+            }),
+          ...allSessionCategories
+            .filter((c) => !activeSessionSessions.some((s) => s.categoryId === c.id))
+            .map((c) => {
+              // Find last SESSION_END for this category to compute pause duration
+              const lastSessionEnd = entries
+                .filter(e => e.type === "SESSION_END" && e.device?.categoryId === c.id)
+                .sort((a, b) => b.startTime.getTime() - a.startTime.getTime())[0] ?? null;
+              return {
+                ...c,
+                notWornSinceMs: lastSessionEnd ? now.getTime() - lastSessionEnd.startTime.getTime() : null,
+                isSessionCategory: true as const,
+              };
+            }),
+        ]}
       />
+      <div className="w-full max-w-2xl mx-auto px-4 pb-2">
+        <TagesformWidget />
+      </div>
       <DashboardClient {...clientProps} tz={tz} />
       {pairs.length > 0 && (
         <div className="w-full max-w-2xl mx-auto px-4 pb-6">

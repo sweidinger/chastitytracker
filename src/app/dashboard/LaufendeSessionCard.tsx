@@ -3,7 +3,7 @@ import { formatDateTime, formatDate, formatTime, hasExifMismatch, toDateLocale, 
 export type { SessionEvent } from "@/lib/sessionHelpers";
 import { getTranslations, getLocale } from "next-intl/server";
 import { getKombinierterPill } from "@/lib/kontrollePills";
-import SessionDurationBadge from "./SessionDurationBadge";
+import PauseAwareTimer from "./PauseAwareTimer";
 import type { SessionEventData } from "./SessionEventRow";
 import SessionTimeline from "./SessionTimeline";
 import LiveTrainingGoals from "./LiveTrainingGoals";
@@ -34,6 +34,8 @@ interface Props {
   jahrH: number;
   /** Governing timezone of the data owner (sub). Defaults to APP_TZ (Europe/Zurich). */
   tz?: string;
+  /** ISO-Zeitstempel einer aktiven Cage-Pause (PAUSE_BEGIN ohne PAUSE_END). */
+  activeCagePauseSince?: string | null;
 }
 
 export default async function LaufendeSessionCard({
@@ -51,6 +53,7 @@ export default async function LaufendeSessionCard({
   monatH,
   jahrH,
   tz = APP_TZ,
+  activeCagePauseSince = null,
 }: Props) {
   const t = await getTranslations("dashboard");
   const tCommon = await getTranslations("common");
@@ -78,33 +81,18 @@ export default async function LaufendeSessionCard({
             <Lock size={24} strokeWidth={2} />
           </div>
           <div className="flex-1 min-w-0">
-            {/* Mobile: stacked */}
-            <div className="sm:hidden">
-              <p className="text-xs font-semibold uppercase tracking-widest opacity-60 mb-0.5">{t("sessionTitle")}</p>
-              <p className="text-2xl font-bold leading-tight">{t("locked")}</p>
-              <div className="flex items-baseline gap-1.5 mt-1">
-                <span className="text-xs font-semibold uppercase tracking-widest opacity-60">{tCommon("duration")}:</span>
-                <span className="text-xl font-bold tabular-nums">
-                  <SessionDurationBadge since={sessionStart.toISOString()} pausedMs={interruptionPausedMs} />
-                </span>
-              </div>
-            </div>
-            {/* Desktop: side by side */}
-            <div className="hidden sm:flex items-start justify-between gap-2">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-widest opacity-60 mb-0.5">{t("sessionTitle")}</p>
-                <p className="text-2xl font-bold">{t("locked")}</p>
-              </div>
-              <div className="text-right flex-shrink-0">
-                <p className="text-xs font-semibold uppercase tracking-widest opacity-60 mb-0.5">{tCommon("duration")}</p>
-                <p className="text-3xl font-bold tabular-nums leading-tight">
-                  <SessionDurationBadge since={sessionStart.toISOString()} pausedMs={interruptionPausedMs} />
-                </p>
-              </div>
-            </div>
+            <p className="text-xs font-semibold uppercase tracking-widest opacity-60 mb-0.5">{t("sessionTitle")}</p>
+            <p className="text-2xl font-bold leading-tight">{t("locked")}</p>
             <p className="text-xs opacity-60 mt-1">
               {t("sessionSince")} {sessionStartStr}
             </p>
+            <PauseAwareTimer
+              since={sessionStart.toISOString()}
+              alreadyPausedMs={interruptionPausedMs}
+              activePauseSince={activeCagePauseSince}
+              pauseStartHref="/dashboard/new/pause-start?device=CAGE"
+              pauseEndHref="/dashboard/new/pause-end?device=CAGE"
+            />
           </div>
         </div>
 

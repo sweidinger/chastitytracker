@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { deviceCategoriesEnabled } from "@/lib/constants";
 import { getActiveWearSessionForCategory, getUserTimezone } from "@/lib/queries";
 import { nowDatetimeLocal } from "@/lib/utils";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 import WearForm from "@/app/dashboard/WearForm";
 import AdminActionFormShell from "@/app/components/AdminActionFormShell";
 import { Circle } from "lucide-react";
@@ -26,12 +27,14 @@ export default async function AdminWearEndPage({
     getTranslations("wearForm"),
     prisma.deviceCategory.findUnique({
       where: { id: categoryId },
-      select: { id: true, userId: true, name: true, color: true, icon: true, isBuiltIn: true },
+      select: { id: true, userId: true, name: true, color: true, icon: true, isBuiltIn: true, slug: true },
     }),
     getActiveWearSessionForCategory(userId, categoryId),
     getUserTimezone(userId),
   ]);
-  if (!category || category.userId !== userId || category.isBuiltIn) notFound();
+  // Block KG (uses VERSCHLUSS/OEFFNEN, not WEAR_END); allow plug + user-defined.
+  if (!category || category.userId !== userId) notFound();
+  if (category.isBuiltIn && category.slug === KG_BUILTIN_SLUG) notFound();
   if (!active) redirect(`/admin/users/${userId}/aktionen/wear-begin?category=${categoryId}`);
 
   return (

@@ -21,6 +21,7 @@ import {
 } from "@/lib/categoryConstants";
 import CategoryIconRender from "@/app/components/CategoryIcon";
 import Toggle from "@/app/components/Toggle";
+import Select from "@/app/components/Select";
 import type { CategoryRow } from "./CategoriesClient";
 
 interface Props {
@@ -50,6 +51,14 @@ export default function CategoryFormSheet({ category, onClose, onSaved, userId }
   );
   const [requirePhoto, setRequirePhoto] = useState<boolean>(category?.requirePhoto ?? false);
   const [allowVorgaben, setAllowVorgaben] = useState<boolean>(category?.allowVorgaben ?? true);
+  const [isSessionCategory, setIsSessionCategory] = useState<boolean>(
+    category?.isSessionCategory ?? false,
+  );
+  const [maxSessionMinutes, setMaxSessionMinutes] = useState<number>(
+    category?.maxSessionMinutes ?? 30,
+  );
+  const [requiresVideo, setRequiresVideo] = useState<boolean>(category?.requiresVideo ?? false);
+  const [orgasmusZiel, setOrgasmusZiel] = useState<string>(category?.orgasmusZiel ?? "KEINE");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -70,9 +79,13 @@ export default function CategoryFormSheet({ category, onClose, onSaved, userId }
       name: name.trim(),
       color,
       icon,
-      trackingEnabled,
-      requirePhoto,
+      trackingEnabled: isSessionCategory ? false : trackingEnabled,
+      requirePhoto: isSessionCategory ? false : requirePhoto,
       allowVorgaben,
+      isSessionCategory,
+      maxSessionMinutes,
+      requiresVideo,
+      orgasmusZiel: isSessionCategory ? orgasmusZiel : "KEINE",
     };
     if (userId) payload.userId = userId;
     const url = isEdit ? `/api/categories/${category!.id}` : "/api/categories";
@@ -162,39 +175,99 @@ export default function CategoryFormSheet({ category, onClose, onSaved, userId }
           </div>
         </div>
 
-        {/* Tracking toggle — when off, this category is inventory-only (no wear sessions). */}
+        {/* Session-Kategorie toggle (e.g. Dildo) */}
         <div className="flex flex-col gap-3 pt-3 border-t border-border-subtle">
           <div className="flex flex-col gap-1.5">
             <Toggle
-              label={t("trackingEnabled")}
-              checked={trackingEnabled}
-              onChange={setTrackingEnabled}
+              label={t("isSessionCategory")}
+              checked={isSessionCategory}
+              onChange={(v) => {
+                setIsSessionCategory(v);
+                // Session-Kategorien tracken keine Wear-Sessions
+                if (v) { setTrackingEnabled(false); setRequirePhoto(false); }
+              }}
               disabled={saving}
             />
-            <p className="text-xs text-foreground-faint">{t("trackingEnabledHint")}</p>
+            <p className="text-xs text-foreground-faint">{t("isSessionCategoryHint")}</p>
           </div>
 
-          {/* Photo-required toggle — only meaningful when tracking is enabled. */}
-          <div className="flex flex-col gap-1.5">
-            <Toggle
-              label={t("requirePhoto")}
-              checked={requirePhoto}
-              onChange={setRequirePhoto}
-              disabled={saving || !trackingEnabled}
-            />
-            <p className="text-xs text-foreground-faint">{t("requirePhotoHint")}</p>
-          </div>
+          {isSessionCategory ? (
+            <>
+              {/* Max session duration */}
+              <Input
+                label={t("maxSessionMinutes")}
+                type="number"
+                value={String(maxSessionMinutes)}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  if (!isNaN(v)) setMaxSessionMinutes(Math.max(1, Math.min(120, v)));
+                }}
+                min={1}
+                max={120}
+                disabled={saving}
+                hint={t("maxSessionMinutesHint")}
+              />
 
-          {/* Allow training-goals on this category */}
-          <div className="flex flex-col gap-1.5">
-            <Toggle
-              label={t("allowVorgaben")}
-              checked={allowVorgaben}
-              onChange={setAllowVorgaben}
-              disabled={saving || !trackingEnabled}
-            />
-            <p className="text-xs text-foreground-faint">{t("allowVorgabenHint")}</p>
-          </div>
+              {/* Video proof toggle */}
+              <div className="flex flex-col gap-1.5">
+                <Toggle
+                  label={t("requiresVideo")}
+                  checked={requiresVideo}
+                  onChange={setRequiresVideo}
+                  disabled={saving}
+                />
+                <p className="text-xs text-foreground-faint">{t("requiresVideoHint")}</p>
+              </div>
+
+              {/* Orgasmus-Ziel */}
+              <Select
+                label={t("orgasmusZiel")}
+                value={orgasmusZiel}
+                onChange={(e) => setOrgasmusZiel(e.target.value)}
+                disabled={saving}
+                options={[
+                  { value: "KEINE", label: t("orgasmusZielNone") },
+                  { value: "ERFORDERLICH", label: t("orgasmusZielRequired") },
+                  { value: "VERBOTEN", label: t("orgasmusZielForbidden") },
+                ]}
+              />
+            </>
+          ) : (
+            <>
+              {/* Tracking toggle — when off, this category is inventory-only. */}
+              <div className="flex flex-col gap-1.5">
+                <Toggle
+                  label={t("trackingEnabled")}
+                  checked={trackingEnabled}
+                  onChange={setTrackingEnabled}
+                  disabled={saving}
+                />
+                <p className="text-xs text-foreground-faint">{t("trackingEnabledHint")}</p>
+              </div>
+
+              {/* Photo-required toggle — only meaningful when tracking is enabled. */}
+              <div className="flex flex-col gap-1.5">
+                <Toggle
+                  label={t("requirePhoto")}
+                  checked={requirePhoto}
+                  onChange={setRequirePhoto}
+                  disabled={saving || !trackingEnabled}
+                />
+                <p className="text-xs text-foreground-faint">{t("requirePhotoHint")}</p>
+              </div>
+
+              {/* Allow training-goals on this category */}
+              <div className="flex flex-col gap-1.5">
+                <Toggle
+                  label={t("allowVorgaben")}
+                  checked={allowVorgaben}
+                  onChange={setAllowVorgaben}
+                  disabled={saving || !trackingEnabled}
+                />
+                <p className="text-xs text-foreground-faint">{t("allowVorgabenHint")}</p>
+              </div>
+            </>
+          )}
         </div>
 
         {error && <FormError message={error} />}

@@ -7,6 +7,7 @@ import { isValidEmail, passwordErrorCode } from "@/lib/constants";
 import { getActiveSperrzeit } from "@/lib/queries";
 import { isUniqueConstraintOn } from "@/lib/prismaErrors";
 import { setReinigungSettings } from "@/lib/reinigungService";
+import { setToiletteSettings } from "@/lib/toiletteService";
 import { setAutoKontrolleSettings } from "@/lib/autoKontrolleService";
 import { setReasonConfig } from "@/lib/reasonsService";
 import { deleteUploadedFiles } from "@/lib/imageUtils";
@@ -91,6 +92,32 @@ export async function PATCH(
       maxProTag: body.reinigungMaxProTag !== undefined ? Number(body.reinigungMaxProTag) : undefined,
       fenster: body.reinigungsFenster, // roh — der Service validiert/normalisiert
     });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (
+    body.toiletteErlaubt !== undefined || body.toiletteMaxMinuten !== undefined ||
+    body.toiletteMaxProTag !== undefined
+  ) {
+    await setToiletteSettings(id, {
+      erlaubt: body.toiletteErlaubt !== undefined ? Boolean(body.toiletteErlaubt) : undefined,
+      maxMinuten: body.toiletteMaxMinuten !== undefined ? Number(body.toiletteMaxMinuten) : undefined,
+      maxProTag: body.toiletteMaxProTag !== undefined ? Number(body.toiletteMaxProTag) : undefined,
+    });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (
+    body.plugReinigungErlaubt !== undefined || body.plugReinigungMaxMinuten !== undefined ||
+    body.plugReinigungMaxProTag !== undefined || body.plugToiletteMaxMinuten !== undefined
+  ) {
+    const data: Record<string, unknown> = {};
+    if (body.plugReinigungErlaubt !== undefined) data.plugReinigungErlaubt = Boolean(body.plugReinigungErlaubt);
+    if (body.plugReinigungMaxMinuten !== undefined) data.plugReinigungMaxMinuten = Math.max(1, Math.min(120, Number(body.plugReinigungMaxMinuten) || 15));
+    if (body.plugReinigungMaxProTag !== undefined) data.plugReinigungMaxProTag = Math.max(0, Math.min(20, Number(body.plugReinigungMaxProTag) || 0));
+    // Plug-Toilette ist immer erlaubt & unbegrenzt — nur Max.-Dauer konfigurierbar.
+    if (body.plugToiletteMaxMinuten !== undefined) data.plugToiletteMaxMinuten = Math.max(1, Math.min(120, Number(body.plugToiletteMaxMinuten) || 15));
+    await prisma.user.update({ where: { id }, data });
     return NextResponse.json({ ok: true });
   }
 

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { mapAnforderungStatus, tzDateParts } from "@/lib/utils";
 import { activeVerschlussAnforderungWhere } from "@/lib/queries";
+import { plugCategoryId } from "@/lib/deviceCategories";
 
 /** A Kontroll-based offense (late or rejected) — raw data, formatting left to consumers. */
 export interface StrafbuchControlOffense {
@@ -46,6 +47,20 @@ export interface StrafbuchData {
     nachricht: string | null;
     requiredArt: string | null;
   }[];
+  /** Plug WEAR_END entries where REINIGUNG/TOILETTE daily limit was exceeded. */
+  plugReinigungLimitViolations: {
+    entryId: string;
+    startTime: Date | null;
+    oeffnenGrund: string | null;
+    note: string | null;
+  }[];
+  /** OEFFNEN/WEAR_END entries (REINIGUNG/TOILETTE) where erektionGemeldet=true → auto StrafeRecord(EREKTION). */
+  erektionViolations: {
+    entryId: string;
+    startTime: Date | null;
+    oeffnenGrund: string | null;
+    note: string | null;
+  }[];
   /** Judgment records — each marks an offense (by `refId`) as PUNISHED or DISMISSED. */
   strafeRecords: {
     refId: string;
@@ -63,9 +78,11 @@ export interface StrafbuchData {
  *  rejected Kontrollen, REINIGUNG-limit violations, plus the punished-marker records.
  *  Single source of truth shared by the admin Strafbuch page and the MCP tool. */
 export async function buildStrafbuch(userId: string, now: Date = new Date()): Promise<StrafbuchData> {
-  const [user, oeffnungen, sperrzeiten, kontrollAnforderungen, strafeRecordsRaw, orgasmusAnforderungen] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { reinigungErlaubt: true, reinigungMaxProTag: true } }),
+  const plugCatId = plugCategoryId(userId);
+  const [user, oeffnungen, plugWearEnds, sperrzeiten, kontrollAnforderungen, strafeRecordsRaw, orgasmusAnforderungen] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, select: { reinigungErlaubt: true, reinigungMaxProTag: true, toiletteErlaubt: true, plugReinigungMaxProTag: true } }),
     prisma.entry.findMany({ where: { userId, type: "OEFFNEN" }, orderBy: { startTime: "desc" } }),
+    prisma.entry.findMany({ where: { userId, type: "WEAR_END", device: { categoryId: plugCatId } }, orderBy: { startTime: "desc" }, select: { id: true, startTime: true, oeffnenGrund: true, note: true } }),
     prisma.verschlussAnforderung.findMany({ where: { userId, art: "SPERRZEIT", ...activeVerschlussAnforderungWhere(now) } }),
     prisma.kontrollAnforderung.findMany({
       where: { userId, entryId: { not: null } },
@@ -85,7 +102,23 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
       (w.withdrawnAt === null || w.withdrawnAt > openTime),
     );
   const userReinigungErlaubt = user?.reinigungErlaubt ?? false;
+  const userToiletteErlaubt = user?.toiletteErlaubt ?? false;
   const reinigungMaxProTag = user?.reinigungMaxProTag ?? 0;
+
+  // Erektion: StrafeRecord.refId points at the offending OEFFNEN entry.
+  const erektionRecords = strafeRecordsRaw.filter((r) => r.offenseType === "EREKTION");
+  const erektionEntryIds = erektionRecords.map((r) => r.refId);
+  const erektionEntries = erektionEntryIds.length > 0
+    ? await prisma.entry.findMany({
+        where: { id: { in: erektionEntryIds } },
+        select: { id: true, startTime: true, oeffnenGrund: true, note: true },
+      })
+    : [];
+  const erektionEntryById = new Map(erektionEntries.map((e) => [e.id, e]));
+  const erektionViolations = erektionRecords.map((r) => {
+    const entry = erektionEntryById.get(r.refId);
+    return { entryId: r.refId, startTime: entry?.startTime ?? null, oeffnenGrund: entry?.oeffnenGrund ?? null, note: entry?.note ?? null };
+  });
 
   // Wrong-device: StrafeRecord.refId points at the offending VERSCHLUSS entry (für Geräte-Namen laden).
   const wrongDeviceRecords = strafeRecordsRaw.filter((r) => r.offenseType === "FALSCHES_GERAET");
@@ -124,6 +157,25 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
     reinigungLimitViolations.reverse(); // neueste zuerst (Anzeige)
   }
 
+  // Plug REINIGUNG daily limit violations (WEAR_END entries for plug category).
+  // Plug-TOILETTE ist immer erlaubt & unbegrenzt → keine Tageslimit-Verstösse.
+  const plugReinigungMaxProTag = user?.plugReinigungMaxProTag ?? 0;
+  const plugReinigungLimitViolations: { entryId: string; startTime: Date | null; oeffnenGrund: string | null; note: string | null }[] = [];
+  if (plugReinigungMaxProTag > 0) {
+    const plugAsc = [...plugWearEnds]
+      .filter((e) => e.oeffnenGrund === "REINIGUNG")
+      .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+    const perDayReinigung = new Map<string, number>();
+    for (const e of plugAsc) {
+      const { year, month, day } = tzDateParts(e.startTime);
+      const key = `${year}-${month}-${day}`;
+      const n = (perDayReinigung.get(key) ?? 0) + 1;
+      perDayReinigung.set(key, n);
+      if (n > plugReinigungMaxProTag) plugReinigungLimitViolations.push({ entryId: e.id, startTime: e.startTime, oeffnenGrund: e.oeffnenGrund, note: e.note });
+    }
+    plugReinigungLimitViolations.reverse(); // neueste zuerst
+  }
+
   // Unauthorized openings — an OEFFNEN inside an active Sperrzeit. A REINIGUNG opening is
   // permitted when both the user flag and the Sperrzeit allow cleaning.
   const unauthorizedOpenings = oeffnungen
@@ -138,7 +190,8 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
     .filter(({ o, sperre }) => {
       if (!sperre) return false;
       const allowedReinigung = o.oeffnenGrund === "REINIGUNG" && userReinigungErlaubt && sperre.reinigungErlaubt;
-      return !allowedReinigung && !isOrgasmusOpenAllowed(o.startTime);
+      const allowedToilette = o.oeffnenGrund === "TOILETTE" && userToiletteErlaubt && sperre.toiletteErlaubt;
+      return !allowedReinigung && !allowedToilette && !isOrgasmusOpenAllowed(o.startTime);
     })
     .map(({ o, sperre }) => ({
       id: o.id,
@@ -170,7 +223,9 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
       .filter((k) => k.entry?.verifikationStatus === "rejected")
       .map(toControl),
     reinigungLimitViolations,
+    plugReinigungLimitViolations,
     wrongDeviceViolations,
+    erektionViolations,
     missedOrgasmInstructions: orgasmusAnforderungen
       .filter((a) => a.art === "ANWEISUNG" && a.withdrawnAt === null && a.fulfilledAt === null && a.endetAt < now)
       .sort((a, b) => b.endetAt.getTime() - a.endetAt.getTime())
