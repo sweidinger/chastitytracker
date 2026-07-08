@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { redirect, notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { nowDatetimeLocal, APP_TZ } from "@/lib/utils";
-import { getActivePause } from "@/lib/pauseService";
+import { getActivePause, pauseReasonsForDevice } from "@/lib/pauseService";
 import type { PauseDevice } from "@/lib/pauseService";
 import PauseForm from "../../PauseForm";
 
@@ -20,9 +20,17 @@ export default async function PauseStartPage({ searchParams }: { searchParams: P
   const tz = session.user.timezone ?? APP_TZ;
 
   const [dbUser, activePause] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { mobileDesktopUpload: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: {
+      mobileDesktopUpload: true,
+      reinigungErlaubt: true, reinigungMaxMinuten: true, reinigungMaxProTag: true,
+      toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true,
+      plugReinigungErlaubt: true, plugReinigungMaxMinuten: true, plugReinigungMaxProTag: true,
+      plugToiletteMaxMinuten: true,
+    } }),
     getActivePause(userId, device),
   ]);
+
+  const reasons = dbUser ? pauseReasonsForDevice(dbUser, device) : [];
 
   // Already paused → redirect to end form
   if (activePause) {
@@ -43,6 +51,7 @@ export default async function PauseStartPage({ searchParams }: { searchParams: P
       <PauseForm
         kind="begin"
         device={device}
+        reasons={reasons}
         tz={tz}
         nowDefault={nowDatetimeLocal(tz)}
         mobileDesktopMode={dbUser?.mobileDesktopUpload ?? false}

@@ -10,7 +10,7 @@ import { orgasmusValueAllowed, validOeffnenCodes, effectiveOrgasmusArten, effect
 import { isDevBypassEnabled } from "@/lib/devMode";
 import { validateDeviceOwnership, releaseSperrzeitenOnOpen, prepareWearEntry, activeVerschlussAnforderungWhere, aktiveKontrolleWhere } from "@/lib/queries";
 import { getActiveSessionForCategory, fulfillSessionAnforderung, getActiveSessionAnforderung } from "@/lib/sessionService";
-import { getActivePause, pauseSettingsForDevice, maybeCreatePauseOverageStrafe, type PauseDevice } from "@/lib/pauseService";
+import { getActivePause, pauseSettingsForDevice, pauseReasonsForDevice, maybeCreatePauseOverageStrafe, type PauseDevice } from "@/lib/pauseService";
 import { gatherDeviceReferences } from "@/lib/deviceReferenceService";
 import { checkDeviceInPhoto } from "@/lib/detectDevice";
 import { structuredLog } from "@/lib/serverLog";
@@ -18,7 +18,7 @@ import { sendPushToUser } from "@/lib/push";
 import { getControllersOfUser } from "@/lib/keyholder";
 import { reactToSubEvent } from "@/lib/aiKeyholder/keyholderService";
 import { sendMail, escHtml } from "@/lib/mail";
-import { formatDateTime, formatDuration } from "@/lib/utils";
+import { formatDateTime, formatDuration, getMidnightToday, APP_TZ } from "@/lib/utils";
 import { getTranslations } from "next-intl/server";
 
 export async function GET() {
@@ -131,6 +131,32 @@ export async function POST(req: NextRequest) {
             });
             if (!latestWear || latestWear.type !== "WEAR_BEGIN") throw Object.assign(new Error(), { _code: "PAUSE_NOT_WEARING" });
           }
+          // Grund (Reinigung/Toilette) + Tageslimit gemäß Einstellungen
+          const puser = await tx.user.findUnique({
+            where: { id: session.user.id },
+            select: {
+              reinigungErlaubt: true, reinigungMaxMinuten: true, reinigungMaxProTag: true,
+              toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true,
+              plugReinigungErlaubt: true, plugReinigungMaxMinuten: true, plugReinigungMaxProTag: true,
+              plugToiletteMaxMinuten: true,
+            },
+          });
+          const pauseReasons = puser ? pauseReasonsForDevice(puser, dev) : [];
+          if (pauseReasons.length > 0) {
+            const chosen = pauseReasons.find((r) => r.grund === oeffnenGrund);
+            if (!chosen) throw Object.assign(new Error(), { _code: "PAUSE_REASON_REQUIRED" });
+            if (chosen.maxProTag > 0) {
+              const tzP = session.user.timezone ?? APP_TZ;
+              const todayCount = await tx.entry.count({
+                where: {
+                  userId: session.user.id, type: "PAUSE_BEGIN", pauseDevice: dev,
+                  oeffnenGrund: chosen.grund,
+                  startTime: { gte: getMidnightToday(new Date(), tzP) },
+                },
+              });
+              if (todayCount >= chosen.maxProTag) throw Object.assign(new Error(), { _code: "PAUSE_LIMIT_REACHED" });
+            }
+          }
         }
         if (type === "PAUSE_END") {
           if (!activePause) throw Object.assign(new Error(), { _code: "PAUSE_NOT_ACTIVE" });
@@ -150,6 +176,13 @@ export async function POST(req: NextRequest) {
           if (user) {
             const settings = pauseSettingsForDevice(user, dev);
             pauseMaxMinuten = settings.maxMinuten;
+            // Grund-spezifische Maximaldauer: falls die Pause einen Reinigung/Toilette-Grund hat,
+            // gilt die konfigurierte Dauer dieses Grunds statt des Geräte-Maximums.
+            const beginEntry = await tx.entry.findUnique({ where: { id: activePause.id }, select: { oeffnenGrund: true } });
+            if (beginEntry?.oeffnenGrund) {
+              const reason = pauseReasonsForDevice(user, dev).find((r) => r.grund === beginEntry.oeffnenGrund);
+              if (reason) pauseMaxMinuten = reason.maxMinuten;
+            }
           }
         }
       }
@@ -360,6 +393,8 @@ export async function POST(req: NextRequest) {
     if (code === "PAUSE_NOT_ACTIVE") return NextResponse.json({ error: "Keine aktive Pause für dieses Gerät" }, { status: 400 });
     if (code === "PAUSE_NOT_LOCKED") return NextResponse.json({ error: "Cage ist nicht verschlossen" }, { status: 400 });
     if (code === "PAUSE_NOT_WEARING") return NextResponse.json({ error: "Plug wird nicht getragen" }, { status: 400 });
+    if (code === "PAUSE_REASON_REQUIRED") return NextResponse.json({ error: "Grund der Pause (Reinigung/Toilette) ist erforderlich" }, { status: 400 });
+    if (code === "PAUSE_LIMIT_REACHED") return NextResponse.json({ error: "Tageslimit für diese Pause erreicht" }, { status: 400 });
     throw e;
   }
 

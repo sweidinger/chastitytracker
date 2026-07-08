@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Lock, LockOpen, ClipboardList, Droplets, Camera, Play, Square } from "lucide-react";
+import { Lock, LockOpen, ClipboardList, Droplets, Camera, Play, Square, Pause } from "lucide-react";
 import { formatDateTime, APP_TZ } from "@/lib/utils";
 import { TYPE_COLORS, TYPE_STATS_KEYS } from "@/lib/constants";
 import { FullscreenImageModal } from "@/app/components/ImageViewer";
@@ -19,6 +19,8 @@ function typeIcon(type: string, size: number): ReactNode {
     ORGASMUS: <Droplets size={size} />,
     WEAR_BEGIN: <Play size={size} />,
     WEAR_END: <Square size={size} />,
+    PAUSE_BEGIN: <Pause size={size} />,
+    PAUSE_END: <Play size={size} />,
   };
   return icons[type];
 }
@@ -34,6 +36,8 @@ interface Entry {
   imageExifTime?: Date | string | null;
   oeffnenGrund?: string | null;
   verifikationStatus?: string | null;
+  /** Pause device ("CAGE" | "PLUG") for PAUSE_BEGIN/PAUSE_END entries. */
+  pauseDevice?: string | null;
   /** Category info for WEAR_BEGIN/WEAR_END entries — derived via Entry.device.category. */
   category?: { name: string; color: string; icon: string } | null;
 }
@@ -58,6 +62,10 @@ export default function EntryRow({ entry: e, locale, tz = APP_TZ, orgasmusLabel,
   const startTime = e.startTime instanceof Date ? e.startTime : new Date(e.startTime);
 
   const isWear = e.type === "WEAR_BEGIN" || e.type === "WEAR_END";
+  const isPause = e.type === "PAUSE_BEGIN" || e.type === "PAUSE_END";
+  const pauseDeviceLabel = isPause && e.pauseDevice
+    ? tStats(e.pauseDevice === "PLUG" ? "devicePlugShort" : "deviceCageShort")
+    : null;
   const wearActionLabel = isWear ? tStats(e.type === "WEAR_BEGIN" ? "wearBeginShort" : "wearEndShort") : "";
   const wearLabel = isWear && e.category
     ? `${e.category.name} · ${wearActionLabel}`
@@ -97,6 +105,13 @@ export default function EntryRow({ entry: e, locale, tz = APP_TZ, orgasmusLabel,
           <span className="text-sm text-foreground tabular-nums">
             {formatDateTime(startTime, locale, tz)}
           </span>
+          {isPause && (pauseDeviceLabel || openingLabel) && (
+            <span className="text-xs text-foreground-faint flex-shrink-0">
+              {pauseDeviceLabel}
+              {pauseDeviceLabel && openingLabel ? " · " : ""}
+              {openingLabel ?? ""}
+            </span>
+          )}
           {e.imageUrl && (
             <Camera size={12} className="text-foreground-faint flex-shrink-0" />
           )}

@@ -521,6 +521,10 @@
     "wearEnd": "Tragen beendet",
     "wearBeginShort": "Beginn",
     "wearEndShort": "Ende",
+    "pauseBegin": "Pause",
+    "pauseEnd": "Pause Ende",
+    "deviceCageShort": "KG",
+    "devicePlugShort": "Plug",
     "longestSession": "Längste Session",
     "avgSession": "Ø Session",
     "totalAllTime": "Gesamt",
@@ -1324,7 +1328,11 @@
     "submitBegin": "Pause starten",
     "submitEnd": "Pause beenden",
     "pauseStarted": "Pause gestartet",
-    "pauseEnded": "Pause beendet"
+    "pauseEnded": "Pause beendet",
+    "reasonLabel": "Grund",
+    "reasonRequired": "Bitte wähle einen Grund (Reinigung/Toilette)",
+    "reasonMaxHint": "Max. {min} Min.",
+    "reasonPerDayHint": "max. {count}×/Tag"
   },
   "tagesform": {
     "title": "Tagesform",
