@@ -1,5 +1,12 @@
 [
   {
+    "version": "4.71.0",
+    "date": "2026-07-08",
+    "changes": [
+      { "type": "feat", "text": "Versäumte Session-Anforderungen (Frist abgelaufen ohne erfüllende Session) werden jetzt als Vergehen erkannt — erkannt, nicht automatisch bestraft; Keyholderin/AI urteilt (analog zur verpassten Orgasmus-Anweisung). Sichtbar im AI-Kontext und im MCP-Disziplin-Ledger, dort verurteilbar (judge_offense)." }
+    ]
+  },
+  {
     "version": "4.70.0",
     "date": "2026-07-08",
     "changes": [

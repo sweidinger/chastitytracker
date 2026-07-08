@@ -90,6 +90,7 @@ export async function getOffenses(username: string): Promise<LedgerResult> {
       });
     }),
     ...sb.missedOrgasmInstructions.map((m) => toRow(m.windowEndedAt, m, { message: m.message, requiredType: m.requiredType })),
+    ...sb.missedSessions.map((m) => toRow(m.windowEndedAt, m, { message: m.message, categoryName: m.categoryName })),
   ];
 
   // Inline-Notes je Offense in EINEM Query.

@@ -47,6 +47,13 @@ export interface StrafbuchData {
     nachricht: string | null;
     requiredArt: string | null;
   }[];
+  /** Session-Anforderungen deren Frist ohne erfüllende Session ablief. */
+  missedSessions: {
+    id: string;
+    endetAt: Date;
+    nachricht: string | null;
+    categoryName: string | null;
+  }[];
   /** Plug WEAR_END entries where REINIGUNG/TOILETTE daily limit was exceeded. */
   plugReinigungLimitViolations: {
     entryId: string;
@@ -79,7 +86,7 @@ export interface StrafbuchData {
  *  Single source of truth shared by the admin Strafbuch page and the MCP tool. */
 export async function buildStrafbuch(userId: string, now: Date = new Date()): Promise<StrafbuchData> {
   const plugCatId = plugCategoryId(userId);
-  const [user, oeffnungen, plugWearEnds, sperrzeiten, kontrollAnforderungen, strafeRecordsRaw, orgasmusAnforderungen] = await Promise.all([
+  const [user, oeffnungen, plugWearEnds, sperrzeiten, kontrollAnforderungen, strafeRecordsRaw, orgasmusAnforderungen, sessionAnforderungen] = await Promise.all([
     prisma.user.findUnique({ where: { id: userId }, select: { reinigungErlaubt: true, reinigungMaxProTag: true, toiletteErlaubt: true, plugReinigungMaxProTag: true } }),
     prisma.entry.findMany({ where: { userId, type: "OEFFNEN" }, orderBy: { startTime: "desc" } }),
     prisma.entry.findMany({ where: { userId, type: "WEAR_END", device: { categoryId: plugCatId } }, orderBy: { startTime: "desc" }, select: { id: true, startTime: true, oeffnenGrund: true, note: true } }),
@@ -91,6 +98,10 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
     }),
     prisma.strafeRecord.findMany({ where: { userId }, orderBy: { createdAt: "desc" } }),
     prisma.orgasmusAnforderung.findMany({ where: { userId } }),
+    prisma.sessionAnforderung.findMany({
+      where: { userId, fulfilledAt: null, withdrawnAt: null, endetAt: { lt: now }, OR: [{ wirksamAb: null }, { wirksamAb: { lte: now } }] },
+      include: { deviceCategory: { select: { name: true } } },
+    }),
   ]);
 
   // Windows that explicitly permit opening to perform the directed orgasm — an OEFFNEN inside
@@ -230,6 +241,9 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
       .filter((a) => a.art === "ANWEISUNG" && a.withdrawnAt === null && a.fulfilledAt === null && a.endetAt < now)
       .sort((a, b) => b.endetAt.getTime() - a.endetAt.getTime())
       .map((a) => ({ id: a.id, endetAt: a.endetAt, nachricht: a.nachricht, requiredArt: a.vorgegebeneArt })),
+    missedSessions: sessionAnforderungen
+      .sort((a, b) => (b.endetAt?.getTime() ?? 0) - (a.endetAt?.getTime() ?? 0))
+      .map((s) => ({ id: s.id, endetAt: s.endetAt as Date, nachricht: s.nachricht, categoryName: s.deviceCategory?.name ?? null })),
     strafeRecords: strafeRecordsRaw.map((r) => ({
       refId: r.refId,
       offenseType: r.offenseType,

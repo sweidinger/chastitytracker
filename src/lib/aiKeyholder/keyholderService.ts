@@ -206,6 +206,8 @@ async function buildMessageHistory(
         lines.push(`- Falsches Gerät (${o.deviceName ?? "?"}) am ${o.time ?? "?"} (Urteil: ${o.judgment})`);
       for (const o of sb.missedOrgasmInstructions)
         lines.push(`- Verpasste Orgasmus-Anweisung (Fenster bis ${o.windowEndedAt}, Urteil: ${o.judgment})`);
+      for (const o of sb.missedSessions)
+        lines.push(`- Versäumte Session (${o.categoryName ?? "?"}, Frist bis ${o.windowEndedAt}, Urteil: ${o.judgment})`);
       for (const o of sb.erektionViolations)
         lines.push(`- Erektion beim Öffnen (${o.oeffnenGrund ?? "?"}) am ${o.time ?? "?"} (Urteil: ${o.judgment})`);
       strafbuchText = `\n\n--- Strafbuch ---\n${lines.join("\n")}`;
@@ -619,6 +621,8 @@ export async function runAutonomousAction(
         lines.push(`- Falsches Gerät (${o.deviceName ?? "?"}) am ${o.time ?? "?"} (Urteil: ${o.judgment})`);
       for (const o of sb.missedOrgasmInstructions)
         lines.push(`- Verpasste Orgasmus-Anweisung (Fenster bis ${o.windowEndedAt}, Urteil: ${o.judgment})`);
+      for (const o of sb.missedSessions)
+        lines.push(`- Versäumte Session (${o.categoryName ?? "?"}, Frist bis ${o.windowEndedAt}, Urteil: ${o.judgment})`);
       for (const o of sb.erektionViolations)
         lines.push(`- Erektion beim Öffnen (${o.oeffnenGrund ?? "?"}) am ${o.time ?? "?"} (Urteil: ${o.judgment})`);
       strafbuchText = `\n\n--- Strafbuch ---\n${lines.join("\n")}`;

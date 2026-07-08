@@ -76,6 +76,8 @@ sie verhindert die häufigsten Fehldeutungen.
   - **missedOrgasmInstructions**: eine **ANWEISUNG** (Orgasmus-Pflicht, §11), deren Fenster ablief,
     ohne dass ein passender ORGASMUS erfasst wurde. Abgeleitet, \`punished:false\` bis du strafst.
     (Eine GELEGENHEIT erzeugt KEIN Vergehen, wenn ungenutzt.)
+  - **missedSessions**: eine **Session-Anforderung**, deren Frist ablief, ohne dass eine passende
+    (Mindestdauer/Gerät/Nachweis erfüllende) Session erfasst wurde. Abgeleitet, \`punished:false\` bis du strafst.
 - **Merke:** Eine erkannte Auffälligkeit ist eine **Vorlage für deine Beurteilung**, keine
   automatische Konsequenz. Ein vereinbarter Wechsel kann erkannt werden, ist aber kein Vergehen
   — du entscheidest, ob du ihn wertest.
