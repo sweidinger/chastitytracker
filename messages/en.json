@@ -208,6 +208,8 @@
     "locked": "Locked",
     "openingForbiddenUntil": "Opening not allowed until {date}",
     "inspectionRequired": "Inspection required",
+    "deviceLabelCage": "Cage",
+    "deviceLabelPlug": "Plug",
     "entries": "Sessions",
     "totalDuration": "Total duration",
     "trainingGoals": "Training goals",

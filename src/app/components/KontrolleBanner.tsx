@@ -25,6 +25,8 @@ interface Props {
   openLabel?: string;
   /** compact only – slot for withdraw X button */
   withdrawAction?: ReactNode;
+  /** Geräte-Label (z.B. „Cage" / „Plug") — bei mehreren aktiven Kontrollen zur Unterscheidung. */
+  deviceLabel?: string | null;
 }
 
 export default function KontrolleBanner({
@@ -37,6 +39,7 @@ export default function KontrolleBanner({
   actions,
   openLabel,
   withdrawAction,
+  deviceLabel,
   tz = APP_TZ,
   viewerTz,
 }: Props) {
@@ -74,7 +77,10 @@ export default function KontrolleBanner({
         : <AlertTriangle size={22} className="flex-shrink-0 text-inspect" />
       }
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-bold">{overdue ? t("overdueTitle") : (openLabel ?? defaultOpenLabel)}</p>
+        <p className="text-sm font-bold">
+          {overdue ? t("overdueTitle") : (openLabel ?? defaultOpenLabel)}
+          {deviceLabel && <span className="ml-1.5 font-semibold opacity-70">· {deviceLabel}</span>}
+        </p>
         <p className="text-xs opacity-80">
           {overdue ? t("overduePrefix") : t("untilPrefix")} {deadlineStr}
           {code && <> · {t("code")}: <span className="font-mono font-bold">{code}</span></>}

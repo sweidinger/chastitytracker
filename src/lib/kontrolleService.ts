@@ -6,6 +6,7 @@ import { trackEvent } from "@/lib/telemetry";
 import { notifyUser } from "@/lib/notify";
 import type { ServiceResult } from "@/lib/serviceResult";
 import type { PrismaTx } from "@/lib/queries";
+import { plugCategoryId } from "@/lib/deviceCategories";
 
 export type KontrolleAction = "withdraw" | "manuallyVerify" | "reject";
 
@@ -133,19 +134,39 @@ export async function requestKontrolle(
   let sealCode: string | null;
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const latest = await getLatestKgEntry(userId, tx);
-      if (!latest || latest.type !== "VERSCHLUSS") {
-        throw Object.assign(new Error(), { _code: "NOT_LOCKED" });
+      // Gerät (default CAGE / Legacy). Voraussetzung gerätespezifisch:
+      // CAGE → muss verschlossen sein; PLUG → muss getragen werden (aktive Plug-Session).
+      const dev: "CAGE" | "PLUG" = device === "PLUG" ? "PLUG" : "CAGE";
+      let sealSource: Awaited<ReturnType<typeof getLatestKgEntry>> | null = null;
+      if (dev === "CAGE") {
+        const latest = await getLatestKgEntry(userId, tx);
+        if (!latest || latest.type !== "VERSCHLUSS") {
+          throw Object.assign(new Error(), { _code: "NOT_LOCKED" });
+        }
+        sealSource = latest;
+      } else {
+        const latestPlug = await tx.entry.findFirst({
+          where: { userId, type: { in: ["WEAR_BEGIN", "WEAR_END"] }, device: { categoryId: plugCategoryId(userId) } },
+          orderBy: { startTime: "desc" },
+          select: { type: true },
+        });
+        if (!latestPlug || latestPlug.type !== "WEAR_BEGIN") {
+          throw Object.assign(new Error(), { _code: "NOT_WEARING" });
+        }
       }
 
-      // Nur andere MANUELLE offene Kontrollen zurückziehen — geplante Auto-Kontrollen bleiben.
+      // Nur andere MANUELLE offene Kontrollen DESSELBEN Geräts zurückziehen — geplante Auto-Kontrollen
+      // und Kontrollen des ANDEREN Geräts bleiben aktiv (Cage + Plug können gleichzeitig laufen).
+      const sameDeviceWhere = dev === "CAGE"
+        ? { OR: [{ device: null }, { device: "CAGE" }] }
+        : { device: "PLUG" };
       await tx.kontrollAnforderung.updateMany({
-        where: { userId, entryId: null, withdrawnAt: null, auto: false },
+        where: { userId, entryId: null, withdrawnAt: null, auto: false, ...sameDeviceWhere },
         data: { withdrawnAt: now },
       });
 
-      // Code nur wenn requireCode=true. Siegel-Nummer wird immer zusätzlich geprüft (falls vorhanden).
-      const seal = deriveSealCode(latest);
+      // Code nur wenn requireCode=true. Siegel-Nummer nur bei CAGE (Plug hat kein Siegel).
+      const seal = sealSource ? deriveSealCode(sealSource) : null;
       const c = requireCode ? generateKontrollCode() : null;
 
       await tx.kontrollAnforderung.create({
@@ -155,7 +176,7 @@ export async function requestKontrolle(
           deadline,
           kommentar: kommentarTrimmed || null,
           requireCode,
-          device: device ?? null,
+          device: dev,
           wirksamAb,
           benachrichtigtAt: wirksamAb ? null : now, // sofort = jetzt benachrichtigt; geplant = Poller
         },
@@ -168,6 +189,9 @@ export async function requestKontrolle(
   } catch (e: unknown) {
     if ((e as { _code?: string })?._code === "NOT_LOCKED") {
       return { ok: false, status: 400, error: "User ist nicht verschlossen" };
+    }
+    if ((e as { _code?: string })?._code === "NOT_WEARING") {
+      return { ok: false, status: 400, error: "Plug wird nicht getragen" };
     }
     throw e;
   }

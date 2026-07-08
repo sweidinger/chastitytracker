@@ -83,7 +83,18 @@ export default async function DashboardPage() {
   };
 
   // ── Compute derived state ──
-  const offeneKontrolle = alleAnforderungen.find(k => !k.entryId && !k.withdrawnAt) ?? null;
+  // Aktive (offene) Kontrollen — max. eine je Gerät (neueste), Cage-Legacy (device null) = CAGE.
+  const aktiveKontrollen = alleAnforderungen.filter((k) => !k.entryId && !k.withdrawnAt);
+  const offeneKontrollenByDevice: { k: (typeof aktiveKontrollen)[number]; device: "CAGE" | "PLUG" }[] = [];
+  {
+    const seen = new Set<string>();
+    for (const k of aktiveKontrollen) {
+      const device = k.device === "PLUG" ? "PLUG" as const : "CAGE" as const;
+      if (seen.has(device)) continue;
+      seen.add(device);
+      offeneKontrollenByDevice.push({ k, device });
+    }
+  }
 
   const latest = [...entries]
     .filter((e) => ["VERSCHLUSS", "OEFFNEN"].includes(e.type))
@@ -97,7 +108,8 @@ export default async function DashboardPage() {
   const cageDeviceName = latest?.type === "VERSCHLUSS" ? (latest.device?.name ?? null) : null;
 
   // ── Build kontroll items for session events ──
-  const kontrollItems = buildKontrolleItems(alleAnforderungen, entries.filter(e => e.type === "PRUEFUNG"), now);
+  // Cage-Timeline: nur KG-Kontrollen (device CAGE/null) — Plug-Kontrollen erscheinen in der Plug-Karte.
+  const kontrollItems = buildKontrolleItems(alleAnforderungen.filter((k) => k.device !== "PLUG"), entries.filter(e => e.type === "PRUEFUNG"), now);
   const pairs = buildPairs(entries, kontrollItems, reinigung);
   const activePair = pairs.find((p) => p.active) ?? null;
 
@@ -146,11 +158,22 @@ export default async function DashboardPage() {
   }
 
   // ── Serialize for client ──
-  const kontrolleOverdue = offeneKontrolle ? offeneKontrolle.deadline < now : false;
-  const kontrolleCode = offeneKontrolle?.code || null; // "" → null when requireCode=false
-  const kontrolleHref = offeneKontrolle
-    ? `/dashboard/new/pruefung${kontrolleCode ? `?code=${kontrolleCode}${offeneKontrolle.kommentar ? `&kommentar=${encodeURIComponent(offeneKontrolle.kommentar)}` : ""}` : offeneKontrolle.kommentar ? `?kommentar=${encodeURIComponent(offeneKontrolle.kommentar)}` : ""}`
-    : "";
+  const offeneKontrollen = offeneKontrollenByDevice.map(({ k, device }) => {
+    const code = k.code || null; // "" → null when requireCode=false
+    const kommentar = k.kommentar ?? null;
+    const params = new URLSearchParams();
+    if (code) params.set("code", code);
+    if (kommentar) params.set("kommentar", kommentar);
+    params.set("device", device);
+    return {
+      deadline: k.deadline.toISOString(),
+      code,
+      kommentar,
+      overdue: k.deadline < now,
+      href: `/dashboard/new/pruefung?${params.toString()}`,
+      device,
+    };
+  });
 
   const anfOverdue = offeneVerschlussAnf ? (offeneVerschlussAnf.endetAt ? offeneVerschlussAnf.endetAt < now : false) : false;
 
@@ -162,13 +185,7 @@ export default async function DashboardPage() {
     currentStatus,
     hasEntries: entries.length > 0,
 
-    offeneKontrolle: offeneKontrolle ? {
-      deadline: offeneKontrolle.deadline.toISOString(),
-      code: kontrolleCode,
-      kommentar: offeneKontrolle.kommentar,
-      overdue: kontrolleOverdue,
-      href: kontrolleHref,
-    } : null,
+    offeneKontrollen,
 
     offeneVerschlussAnf: offeneVerschlussAnf ? {
       endetAt: offeneVerschlussAnf.endetAt?.toISOString() ?? null,
