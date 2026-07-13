@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { buildStrafbuch, type StrafbuchData } from "@/lib/strafbuch";
-import { notifyUser } from "@/lib/notify";
+import { notifyUser, type NotifyContent } from "@/lib/notify";
 import { executePenaltyAction, type PenaltyAction } from "@/lib/penaltyActions";
 import { bestaetigeErledigung, lehneErledigungAb } from "@/lib/strafErledigung";
 import type { ServiceResult } from "@/lib/serviceResult";
@@ -19,6 +19,7 @@ export type OffenseCanonicalType =
   | "unauthorized_opening"
   | "late_control"
   | "rejected_control"
+  | "auto_removed_control"
   | "wrong_device"
   | "missed_orgasm"
   | "missed_session"
@@ -30,6 +31,9 @@ const STORED_TYPE: Record<OffenseCanonicalType, string> = {
   unauthorized_opening: "OEFFNEN_ENTRY",
   late_control: "KONTROLLANFORDERUNG",
   rejected_control: "KONTROLLANFORDERUNG",
+  // Eigener Typ statt "KONTROLLANFORDERUNG" — eine vermutete Entfernung (Kontrolle nicht
+  // beantwortet, System hat automatisch geöffnet) ist etwas anderes als eine verspätete Einreichung.
+  auto_removed_control: "AUTO_ENTFERNT",
   wrong_device: "FALSCHES_GERAET",
   missed_orgasm: "ORGASMUS_ANWEISUNG",
   missed_session: "SESSION_VERSAEUMT",
@@ -46,6 +50,7 @@ export const OFFENSE_SEVERITY: Record<OffenseCanonicalType, OffenseSeverity> = {
   unauthorized_opening: "schwer",
   wrong_device: "schwer",
   rejected_control: "schwer",
+  auto_removed_control: "schwer",  // vermutete Entfernung: Kontrolle ignoriert, System hat automatisch geöffnet
   missed_lock: "mittel",
   missed_session: "mittel",
   missed_orgasm: "mittel",
@@ -118,6 +123,7 @@ export function collectDetectedOffenses(sb: StrafbuchData): DetectedOffense[] {
     ...sb.unauthorizedOpenings.map((o) => mk("unauthorized_opening", o.id, o.startTime)),
     ...sb.lateControls.map((k) => mk("late_control", k.id, k.entryStartTime ?? k.deadline)),
     ...sb.rejectedControls.map((k) => mk("rejected_control", k.id, k.entryStartTime ?? k.deadline)),
+    ...sb.autoRemovedControls.map((k) => mk("auto_removed_control", k.id, k.entryStartTime ?? k.deadline)),
     ...sb.wrongDeviceViolations.map((v) => mk("wrong_device", v.entryId, v.startTime)),
     ...sb.erektionViolations.map((v) => mk("erektion", v.entryId, v.startTime)),
     ...sb.pauseOverageViolations.map((v) => mk("pause_overage", v.entryId, v.startTime)),
@@ -205,11 +211,10 @@ export interface JudgeOffenseResult {
  */
 /** Betreff + Text der „Strafe verhängt"-Benachrichtigung — geteilt von judgeOffense (MCP) und
  *  der Admin-Strafe-Route, damit beide Wege identisch benachrichtigen. */
-export function strafeVerhaengtNotice(reason: string | null): { subject: string; message: string } {
-  return {
-    subject: "Strafe verhängt",
-    message: reason ? `Der Keyholder hat eine Strafe verhängt: ${reason}` : "Der Keyholder hat eine Strafe verhängt.",
-  };
+export function strafeVerhaengtNotice(reason: string | null): NotifyContent {
+  return reason
+    ? { subjectKey: "penaltySubject", messageKey: "penaltyMessage", params: { reason } }
+    : { subjectKey: "penaltySubject", messageKey: "penaltyMessageNoReason" };
 }
 
 export async function judgeOffense(p: JudgeOffenseParams): Promise<ServiceResult<JudgeOffenseResult>> {

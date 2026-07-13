@@ -95,10 +95,9 @@ export async function meldeErledigung(
   try {
     for (const c of await getControllersOfUser(userId)) {
       await notifyUser(c.id, {
-        subject: "Strafe als erledigt gemeldet",
-        message: rec.reason
-          ? `Dein Sub meldet eine Strafe als erledigt: ${rec.reason}`
-          : "Dein Sub meldet eine Strafe als erledigt.",
+        subjectKey: "penaltyReportedSubject",
+        messageKey: rec.reason ? "penaltyReportedMessage" : "penaltyReportedMessagePlain",
+        ...(rec.reason ? { params: { reason: rec.reason } } : {}),
       });
     }
   } catch { /* Benachrichtigung darf die Meldung nie verhindern */ }
@@ -118,8 +117,9 @@ export async function bestaetigeErledigung(userId: string, refId: string): Promi
     data: { erledigtAt: new Date(), ablehnungGrund: null },
   });
   await notifyUser(userId, {
-    subject: "Strafe abgehakt",
-    message: rec.reason ? `Deine Erledigung wurde bestätigt: ${rec.reason}` : "Deine Erledigung wurde bestätigt.",
+    subjectKey: "penaltyConfirmedSubject",
+    messageKey: rec.reason ? "penaltyConfirmedMessage" : "penaltyConfirmedMessagePlain",
+    ...(rec.reason ? { params: { reason: rec.reason } } : {}),
   });
   return { ok: true, data: { refId } };
 }
@@ -142,8 +142,9 @@ export async function lehneErledigungAb(
     data: { gemeldetAt: null, ablehnungGrund: text },
   });
   await notifyUser(userId, {
-    subject: "Erledigung abgelehnt",
-    message: `Deine gemeldete Erledigung wurde abgelehnt: ${text}. Die Strafe ist weiterhin offen.`,
+    subjectKey: "penaltyRejectedSubject",
+    messageKey: "penaltyRejectedMessage",
+    params: { text },
   });
   return { ok: true, data: { refId } };
 }

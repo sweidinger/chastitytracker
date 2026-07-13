@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { sendMail, escHtml, dashboardEmailHtml } from "@/lib/mail";
-import { notifyUser } from "@/lib/notify";
+import { notifyUser, type NotifyContent } from "@/lib/notify";
+import { emailT, emailGreeting } from "@/lib/emailI18n";
 import { validateDeviceOwnership } from "@/lib/queries";
 import { formatDateTime } from "@/lib/utils";
 import { sendPushToUser } from "@/lib/push";
@@ -157,7 +158,7 @@ export async function createVerschlussAnforderung(
  *  Reused by the immediate path in createVerschlussAnforderung and by the delayed-trigger poller. */
 export async function sendVerschlussAnforderungNotifications(opts: {
   userId: string;
-  user: { email: string | null; username: string };
+  user: { email: string | null; username: string; locale: string };
   art: "ANFORDERUNG" | "SPERRZEIT";
   nachricht?: string | null;
   endetAtDate: Date | null;
@@ -165,47 +166,59 @@ export async function sendVerschlussAnforderungNotifications(opts: {
   isPlugCategory?: boolean;
 }) {
   const { userId, user, art, nachricht, endetAtDate, dauerH, isPlugCategory } = opts;
+  const t = await emailT(user.locale);
   const nachrichtHtml = nachricht?.trim()
-    ? `<div style="background:#fef9c3;border:1px solid #fde047;border-radius:10px;padding:14px 18px;margin:16px 0"><p style="margin:0 0 4px 0;font-size:13px;font-weight:bold;color:#713f12">Nachricht des Admins:</p><p style="margin:0;font-size:15px;color:#422006">${escHtml(nachricht.trim())}</p></div>`
+    ? `<div style="background:#fef9c3;border:1px solid #fde047;border-radius:10px;padding:14px 18px;margin:16px 0"><p style="margin:0 0 4px 0;font-size:13px;font-weight:bold;color:#713f12">${t("lockNoticeLabel")}</p><p style="margin:0;font-size:15px;color:#422006">${escHtml(nachricht.trim())}</p></div>`
     : "";
+  const greeting = emailGreeting(t, user.username);
 
   if (art === "SPERRZEIT" && user.email) {
     const bisHtml = endetAtDate
-      ? `<p><strong>Gesperrt bis:</strong> ${formatDateTime(endetAtDate)}</p>`
-      : `<p><strong>Dauer:</strong> Unbefristet</p>`;
-    const subject = isPlugCategory ? "KG-Tracker – Plug Sperrdauer gesetzt" : "KG-Tracker – Sperrzeit gesetzt";
-    const title = isPlugCategory ? "Plug Sperrdauer gesetzt" : "Sperrzeit gesetzt";
-    const body = isPlugCategory
-      ? `<p>Hallo ${escHtml(user.username)},</p><p>Der Admin hat eine Sperrdauer für den Anal-Plug gesetzt. Du darfst ihn in dieser Zeit nicht ablegen.</p>`
-      : `<p>Hallo ${escHtml(user.username)},</p><p>Der Admin hat eine Sperrzeit gesetzt. Du darfst dich in dieser Zeit nicht öffnen.</p>`;
-    await sendMail(user.email, subject, dashboardEmailHtml(title, `${body}${nachrichtHtml}${bisHtml}`));
+        ? `<p><strong>${t("lockedUntilLabel")}</strong> ${formatDateTime(endetAtDate)}</p>`
+        : `<p><strong>${t("lockDurationLabel")}</strong> ${t("lockIndefinite")}</p>`;
+      const subject = isPlugCategory ? t("lockPeriodSetSubjectPlug") : t("lockPeriodSetSubject");
+      await sendMail(
+        user.email,
+        `KG-Tracker – ${subject}`,
+        dashboardEmailHtml(subject,
+          `${greeting}
+          <p>${escHtml(isPlugCategory ? t("lockPeriodSetBodyPlug") : t("lockPeriodSetBody"))}</p>
+          ${nachrichtHtml}
+          ${bisHtml}`, t("dashboardButton")),
+      );
   }
 
   if (art === "ANFORDERUNG" && user.email) {
     const deadlineHtml = endetAtDate
-      ? `<p><strong>${isPlugCategory ? "Bitte anlegen bis" : "Bitte einschliessen bis"}:</strong> ${formatDateTime(endetAtDate)}</p>`
-      : "";
-    const dauerHtml = dauerH && !isPlugCategory
-      ? `<p><strong>Mindest-Tragedauer nach Einschliessen:</strong> ${dauerH >= 24 ? `${Math.floor(dauerH / 24)}T ${dauerH % 24 > 0 ? `${dauerH % 24}h` : ""}`.trim() : `${dauerH}h`}</p>`
-      : "";
-    const subject = isPlugCategory ? "KG-Tracker – Plug anlegen angefordert" : "KG-Tracker – Einschliessen angefordert";
-    const title = isPlugCategory ? "Anal-Plug anlegen angefordert" : "Einschliessen angefordert";
-    const body = isPlugCategory
-      ? `<p>Hallo ${escHtml(user.username)},</p><p>Der Admin hat dich aufgefordert, den Anal-Plug anzulegen.</p>`
-      : `<p>Hallo ${escHtml(user.username)},</p><p>Der Admin hat dich aufgefordert, dich einzuschliessen.</p>`;
-    await sendMail(user.email, subject, dashboardEmailHtml(title, `${body}${nachrichtHtml}${deadlineHtml}${dauerHtml}`));
-  }
+        ? `<p><strong>${isPlugCategory ? t("lockUntilLabelPlug") : t("lockUntilLabel")}</strong> ${formatDateTime(endetAtDate)}</p>`
+        : "";
+      // Mindest-Tragedauer gibt es nur beim Käfig — für den Plug wird keine Dauer angekündigt.
+      const dauerHtml = dauerH && !isPlugCategory
+        ? `<p><strong>${t("lockMinWearLabel")}</strong> ${dauerH >= 24 ? `${Math.floor(dauerH / 24)}${t("dayUnitShort")} ${dauerH % 24 > 0 ? `${dauerH % 24}h` : ""}`.trim() : `${dauerH}h`}</p>`
+        : "";
+      const subject = isPlugCategory ? t("lockRequestSubjectPlug") : t("lockRequestSubject");
+      await sendMail(
+        user.email,
+        `KG-Tracker – ${subject}`,
+        dashboardEmailHtml(subject,
+          `${greeting}
+          <p>${escHtml(isPlugCategory ? t("lockRequestBodyPlug") : t("lockRequestBody"))}</p>
+          ${nachrichtHtml}
+          ${deadlineHtml}
+          ${dauerHtml}`, t("dashboardButton")),
+      );
+    }
 
-  // Push (fire-and-forget)
-  const pushTitle = art === "ANFORDERUNG"
-    ? (isPlugCategory ? "Anal-Plug anlegen" : "Bitte einschliessen")
-    : (isPlugCategory ? "Plug Sperrdauer gesetzt" : "Sperrzeit gesetzt");
-  const pushParts: string[] = [];
-  if (art === "ANFORDERUNG") {
-    pushParts.push(isPlugCategory ? "Der Admin fordert dich auf, den Anal-Plug anzulegen." : "Der Admin fordert dich auf, dich einzuschliessen.");
-    if (endetAtDate) pushParts.push(`Frist: ${formatDateTime(endetAtDate)}`);
+    // Push (fire-and-forget)
+    const pushTitle = art === "ANFORDERUNG"
+      ? (isPlugCategory ? t("lockPushRequestTitlePlug") : t("lockPushRequestTitle"))
+      : (isPlugCategory ? t("lockPeriodSetSubjectPlug") : t("lockPushPeriodTitle"));
+    const pushParts: string[] = [];
+    if (art === "ANFORDERUNG") {
+      pushParts.push(isPlugCategory ? t("lockPushRequestBodyPlug") : t("lockPushRequestBody"));
+      if (endetAtDate) pushParts.push(t("lockPushDeadline", { date: formatDateTime(endetAtDate) }));
   } else {
-    pushParts.push(endetAtDate ? `Bis: ${formatDateTime(endetAtDate)}` : "Unbefristet");
+    pushParts.push(endetAtDate ? t("lockPushUntil", { date: formatDateTime(endetAtDate) }) : t("lockIndefinite"));
   }
   if (nachricht?.trim()) pushParts.push(nachricht.trim());
   sendPushToUser(userId, pushTitle, pushParts.join(" · "), "/dashboard").catch(() => { /* ignore push errors */ });
@@ -231,21 +244,18 @@ export async function updateSperrzeitEnde(
   }
 
   await prisma.verschlussAnforderung.update({ where: { id }, data: { endetAt } });
-  await notifyUser(va.userId, {
-    subject: "Sperrzeit geändert",
-    message: endetAt
-      ? `Der Keyholder hat das Ende deiner Sperrzeit auf ${formatDateTime(endetAt)} geändert.`
-      : "Der Keyholder hat deine Sperrzeit auf unbefristet gesetzt.",
-  });
+  await notifyUser(va.userId, endetAt
+    ? { subjectKey: "lockPeriodChangedSubject", messageKey: "lockPeriodChangedMessage", params: { date: formatDateTime(endetAt) } }
+    : { subjectKey: "lockPeriodChangedSubject", messageKey: "lockPeriodChangedMessageIndefinite" });
   return { ok: true, data: { id, userId: va.userId } };
 }
 
 /** Betreff + Text der Withdraw-Benachrichtigung — geteilt von Service (MCP, per art) und
  *  Admin-Route (per id), damit die Meldung nicht divergiert. */
-export function verschlussWithdrawNotice(art: "ANFORDERUNG" | "SPERRZEIT"): { subject: string; message: string } {
+export function verschlussWithdrawNotice(art: "ANFORDERUNG" | "SPERRZEIT"): NotifyContent {
   return art === "SPERRZEIT"
-    ? { subject: "Sperrzeit aufgehoben", message: "Der Keyholder hat deine aktive Sperrzeit aufgehoben." }
-    : { subject: "Anforderung zurückgezogen", message: "Der Keyholder hat die Einschliess-Anforderung zurückgezogen." };
+    ? { subjectKey: "lockPeriodWithdrawnSubject", messageKey: "lockPeriodWithdrawnMessage" }
+    : { subjectKey: "lockRequestWithdrawnSubject", messageKey: "lockRequestWithdrawnMessage" };
 }
 
 /**

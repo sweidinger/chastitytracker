@@ -3,7 +3,9 @@ import { sendMail, escHtml } from "@/lib/mail";
 import { formatDateTime } from "@/lib/utils";
 import { sendPushToUser } from "@/lib/push";
 import { trackEvent } from "@/lib/telemetry";
-import { notifyUser } from "@/lib/notify";
+import { notifyUser, type NotifyContent } from "@/lib/notify";
+import { emailT, emailGreeting } from "@/lib/emailI18n";
+import { toLocale, inspectionHelpUrl } from "@/lib/constants";
 import type { ServiceResult } from "@/lib/serviceResult";
 import type { PrismaTx } from "@/lib/queries";
 import { plugCategoryId } from "@/lib/deviceCategories";
@@ -31,10 +33,10 @@ export async function resolveKontrolle(id: string, action: KontrolleAction): Pro
     return { ok: false, status: 400, error: "Unbekannte Aktion" };
   }
 
-  const notif =
-    action === "manuallyVerify" ? { subject: "Kontrolle bestätigt", message: "Der Keyholder hat deine eingereichte Kontrolle bestätigt." }
-    : action === "reject" ? { subject: "Kontrolle abgelehnt", message: "Der Keyholder hat deine Kontrolle abgelehnt — bitte reiche eine neue ein." }
-    : { subject: "Kontrolle zurückgezogen", message: "Der Keyholder hat die angeforderte Kontrolle zurückgezogen." };
+  const notif: NotifyContent =
+    action === "manuallyVerify" ? { subjectKey: "inspectionConfirmedSubject", messageKey: "inspectionConfirmedMessage" }
+    : action === "reject" ? { subjectKey: "inspectionRejectedSubject", messageKey: "inspectionRejectedMessage" }
+    : { subjectKey: "inspectionResolvedWithdrawnSubject", messageKey: "inspectionResolvedWithdrawnMessage" };
   await notifyUser(ka.userId, notif);
 
   return { ok: true, data: { userId: ka.userId } };
@@ -83,6 +85,41 @@ export function sealRequiredForCode(
 /** Frische 5-stellige Kontroll-Code-Nummer (10000–99999). */
 export function generateKontrollCode(): string {
   return String(Math.floor(10000 + Math.random() * 90000));
+}
+
+/** True, wenn der User eine LAUFENDE Kontrolle hat — angelegt, nicht erfüllt, nicht zurückgezogen,
+ *  bereits sichtbar (sofort oder wirksamAb erreicht) UND noch innerhalb der Frist (deadline >= now).
+ *  Das entspricht genau Status "open" aus mapAnforderungStatus. Bewusst NICHT blockierend sind:
+ *  - geplante (wirksamAb in Zukunft) — noch unsichtbar, es gibt nichts zu überschneiden;
+ *  - überfällige (deadline < now) — das Fenster ist abgelaufen; eine solche Zeile würde sonst,
+ *    wenn der Sub sie nie beantwortet und die Auto-Markierung aus ist, JEDE künftige (auch Auto-)
+ *    Kontrolle dauerhaft blockieren. Überfällige werden weiter normal eskaliert/bestraft — sie
+ *    zählen hier nur nicht mehr als "aktiv". Gemeinsamer Guard für requestKontrolle (Anlegen) UND
+ *    den Poller (Ausliefern), damit sich echte laufende Kontrollen nie überschneiden.
+ *  `excludeId` lässt den Poller "irgendeine ANDERE laufende" prüfen, wenn die zu prüfende Zeile
+ *  selbst bereits auf die Kriterien passt. Kompatibel mit der Eskalations-Auto-Markierung: die
+ *  setzt withdrawnAt, fällt also korrekt aus diesem Guard heraus, ohne Sonderfall-Code. */
+export async function hasActiveKontrolle(
+  userId: string,
+  now: Date,
+  opts?: { excludeId?: string; tx?: PrismaTx; device?: string | null },
+): Promise<boolean> {
+  const client = opts?.tx ?? prisma;
+  const existing = await client.kontrollAnforderung.findFirst({
+    where: {
+      userId, entryId: null, withdrawnAt: null,
+      OR: [{ wirksamAb: null }, { wirksamAb: { lte: now } }], // sichtbar
+      deadline: { gte: now },                                 // noch innerhalb der Frist (nicht überfällig)
+      ...(opts?.excludeId ? { id: { not: opts.excludeId } } : {}),
+      // Geräte-bewusst: "CAGE" deckt auch Legacy-Zeilen ohne device ab; Plug-Kontrollen sind
+      // davon unabhängig, damit Käfig und Plug parallel kontrolliert werden können.
+      ...(opts?.device === undefined ? {} : opts.device === "PLUG"
+        ? { device: "PLUG" }
+        : { OR: [{ device: null }, { device: "CAGE" }] }),
+    },
+    select: { id: true },
+  });
+  return existing !== null;
 }
 
 export interface RequestKontrolleParams {
@@ -155,15 +192,12 @@ export async function requestKontrolle(
         }
       }
 
-      // Nur andere MANUELLE offene Kontrollen DESSELBEN Geräts zurückziehen — geplante Auto-Kontrollen
-      // und Kontrollen des ANDEREN Geräts bleiben aktiv (Cage + Plug können gleichzeitig laufen).
-      const sameDeviceWhere = dev === "CAGE"
-        ? { OR: [{ device: null }, { device: "CAGE" }] }
-        : { device: "PLUG" };
-      await tx.kontrollAnforderung.updateMany({
-        where: { userId, entryId: null, withdrawnAt: null, auto: false, ...sameDeviceWhere },
-        data: { withdrawnAt: now },
-      });
+        // Überschneidungs-Schutz (geräte-bewusst): eine laufende Kontrolle DESSELBEN Geräts blockiert
+        // eine neue — Cage und Plug dürfen weiterhin parallel kontrolliert werden. Best-Effort-
+        // Read-then-Write in derselben Transaktion (siehe hasActiveKontrolle).
+        if (await hasActiveKontrolle(userId, now, { tx, device: dev })) {
+          throw Object.assign(new Error(), { _code: "ALREADY_ACTIVE" });
+        }
 
       // Code nur wenn requireCode=true. Siegel-Nummer nur bei CAGE (Plug hat kein Siegel).
       const seal = sealSource ? deriveSealCode(sealSource) : null;
@@ -193,6 +227,9 @@ export async function requestKontrolle(
     if ((e as { _code?: string })?._code === "NOT_WEARING") {
       return { ok: false, status: 400, error: "Plug wird nicht getragen" };
     }
+    if ((e as { _code?: string })?._code === "ALREADY_ACTIVE") {
+      return { ok: false, status: 409, error: "Es ist bereits eine Kontrolle aktiv – zuerst abschliessen oder zurückziehen." };
+    }
     throw e;
   }
 
@@ -214,7 +251,7 @@ export async function requestKontrolle(
  * No-op if the user has no e-mail. Push is fire-and-forget.
  */
 export async function sendKontrolleNotification(opts: {
-  user: { id: string; email: string | null; username: string };
+  user: { id: string; email: string | null; username: string; locale: string };
   code: string | null;  // null = kein Frische-Code erforderlich (nur Foto-Nachweis)
   sealCode: string | null;
   kommentar: string | null;
@@ -223,14 +260,18 @@ export async function sendKontrolleNotification(opts: {
   const { user, code, sealCode, kommentar, deadline } = opts;
   if (!user.email) return;
 
+  const locale = toLocale(user.locale);
+  const t = await emailT(locale);
+
   const hoursLeft = Math.max(1, Math.round((deadline.getTime() - Date.now()) / (60 * 60 * 1000)));
   const kommentarHtml = kommentar
-    ? '<div style="background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:14px 18px;margin:16px 0"><p style="margin:0 0 4px 0;font-size:13px;font-weight:bold;color:#713f12">Anweisung des Admins:</p><p style="margin:0;font-size:15px;color:#422006">' + escHtml(kommentar) + '</p></div>'
+    ? `<div style="background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:14px 18px;margin:16px 0"><p style="margin:0 0 4px 0;font-size:13px;font-weight:bold;color:#713f12">${t("inspectionAdminLabel")}</p><p style="margin:0;font-size:15px;color:#422006">${escHtml(kommentar)}</p></div>`
     : "";
 
   const baseUrl = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
   const kommentarParam = kommentar ? `&kommentar=${encodeURIComponent(kommentar)}` : "";
   const deadlineStr = formatDateTime(deadline);
+  const helpUrl = inspectionHelpUrl(locale);
 
   let bodyHtml: string;
   let pushBody: string;
@@ -240,26 +281,27 @@ export async function sendKontrolleNotification(opts: {
     // Kein Frische-Code: nur Foto als Nachweis des Tragens
     const link = `${baseUrl}/dashboard/new/pruefung${kommentarParam ? `?${kommentarParam.slice(1)}` : ""}`;
     const sealHintHtml = sealCode
-      ? '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin:16px 0"><p style="margin:0;font-size:14px;color:#1e3a8a"><strong>Hinweis:</strong> Die Siegel-Nummer deines Verschlusses muss auf dem Foto lesbar sein.</p></div>'
+      ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin:16px 0"><p style="margin:0;font-size:14px;color:#1e3a8a"><strong>${t("inspectionSealHintLabelPhoto")}</strong> ${t("inspectionSealHintTextPhoto")}</p></div>`
       : "";
     bodyHtml = `
     <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
-      <h2 style="color:#1e293b">Kontrolle angefordert</h2>
-      <p>Hallo ${escHtml(user.username)},</p>
-      <p>Es wurde eine Kontrolle angefordert. Bitte erstelle innert der nächsten ${hoursLeft} Stunde${hoursLeft === 1 ? "" : "n"} einen Kontroll-Eintrag mit Foto als Nachweis des Tragens.</p>
+      <h2 style="color:#1e293b">${t("inspectionRequestedSubject")}</h2>
+      ${emailGreeting(t, user.username)}
+      <p>${escHtml(t("inspectionRequestedIntroPhoto", { hours: hoursLeft }))}</p>
       ${kommentarHtml}
       ${sealHintHtml}
-      <p><strong>Frist:</strong> ${deadlineStr}</p>
+      <p><strong>${t("inspectionDeadlineLabel")}</strong> ${deadlineStr}</p>
       <p>
         <a href="${link}" style="display:inline-block;background:#f97316;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold">
-          Kontrolle jetzt erfassen →
+          ${t("inspectionButton")}
         </a>
       </p>
-      <p style="color:#94a3b8;font-size:12px">Falls du den Link nicht öffnen kannst, gehe zu: ${link}</p>
+      <p style="color:#94a3b8;font-size:12px">${escHtml(t("inspectionLinkFallback", { link }))}</p>
+      <p style="color:#64748b;font-size:13px;margin-top:20px;border-top:1px solid #f1f5f9;padding-top:16px">${escHtml(t("inspectionHelpText"))} <a href="${helpUrl}" style="color:#4f46e5">${escHtml(t("inspectionHelpLink"))}</a></p>
     </div>
     `;
-    const pushParts = [`Foto-Nachweis erforderlich`, `Frist: ${deadlineStr}`];
-    if (sealCode) pushParts.push("Siegel-Nummer mitfotografieren");
+    const pushParts = [t("inspectionPushPhotoOnly"), t("inspectionPushDeadline", { deadline: deadlineStr })];
+    if (sealCode) pushParts.push(t("inspectionPushSeal"));
     if (kommentar) pushParts.push(kommentar);
     pushBody = pushParts.join(" · ");
     pushLink = `/dashboard/new/pruefung`;
@@ -268,38 +310,39 @@ export async function sendKontrolleNotification(opts: {
     const sealRequired = requiredSealCode(code, sealCode) !== null;
     const link = `${baseUrl}/dashboard/new/pruefung?code=${code}${kommentarParam}`;
     const codeLabel = sealCode && !sealRequired
-      ? "Deine Siegel-Nummer (muss auf dem Foto erkennbar sein):"
-      : "Dein Kontroll-Code (muss auf dem Foto erkennbar sein):";
+      ? t("inspectionCodeLabelSeal")
+      : t("inspectionCodeLabelControl");
     const sealHintHtml = sealRequired
-      ? '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin:16px 0"><p style="margin:0;font-size:14px;color:#1e3a8a"><strong>Zusätzlich:</strong> Die Siegel-Nummer deines Verschlusses muss auf demselben Foto lesbar sein.</p></div>'
+      ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin:16px 0"><p style="margin:0;font-size:14px;color:#1e3a8a"><strong>${t("inspectionSealHintLabel")}</strong> ${t("inspectionSealHintText")}</p></div>`
       : "";
     bodyHtml = `
     <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
-      <h2 style="color:#1e293b">Kontrolle angefordert</h2>
-      <p>Hallo ${escHtml(user.username)},</p>
-      <p>Es wurde eine Kontrolle angefordert. Bitte erstelle innert der nächsten ${hoursLeft} Stunde${hoursLeft === 1 ? "" : "n"} einen Kontroll-Eintrag mit Foto.</p>
+      <h2 style="color:#1e293b">${t("inspectionRequestedSubject")}</h2>
+      ${emailGreeting(t, user.username)}
+      <p>${escHtml(t("inspectionRequestedIntro", { hours: hoursLeft }))}</p>
       ${kommentarHtml}
       <p><strong>${codeLabel}</strong></p>
       <div style="font-size:48px;font-weight:bold;letter-spacing:12px;color:#f97316;text-align:center;padding:24px;background:#fff7ed;border-radius:12px;margin:16px 0">${code}</div>
       ${sealHintHtml}
-      <p><strong>Frist:</strong> ${deadlineStr}</p>
+      <p><strong>${t("inspectionDeadlineLabel")}</strong> ${deadlineStr}</p>
       <p>
         <a href="${link}" style="display:inline-block;background:#f97316;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold">
-          Kontrolle jetzt erfassen →
+          ${t("inspectionButton")}
         </a>
       </p>
-      <p style="color:#94a3b8;font-size:12px">Falls du den Link nicht öffnen kannst, gehe zu: ${link}</p>
+      <p style="color:#94a3b8;font-size:12px">${escHtml(t("inspectionLinkFallback", { link }))}</p>
+      <p style="color:#64748b;font-size:13px;margin-top:20px;border-top:1px solid #f1f5f9;padding-top:16px">${escHtml(t("inspectionHelpText"))} <a href="${helpUrl}" style="color:#4f46e5">${escHtml(t("inspectionHelpLink"))}</a></p>
     </div>
     `;
-    const pushParts = [`Code: ${code}`, `Frist: ${deadlineStr}`];
-    if (sealRequired) pushParts.push("Siegel-Nummer mitfotografieren");
+    const pushParts = [t("inspectionPushCode", { code }), t("inspectionPushDeadline", { deadline: deadlineStr })];
+    if (sealRequired) pushParts.push(t("inspectionPushSeal"));
     if (kommentar) pushParts.push(kommentar);
     pushBody = pushParts.join(" · ");
     pushLink = `/dashboard/new/pruefung?code=${code}`;
   }
 
-  await sendMail(user.email, "KG-Tracker – Kontrolle angefordert", bodyHtml);
+  await sendMail(user.email, `KG-Tracker – ${t("inspectionRequestedSubject")}`, bodyHtml);
 
-  sendPushToUser(user.id, "Kontrolle erforderlich", pushBody, pushLink)
+  sendPushToUser(user.id, t("inspectionPushTitle"), pushBody, pushLink)
     .catch(() => { /* ignore push errors */ });
 }

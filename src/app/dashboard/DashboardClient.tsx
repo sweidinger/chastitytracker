@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { Lock } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { Lock, LockOpen } from "lucide-react";
+import { useTranslations, useLocale } from "next-intl";
+import TimerDisplay from "@/app/components/TimerDisplay";
 import EmptyState from "@/app/components/EmptyState";
 import KontrolleBanner from "@/app/components/KontrolleBanner";
 import LockRequestBanner from "@/app/components/LockRequestBanner";
 import { formatHoursHM } from "@/lib/utils";
+import { inspectionHelpUrl } from "@/lib/constants";
 import { useLiveHours } from "@/app/hooks/useLiveHours";
 
 // ── Types ────────────────────────────────────
@@ -105,6 +107,7 @@ function WearPercent({ wornH, elapsedH }: { wornH: number; elapsedH: number }) {
 export default function DashboardClient(props: DashboardProps) {
   const t = useTranslations("dashboard");
   const tCommon = useTranslations("common");
+  const locale = useLocale();
   const {
     currentStatus,
     hasEntries,
@@ -230,6 +233,7 @@ export default function DashboardClient(props: DashboardProps) {
           href={k.href}
           openLabel={t("inspectionRequired")}
           deviceLabel={t(k.device === "PLUG" ? "deviceLabelPlug" : "deviceLabelCage")}
+          helpHref={inspectionHelpUrl(locale)}
           tz={tz}
         />
       ))}
