@@ -1,216 +1,924 @@
 [
   {
+    "version": "4.98.1",
+    "date": "2026-07-11",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Die Sofort-Reaktion der Keyholderin auf einen neuen Eintrag war noch blind: sie läuft über einen eigenen Pfad und bekam deshalb kein Bild — ausgerechnet in dem Moment, wo der Sub gerade ein Foto hochgeladen hat. Das Foto des erfassten Eintrags wird jetzt mitgeschickt, und sie soll sich in ihrer Reaktion konkret darauf beziehen."
+      }
+    ]
+  },
+  {
+    "version": "4.98.0",
+    "date": "2026-07-11",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Die AI-Keyholderin sieht jetzt Fotos. Bisher war sie blind: der Chat kannte nur Text, im Kontext stand lediglich, DASS ein Foto existiert. Der LLM-Client versteht nun Bild-Blöcke (Anthropic und OpenAI-kompatibel/Ollama), und die relevanten Fotos werden der Anfrage wirklich beigefügt — beschriftet, damit sie weiß, was sie sieht."
+      },
+      {
+        "type": "feat",
+        "text": "Angehängt werden bis zu 3 Bilder: offene Straf-Nachweise zuerst (die verlangen ja ihre Entscheidung), dann die neuesten Foto-Einträge der letzten 72 Stunden — Verschluss, Kontrolle, Orgasmus, Tragen, Session, Pause. Klein skaliert, damit Antwortzeit und Kosten im Rahmen bleiben. Gilt für Chat und autonomen Lauf."
+      },
+      {
+        "type": "feat",
+        "text": "Neuer Schalter Fotos sehen (Vision) in der AI-Konfiguration, standardmäßig an. Bei einem reinen Text-Modell (lokales Ollama ohne Vision) abschalten, sonst scheitern die Anfragen."
+      },
+      {
+        "type": "chore",
+        "text": "Bild-Laden und Skalieren liegt jetzt zentral in imageLoad.ts — geteilt von der Code-/Siegel-Verifikation und der neuen Keyholder-Vision, statt doppelt."
+      }
+    ]
+  },
+  {
+    "version": "4.97.0",
+    "date": "2026-07-11",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Orgasmus erfassen: Es lässt sich jetzt optional ein Foto anhängen — wie bei Verschluss, Prüfung und Pause. Das Foto ist auch beim Bearbeiten eines Eintrags änderbar."
+      },
+      {
+        "type": "feat",
+        "text": "Orgasmus anfordern: Neue Option Foto-Nachweis erforderlich. Ohne Haken darf der Sub freiwillig ein Foto anhängen, mit Haken ist es beim Erfassen Pflicht — serverseitig erzwungen, nicht nur im Formular. Die Pflicht steht auch in E-Mail und Push. Gilt ebenso für gewährte Belohnungs-Fenster."
+      },
+      {
+        "type": "feat",
+        "text": "Die AI-Keyholderin kann die Foto-Pflicht setzen (Chat und autonom über orgasmusFotoPflicht, per MCP über request_orgasm.requirePhoto). Das Foto selbst sieht sie nicht — nur der menschliche Keyholder."
+      }
+    ]
+  },
+  {
+    "version": "4.96.1",
+    "date": "2026-07-11",
+    "changes": [
+      {
+        "type": "ui",
+        "text": "Aktions-Chips und Ereignis-Karten im Keyholder-Chat waren im Dunkelmodus kaum lesbar. Ursache: sie griffen auf Farb-Tokens zu, die es im Design-System gar nicht gibt (success, error, info) — der Browser fiel auf Transparent zurück. Jetzt nutzen sie die echten Tokens (ok, warn, request, sperrzeit, inspect, unlock) samt Dunkelmodus-Werten. Betraf auch die Status-Badges im AI-Keyholder-Admin-Panel."
+      }
+    ]
+  },
+  {
+    "version": "4.96.0",
+    "date": "2026-07-11",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Strafen für den Sub sichtbar: Unter Strafen (neuer Hinweis auf dem Dashboard) sieht der Sub jetzt alle verhängten Strafen und kann sie als erledigt melden — optional mit Nachweis-Foto und Notiz. Bisher gab es das Erledigt-Feld nur im Admin-Strafbuch; der Sub erfuhr von seinen Strafen in der App gar nichts und konnte den Kreis nie schließen."
+      },
+      {
+        "type": "feat",
+        "text": "Prüf-Schleife: Eine gemeldete Erledigung wandert in den Status Zur Prüfung. Die Keyholderin sieht Nachweis und Notiz im Strafbuch und bestätigt (Strafe abgehakt) oder lehnt mit Begründung ab (Strafe wieder offen, Begründung wird dem Sub angezeigt). Jeder Schritt löst Push und E-Mail aus."
+      },
+      {
+        "type": "feat",
+        "text": "Die AI-Keyholderin sieht gemeldete Erledigungen im Status und kann sie selbst prüfen — im Chat und autonom über die neue Aktion review_strafe, per MCP über judge_offense (complete bzw. reject_completion). Das Nachweis-Foto kann sie nicht sehen; sie urteilt nach Notiz und Plausibilität."
+      },
+      {
+        "type": "fix",
+        "text": "Von der AI verhängte Strafen speichern ihren Text jetzt auch als Urteilstext — vorher blieb er im Strafbuch und in der Sub-Ansicht leer."
+      }
+    ]
+  },
+  {
+    "version": "4.95.0",
+    "date": "2026-07-10",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Belohnungs- und Straf-Historie: In der Statistik (eigene wie Admin-Ansicht) gibt es jetzt eine gemeinsame Zeitleiste aller Belohnungs- und Straf-Ereignisse — verdient, gewährt, eingelöst, verfallen, entzogen, verschoben sowie geurteilte Vergehen. Dazu Kennzahlen, ein Verlaufs-Graph des Guthabens und ein Monatsvergleich Belohnungen gegen Strafen der letzten 6 Monate."
+      },
+      {
+        "type": "feat",
+        "text": "Neues Ereignis-Protokoll (Kontoauszug) hinter der Belohnungs-Ökonomie: jede Guthaben-Bewegung wird mit Kontostand festgehalten. Das Protokoll startet mit diesem Update — frühere Buchungen lassen sich nicht rückwirkend rekonstruieren."
+      }
+    ]
+  },
+  {
+    "version": "4.94.0",
+    "date": "2026-07-10",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Gesundheits-Stopp: Der Sub kann auf seinem Tracker jederzeit selbst signalisieren, dass er eine Pause braucht (kurzer Grund genügt) — und ihn ebenso selbst wieder beenden. Solange der Stopp aktiv ist, stellt die AI-Keyholderin KEINE neuen Anforderungen und verhängt KEINE Strafen; das ist serverseitig hart blockiert, unabhängig von der eingestellten Intensität. Erlaubt bleiben nur Nachrichten und Belohnungen."
+      },
+      {
+        "type": "feat",
+        "text": "Der Gesundheits-Stopp wird der Keyholderin per Push/E-Mail gemeldet, erscheint als Hinweis auf der Admin-Übersicht und steht der AI im Status-Kontext. Bestehende Sperren/Anforderungen bleiben unangetastet — der Stopp ist ein Fürsorge-Signal, kein Not-Aus des Verschlusses."
+      }
+    ]
+  },
+  {
+    "version": "4.93.0",
+    "date": "2026-07-10",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "AI-Keyholderin: Neuer Intensitäts-Regler (1–5, sehr sanft bis sehr streng) in den Einstellungen. Er steuert, wie häufig und wie hart die KI agiert (Ton, Strafmaß, Frequenz proaktiver Aktionen) — verändert aber niemals die Sicherheitsregeln oder anatomischen Grenzen. Wirkt in Chat und autonomem Lauf. Die vorhandene Persona-Verwaltung (eigene Vorlagen anlegen/übernehmen) bleibt."
+      }
+    ]
+  },
+  {
+    "version": "4.92.0",
+    "date": "2026-07-10",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Belohnungs-Benachrichtigungen: Der Sub bekommt jetzt Push/E-Mail, wenn ihm eine Belohnung gutgeschrieben, entzogen oder verschoben wird (bisher nur beim Gewähren eines Fensters)."
+      },
+      {
+        "type": "feat",
+        "text": "AI-Keyholderin: Reward-Leitlinie im Kontext ergänzt (analog zur Schwere-Leitlinie) — sie weiß jetzt, wann Belohnungen gutzuschreiben/zu gewähren sind."
+      },
+      {
+        "type": "fix",
+        "text": "credit_reward (AI + MCP) schreibt jetzt standardmäßig nur 1 Belohnung pro Aufruf gut (statt alle erreichten Ziele auf einmal); all=true bucht bei Bedarf alle."
+      },
+      {
+        "type": "chore",
+        "text": "Abgelaufene, ungenutzte Belohnungs-Fenster werden nun automatisch als zurückgezogen markiert (Aufräumen)."
+      },
+      {
+        "type": "fix",
+        "text": "Körperregion-Konflikt wird jetzt schon beim Anfordern geprüft: Die AI kann nicht mehr Plug-Tragen UND eine Anal-Session gleichzeitig anfordern — die zweite Anforderung wird abgelehnt/übersprungen."
+      }
+    ]
+  },
+  {
+    "version": "4.91.2",
+    "date": "2026-07-10",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "AI-Keyholderin: Geräte-Anforderungen (Plug tragen / Käfig) scheiterten, wenn die AI den Gerätenamen im Listen-Format „Name (Kategorie)\" statt des reinen Namens übergab (Fehler „Gerät nicht gefunden\"). Die Namensauflösung ist jetzt tolerant (ignoriert den Kategorie-Zusatz und Groß-/Kleinschreibung)."
+      }
+    ]
+  },
+  {
+    "version": "4.91.1",
+    "date": "2026-07-10",
+    "changes": [
+      {
+        "type": "ui",
+        "text": "Gibt eine Einschließen-Anforderung ein bestimmtes Gerät vor, ist die Geräte-Auswahl im Erfass-Formular jetzt fest auf genau dieses Gerät begrenzt (gesperrt) — kein „Keinen angeben\" oder anderes Gerät mehr wählbar."
+      },
+      {
+        "type": "fix",
+        "text": "AI-Keyholderin: Bei einer Einschließen-Anforderung kann sie jetzt den Käfig strukturiert vorgeben (deviceName wird zum Gerät aufgelöst) — vorher stand das Gerät nur im Nachrichtentext und das Formular blieb frei wählbar."
+      }
+    ]
+  },
+  {
+    "version": "4.91.0",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "AI-Keyholderin (Chat + autonom) kann jetzt die Belohnungs-Ökonomie bedienen: Belohnung gewähren, Guthaben gutschreiben, Orgasmus-Entzug und Orgasmus-Gelegenheit verschieben — bisher sah sie das Guthaben nur, konnte aber nicht handeln."
+      },
+      {
+        "type": "feat",
+        "text": "AI-Keyholderin-Session-Anforderung erweitert: Video-Pflicht, Orgasmus-Ziel und „ruinierter Orgasmus\" können jetzt auch von der AI gesetzt werden. Zusätzlich neues MCP-Tool request_session für externe Agenten."
+      }
+    ]
+  },
+  {
+    "version": "4.90.1",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "chore",
+        "text": "Bereinigung: Bestehende Session-Kategorien wurden auf die Standardwerte zurückgesetzt (kein Video-Zwang, kein Orgasmus-Ziel). Diese Vorgaben werden jetzt ausschließlich pro „Session anfordern\" gesetzt."
+      }
+    ]
+  },
+  {
+    "version": "4.90.0",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "„Session anfordern\": Ist das Orgasmus-Ziel „Orgasmus erforderlich\", kann jetzt zusätzlich angehakt werden, dass es ein ruinierter Orgasmus sein muss. Der Sub sieht das entsprechend als Ziel-Badge in der Session."
+      },
+      {
+        "type": "ui",
+        "text": "Video-Beweis-Pflicht und Orgasmus-Ziel wurden aus dem Kategorie-Formular entfernt — beides wird jetzt ausschließlich pro „Session anfordern\" gesetzt (die Session-Dauer bleibt an der Kategorie)."
+      }
+    ]
+  },
+  {
+    "version": "4.89.0",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "„Session anfordern\": Video-Beweis-Pflicht und Orgasmus-Ziel sind jetzt pro Anforderung wählbar (vorbelegt mit dem Kategorie-Standard). Die Video-Checkbox ist nicht mehr durch die Kategorie gesperrt, und ein Orgasmus-Ziel (kein Ziel / erforderlich / verboten) kann direkt gesetzt werden."
+      },
+      {
+        "type": "feat",
+        "text": "Beim Erfüllen einer angeforderten Session gelten die Werte der Anforderung: Video-Pflicht wird beim Session-Ende entsprechend erzwungen und das Orgasmus-Ziel der Anforderung wird angezeigt — beides überschreibt den Kategorie-Standard."
+      }
+    ]
+  },
+  {
+    "version": "4.88.0",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "ui",
+        "text": "Formular „Orgasmus anfordern\" aufgeräumt: Die Art-Auswahl bietet jetzt drei klare Presets — Orgasmus (Masturbation), Ruinierter Orgasmus – verschlossen, Ruinierter Orgasmus – nicht verschlossen. Das Preset codiert bereits, ob geöffnet werden darf, daher entfällt die separate Checkbox „Öffnen erlaubt\"."
+      },
+      {
+        "type": "feat",
+        "text": "„Orgasmus anfordern\": Neue Checkbox „Als Belohnung gewähren\" — sie bucht 1 vom verdienten Guthaben ab und öffnet ein Belohnungs-Fenster (identisch zum Button „Belohnung gewähren\"). „Belohnung\" ist damit kein Eintrag mehr in der Art-Auswahl."
+      }
+    ]
+  },
+  {
+    "version": "4.87.1",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "ui",
+        "text": "Die Orgasmus-Art „Belohnung\" ist im Erfassungs-Formular jetzt nur noch wählbar, wenn tatsächlich ein Belohnungs-Fenster aktiv ist. Ohne gewährte Belohnung wird sie ausgeblendet."
+      }
+    ]
+  },
+  {
+    "version": "4.87.0",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Körperregion-Sperre (anatomisch): Geräte-Kategorien haben jetzt eine Körperregion (genital/anal/keine). Zwei Geräte derselben Region können nicht mehr gleichzeitig aktiv sein — ein Anal-Plug und eine Anal-/Dildo-Session gleichzeitig werden hart blockiert (Käfig + Anal-Session bleibt erlaubt). Käfig=genital und Plug=anal sind vorbelegt; für weitere Kategorien (z.B. Dildo) im Kategorie-Formular einstellbar."
+      },
+      {
+        "type": "ui",
+        "text": "Überfällige Anforderungs-Banner auf dem Tracker färben sich jetzt in Warnfarbe (Einschließen/Orgasmus/Plug/Session) — vorher blieben die großen Banner bei abgelaufener Frist in ihrer normalen Farbe."
+      },
+      {
+        "type": "fix",
+        "text": "AI-Keyholderin: Offene Session-Anforderungen stehen jetzt ebenfalls in der Status-Kurzfassung (mit Überfällig-Hinweis), erfüllte fallen automatisch heraus — so mahnt sie eine bereits absolvierte Session nicht erneut an."
+      }
+    ]
+  },
+  {
+    "version": "4.86.0",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Offene Session-Anforderungen (von Admin oder AI-Keyholderin) erscheinen jetzt als Banner auf dem eigenen Tracker — inkl. Kategorie, Frist und direktem \"Session starten\"-Button. Bisher gab es dafür nur Push/E-Mail ohne Anzeige im Dashboard."
+      }
+    ]
+  },
+  {
+    "version": "4.85.1",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "ui",
+        "text": "Aktions-Button jetzt auch auf den Anforderungs-Bannern des Trackers: Der Einschließen-Banner und der Orgasmus-Banner haben nun einen direkten Button zur passenden Seite (analog zu Plug- und Kontroll-Banner). Damit ist bei jeder Anforderung ein Start-Button präsent."
+      }
+    ]
+  },
+  {
+    "version": "4.85.0",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "AI-Keyholderin-Chat: Wenn die Keyholderin eine Aufgabe anordnet (Tragen, Session, Orgasmus, Einschließen, Kontrolle), erscheint unter der Bestätigung jetzt ein Start-Button, der direkt zur passenden Seite im Tracker führt — kein manuelles Suchen mehr."
+      }
+    ]
+  },
+  {
+    "version": "4.84.1",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "AI-Keyholderin: Ein ruinierter Orgasmus (oder jede Orgasmus-Anweisung) wird nicht mehr als \"Verschlossen\" (muss verschlossen bleiben) angeordnet, wenn der Sub gar nicht verschlossen ist. Ohne angelegten Käfig wird jetzt zwingend \"Öffnen erlaubt\" gesetzt — sowohl per Prompt-Regel als auch hart erzwungen."
+      },
+      {
+        "type": "fix",
+        "text": "AI-Keyholderin: Der aktuelle Status (welches Gerät gerade getragen wird + Verschluss-Zustand) steht jetzt als deutliche Kurz-Zusammenfassung vor den Detaildaten. So erkennt sie eine laufende Plug-/Tragesession zuverlässig und fragt nicht mehr \"Wie lange trägst du den Plug schon?\", obwohl der Tracker es weiß."
+      }
+    ]
+  },
+  {
+    "version": "4.84.0",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Doppelte Trainingsvorgaben-Box auf dem eigenen Tracker entfernt: Läuft eine Plug-Session, zeigte die große Session-Karte die Vorgaben und darunter erschien nochmals dieselbe Vorgaben-Box. Die Kategorie wird jetzt nur noch einmal (in der Session-Karte) angezeigt."
+      },
+      {
+        "type": "fix",
+        "text": "AI-Keyholderin: Körperregion-Regeln ergänzt. Sie fordert nun nicht mehr zwei Geräte derselben Körperregion gleichzeitig an — insbesondere kein Anal-Plug UND eine Dildo-/Anal-Session zusammen (anatomisch unmöglich); ein Käfig (genital) darf parallel zu einer Anal-Session laufen. Käfig und Plug werden nicht mehr verwechselt."
+      },
+      {
+        "type": "fix",
+        "text": "AI-Keyholderin: Erfüllung von Trage-/Session-Anforderungen wird jetzt am Tracker-Status abgelesen (aktive Tragesessions) statt aus dem Chat-Text angenommen oder nachgefragt — trägt der Sub das Gerät laut Tracker, wird das erkannt."
+      }
+    ]
+  },
+  {
+    "version": "4.83.2",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "ui",
+        "text": "Belohnungs-Anzeige auf dem eigenen Tracker ist jetzt dauerhaft sichtbar (auch bei Guthaben 0), analog zum Admin-Panel — verfügbares und vorgemerktes Guthaben sowie ein aktives Belohnungs-Fenster mit Restzeit."
+      }
+    ]
+  },
+  {
+    "version": "4.83.1",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Belohnung ist jetzt ein fester Built-in unter den Orgasmus-Arten — auch bei individuell angepassten Arten-Listen bleibt sie immer wählbar und darf nicht entfernt werden. So funktioniert das Gewähren einer Belohnung unabhängig von der Arten-Konfiguration des Subs."
+      }
+    ]
+  },
+  {
+    "version": "4.83.0",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Belohnungs-Ökonomie: Verdiente Orgasmen als Guthaben. Erreicht der Sub ein Trainingsziel (Tag/Woche/Monat/Jahr, KG oder Kategorie), erscheint es im Admin- und AI-Kontext als belohnbar; die Keyholderin schreibt +1 gut (einmal pro Zeitraum je Ziel). Einlösen: Belohnung gewähren öffnet ein Orgasmus-Fenster der neuen Art Belohnung und merkt 1 Guthaben vor. Der Sub erfasst den Orgasmus als Belohnung im Fenster."
+      },
+      {
+        "type": "feat",
+        "text": "Zwei neue Straf-Aktionen im Urteil: Orgasmus-Entzug (Belohnungs-Guthaben minus 1; bei Stand 0 gesperrt) und Orgasmus-Gelegenheit verschieben (aktives Belohnungs-Fenster um X Stunden). Auch für die AI-Keyholderin (judge_offense). Neue MCP-Tools grant_reward und credit_reward; Guthaben und belohnbare Ziele im keyholder_dashboard."
+      },
+      {
+        "type": "ui",
+        "text": "Sub-Dashboard zeigt ganz oben das Belohnungs-Guthaben (verfügbar/vorgemerkt) und ein aktives Belohnungs-Fenster mit Restzeit."
+      }
+    ]
+  },
+  {
+    "version": "4.82.0",
+    "date": "2026-07-09",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Inline-Konfiguration jetzt auch für die restlichen Straf-Aktionen: Extra-Kontrolle mit Gerät (Käfig/Plug), Frist und Code-Pflicht; nächstgrößerer Plug mit Mindest-Tragedauer und Frist; Sperrzeit verlängern zusätzlich mit Reinigungs- und Toilettenpausen-Optionen. Gilt auch für die AI-Keyholderin (judge_offense mit den entsprechenden Feldern)."
+      }
+    ]
+  },
+  {
+    "version": "4.81.0",
+    "date": "2026-07-08",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Straf-Aktionen im Urteil sind jetzt vollständig konfigurierbar: Bei Pflicht-Session erscheinen inline Kategorie, Mindestdauer, Erst-ab, Gerät, Nachweis-Pflicht und Frist; beim ruinierten Orgasmus Fenster und Öffnen-erlaubt. Gilt auch für die AI-Keyholderin (judge_offense mit den entsprechenden Feldern)."
+      }
+    ]
+  },
+  {
+    "version": "4.80.1",
+    "date": "2026-07-08",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Urteils-Formular: Aktions-Chips häufen den Straftext nicht mehr an — ein Klick schaltet die Aktion nur noch um (aktiver Chip hervorgehoben). Für ruinierten Orgasmus und Pflicht-Session gibt es jetzt, wie bei der Sperrzeit, ein Eingabefeld (Fenster bzw. Frist in Stunden)."
+      }
+    ]
+  },
+  {
+    "version": "4.80.0",
+    "date": "2026-07-08",
+    "changes": [
+      {
+        "type": "ui",
+        "text": "Urteils-Formular zusammengeführt: Die Strafvorschläge sind jetzt Aktions-Chips — ein Klick setzt Straftext UND Aktion zugleich (aktiver Chip hervorgehoben, Stunden-Feld direkt bei der Sperrzeit). Das separate, davon getrennte Aktions-Dropdown entfällt."
+      },
+      {
+        "type": "feat",
+        "text": "Pflicht-Session als Strafe markierbar (istStrafe) — im Admin-Formular und über die Straf-Aktion. Eine ignorierte Straf-Session eskaliert ab 2x auf schwer, symmetrisch zur Orgasmus-Anweisung."
+      }
+    ]
+  },
+  {
+    "version": "4.79.1",
+    "date": "2026-07-08",
+    "changes": [
+      {
+        "type": "ui",
+        "text": "Das Feld Größen-Reihenfolge erscheint im Geräte-Formular jetzt nur noch bei der Anal-Plug-Kategorie (dort ist es für die Strafaktion nächstgrößerer Plug relevant), nicht mehr bei jedem Gerät."
+      }
+    ]
+  },
+  {
+    "version": "4.79.0",
+    "date": "2026-07-08",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Strafbuch Phase 3 — Straf-Aktionen werden jetzt direkt ausgeführt: Beim Bestrafen kann eine Maßnahme gewählt werden, die zusätzlich zum Straf-Eintrag sofort greift — Sperrzeit verlängern (Stunden eingeben), ruinierter Orgasmus als Pflicht, Pflicht-Session, nächstgrößeren Plug anfordern oder Extra-Kontrolle. Verfügbar im Admin-Strafbuch und für die AI-Keyholderin (judge_offense mit penaltyAction)."
+      },
+      {
+        "type": "feat",
+        "text": "Geräte haben jetzt eine Größen-Reihenfolge (sortOrder), damit die Aktion nächstgrößeren Plug automatisch das passende Gerät wählt."
+      }
+    ]
+  },
+  {
+    "version": "4.78.0",
+    "date": "2026-07-08",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Strafbuch Phase 2 — Wiederholungs-Eskalation: Dasselbe Vergehen ab 5x in 7 Tagen hebt die Schwere automatisch eine Stufe an; eine ignorierte Straf-Anweisung (ruinierter Orgasmus als Pflicht) ab 2x hebt direkt auf schwer. Hochgestufte Vergehen sind im Admin-Strafbuch mit einem Marker gekennzeichnet und die AI-Keyholderin bemisst die Strafe an der effektiven Schwere (severity/escalated im MCP-Ledger)."
+      },
+      {
+        "type": "feat",
+        "text": "Orgasmus-Anweisungen können jetzt als Strafe markiert werden (Admin-Formular sowie MCP-Tool request_orgasm mit asPenalty) — Grundlage fuer die strengere Eskalation bei ignorierten Strafen."
+      }
+    ]
+  },
+  {
+    "version": "4.77.0",
+    "date": "2026-07-08",
+    "changes": [
+      {
+        "type": "ui",
+        "text": "Neu im Admin-Strafbuch: eine aufklappbare Schwere-Übersicht als Hilfestellung — sie zeigt je Stufe (schwer/mittel/leicht) die zugehörigen Vergehen und die Straf-Vorschläge auf einen Blick."
+      }
+    ]
+  },
+  {
+    "version": "4.76.0",
+    "date": "2026-07-08",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Strafbuch-Vergehen sind jetzt nach Schwere kategorisiert (leicht / mittel / schwer). Im Admin-Strafbuch zeigt jedes Vergehen ein farbiges Schwere-Badge, und die Liste ist nach Schwere sortiert (schwer zuerst)."
+      },
+      {
+        "type": "feat",
+        "text": "Beim Bestrafen erscheinen anklickbare Straf-Vorschläge passend zur Schwere-Stufe, die das Freitextfeld vorbefüllen."
+      },
+      {
+        "type": "feat",
+        "text": "AI-Keyholderin erhält Schwere + Straf-Vorschläge je Stufe als Orientierung (im Kontext, im MCP-Disziplin-Ledger als severity/penaltySuggestionsBySeverity und in der MCP-Doku). Leitlinie: ruinierter Orgasmus (Pflicht) & angeordnete Session = Strafe; normaler Orgasmus (Gelegenheit) = Belohnung."
+      }
+    ]
+  },
+  {
+    "version": "4.75.0",
+    "date": "2026-07-08",
+    "changes": [
+      {
+        "type": "chore",
+        "text": "Aufräumen: Das tote Reinigungs-/Tageslimit-UI (Limit-Warnungen, Zähler) wurde aus dem Öffnen- und Trage-Ende-Formular entfernt — es griff seit der Umstellung auf die Pause-Funktion nicht mehr. Sperrzeit-Hinweise und der reguläre Ablauf bleiben unverändert."
+      },
+      {
+        "type": "chore",
+        "text": "Reinigung und Toilette sind keine geschützten Öffnungsgründe mehr und erscheinen daher nicht mehr im Öffnungsgründe-Editor der Einstellungen. Ihre Codes/Labels bleiben systemweit erhalten (für die Pausen-Anzeige und bestehende Einträge)."
+      }
+    ]
+  },
+  {
+    "version": "4.74.0",
+    "date": "2026-07-08",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Reinigung und Toilette laufen jetzt ausschließlich über die Pause-Funktion. Beim vollständigen Öffnen bzw. Trage-Beenden werden sie nicht mehr als Grund angeboten (Server lehnt sie dort ab)."
+      },
+      {
+        "type": "ui",
+        "text": "Die Erektions-Meldung wurde vom Öffnen/Trage-Ende ins Pause-Ende verschoben — sie gehört jetzt dorthin, wo Reinigung/Toilette stattfinden. Wird weiterhin nur erkannt, nie automatisch bestraft."
+      },
+      {
+        "type": "feat",
+        "text": "Neues Vergehen: Versäumte Verschluss-Anforderung (Frist zum Einschließen abgelaufen, ohne dass eingeschlossen wurde) wird jetzt erkannt und ist im Strafbuch sowie via judge_offense beurteilbar."
+      },
+      {
+        "type": "chore",
+        "text": "Reinigungslimit-Erkennung (Käfig + Plug) entfernt — das Tageslimit wird bei der Pause bereits vorab erzwungen, ein nachträgliches Vergehen entsteht so gar nicht mehr."
+      }
+    ]
+  },
+  {
+    "version": "4.73.0",
+    "date": "2026-07-08",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Keine automatischen Bestrafungen mehr — auch Pause-Überzug (Pause länger als erlaubt) und Falsches Gerät (Verschluss mit anderem als dem angeforderten Gerät) werden jetzt nur noch als Vergehen erkannt. Das Urteil fällt ausschließlich die Keyholderin (AI) oder der Admin. Beide erscheinen im vereinheitlichten Strafbuch und sind dort sowie via judge_offense beurteilbar."
+      }
+    ]
+  },
+  {
+    "version": "4.72.0",
+    "date": "2026-07-08",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Admin-Strafbuch ist jetzt ein vereinheitlichtes Ledger: alle Vergehenstypen erscheinen in einer chronologischen Liste — inklusive der bisher fehlenden Typen Plug-Reinigungslimit, Falsches Gerät, Verpasste Orgasmus-Anweisung und Versäumte Session. Jedes Vergehen wird generisch beurteilt (bestrafen / verwerfen)."
+      },
+      {
+        "type": "fix",
+        "text": "Keine automatischen Bestrafungen mehr: Eine beim Öffnen gemeldete Erektion wird nur noch als Vergehen erkannt und nicht mehr automatisch bestraft. Das Urteil fällt die Keyholderin (AI) oder der Admin."
+      }
+    ]
+  },
+  {
     "version": "4.71.0",
     "date": "2026-07-08",
     "changes": [
-      { "type": "feat", "text": "Versäumte Session-Anforderungen (Frist abgelaufen ohne erfüllende Session) werden jetzt als Vergehen erkannt — erkannt, nicht automatisch bestraft; Keyholderin/AI urteilt (analog zur verpassten Orgasmus-Anweisung). Sichtbar im AI-Kontext und im MCP-Disziplin-Ledger, dort verurteilbar (judge_offense)." }
+      {
+        "type": "feat",
+        "text": "Versäumte Session-Anforderungen (Frist abgelaufen ohne erfüllende Session) werden jetzt als Vergehen erkannt — erkannt, nicht automatisch bestraft; Keyholderin/AI urteilt (analog zur verpassten Orgasmus-Anweisung). Sichtbar im AI-Kontext und im MCP-Disziplin-Ledger, dort verurteilbar (judge_offense)."
+      }
     ]
   },
   {
     "version": "4.70.0",
     "date": "2026-07-08",
     "changes": [
-      { "type": "ui", "text": "Einstellungen: Reinigung + Toilette für den Käfig sind jetzt in einer gemeinsamen Box zusammengefasst (analog zur Plug-Box)." },
-      { "type": "feat", "text": "Plug-Reinigung: tägliche Zeitfenster konfigurierbar (wie beim Käfig). Sind Fenster gesetzt, ist eine Plug-Reinigungspause nur innerhalb dieser Fenster möglich." }
+      {
+        "type": "ui",
+        "text": "Einstellungen: Reinigung + Toilette für den Käfig sind jetzt in einer gemeinsamen Box zusammengefasst (analog zur Plug-Box)."
+      },
+      {
+        "type": "feat",
+        "text": "Plug-Reinigung: tägliche Zeitfenster konfigurierbar (wie beim Käfig). Sind Fenster gesetzt, ist eine Plug-Reinigungspause nur innerhalb dieser Fenster möglich."
+      }
     ]
   },
   {
     "version": "4.69.1",
     "date": "2026-07-08",
     "changes": [
-      { "type": "ui", "text": "Dashboard (offener Zustand): „Offen seit\"-Box mit „Käfig\"-Label steht jetzt ganz oben; die Cage-Trainingsvorgabe wird auch im offenen Zustand angezeigt; die Schnellstart-Boxen für inaktive Geräte/Sessions entfallen (Start weiterhin über „+ Neu\")." }
+      {
+        "type": "ui",
+        "text": "Dashboard (offener Zustand): „Offen seit\"-Box mit „Käfig\"-Label steht jetzt ganz oben; die Cage-Trainingsvorgabe wird auch im offenen Zustand angezeigt; die Schnellstart-Boxen für inaktive Geräte/Sessions entfallen (Start weiterhin über „+ Neu\")."
+      }
     ]
   },
   {
     "version": "4.69.0",
     "date": "2026-07-08",
     "changes": [
-      { "type": "feat", "text": "„Session anfordern\" verfeinert: Mindestdauer, Nachweis-Pflicht (Video/Foto), geplante Auslösung („erst ab …\") und bestimmtes Gerät der Kategorie wählbar. Eine Session erfüllt die Anforderung nur, wenn Mindestdauer erreicht, ggf. Nachweis vorhanden und (falls gesetzt) das richtige Gerät genutzt wurde." }
+      {
+        "type": "feat",
+        "text": "„Session anfordern\" verfeinert: Mindestdauer, Nachweis-Pflicht (Video/Foto), geplante Auslösung („erst ab …\") und bestimmtes Gerät der Kategorie wählbar. Eine Session erfüllt die Anforderung nur, wenn Mindestdauer erreicht, ggf. Nachweis vorhanden und (falls gesetzt) das richtige Gerät genutzt wurde."
+      }
     ]
   },
   {
     "version": "4.68.0",
     "date": "2026-07-08",
     "changes": [
-      { "type": "feat", "text": "Benachrichtigungen für Pausen (Cage & Plug): neuer Bereich „Pausen\" mit Push/E-Mail für Keyholder — und die AI-Keyholderin reagiert jetzt auch auf Pause-Beginn/-Ende." },
-      { "type": "fix", "text": "Admin-Panel (pro User): aktive Kontrollen werden jetzt pro Gerät (Cage/Plug) als getrennte Banner mit Geräte-Label angezeigt (vorher nur eine)." }
+      {
+        "type": "feat",
+        "text": "Benachrichtigungen für Pausen (Cage & Plug): neuer Bereich „Pausen\" mit Push/E-Mail für Keyholder — und die AI-Keyholderin reagiert jetzt auch auf Pause-Beginn/-Ende."
+      },
+      {
+        "type": "fix",
+        "text": "Admin-Panel (pro User): aktive Kontrollen werden jetzt pro Gerät (Cage/Plug) als getrennte Banner mit Geräte-Label angezeigt (vorher nur eine)."
+      }
     ]
   },
   {
     "version": "4.67.0",
     "date": "2026-07-08",
     "changes": [
-      { "type": "feat", "text": "Kontrollen pro Gerät (Cage/Plug): können jetzt gleichzeitig aktiv sein. Eine neue Kontrolle zieht nur die des gleichen Geräts zurück; die Voraussetzung ist gerätespezifisch (Cage verschlossen / Plug getragen)." },
-      { "type": "fix", "text": "Aktive Kontrollen werden jetzt als getrennte Banner mit Geräte-Label (Käfig/Plug) angezeigt; das Erfassen-Formular zeigt das Gerät ebenfalls. Plug-Kontrollen erscheinen in der Plug-Karte statt in der Cage-Timeline." }
+      {
+        "type": "feat",
+        "text": "Kontrollen pro Gerät (Cage/Plug): können jetzt gleichzeitig aktiv sein. Eine neue Kontrolle zieht nur die des gleichen Geräts zurück; die Voraussetzung ist gerätespezifisch (Cage verschlossen / Plug getragen)."
+      },
+      {
+        "type": "fix",
+        "text": "Aktive Kontrollen werden jetzt als getrennte Banner mit Geräte-Label (Käfig/Plug) angezeigt; das Erfassen-Formular zeigt das Gerät ebenfalls. Plug-Kontrollen erscheinen in der Plug-Karte statt in der Cage-Timeline."
+      }
     ]
   },
   {
     "version": "4.66.3",
     "date": "2026-07-08",
     "changes": [
-      { "type": "fix", "text": "Plug-Trainingsvorgabe erscheint jetzt auf der Plug-Session-Karte. Ursache: Die Plug-Kategorie ist (wie KG) built-in und wurde in der Ziel-Berechnung fälschlich per isBuiltIn-Filter ausgeschlossen." }
+      {
+        "type": "fix",
+        "text": "Plug-Trainingsvorgabe erscheint jetzt auf der Plug-Session-Karte. Ursache: Die Plug-Kategorie ist (wie KG) built-in und wurde in der Ziel-Berechnung fälschlich per isBuiltIn-Filter ausgeschlossen."
+      }
     ]
   },
   {
     "version": "4.66.2",
     "date": "2026-07-08",
     "changes": [
-      { "type": "fix", "text": "Admin-Vorgaben: KG-Trainingsvorgaben (ohne Geräte-Kategorie) werden jetzt korrekt unter der KG-Kategorie gruppiert statt unter „Ohne Kategorie“." }
+      {
+        "type": "fix",
+        "text": "Admin-Vorgaben: KG-Trainingsvorgaben (ohne Geräte-Kategorie) werden jetzt korrekt unter der KG-Kategorie gruppiert statt unter „Ohne Kategorie“."
+      }
     ]
   },
   {
     "version": "4.66.1",
     "date": "2026-07-08",
     "changes": [
-      { "type": "ui", "text": "KG-Session-Karte zeigt jetzt auch den Gerätenamen unter „Verschlossen“ (analog zur Plug-Karte), sofern ein Gerät gewählt wurde." }
+      {
+        "type": "ui",
+        "text": "KG-Session-Karte zeigt jetzt auch den Gerätenamen unter „Verschlossen“ (analog zur Plug-Karte), sofern ein Gerät gewählt wurde."
+      }
     ]
   },
   {
     "version": "4.66.0",
     "date": "2026-07-08",
     "changes": [
-      { "type": "ui", "text": "Aktive Plug-Session wird jetzt als große Karte dargestellt (wie die KG-Session): Header in Kategorie-Farbe mit Icon, Gerätename, großem Live-Timer + Pause, Ziel-Fortschritt und Event-Timeline (Pausen mit Grund + Kontrollen mit denselben Status-Pills wie bei KG)." }
+      {
+        "type": "ui",
+        "text": "Aktive Plug-Session wird jetzt als große Karte dargestellt (wie die KG-Session): Header in Kategorie-Farbe mit Icon, Gerätename, großem Live-Timer + Pause, Ziel-Fortschritt und Event-Timeline (Pausen mit Grund + Kontrollen mit denselben Status-Pills wie bei KG)."
+      }
     ]
   },
   {
     "version": "4.65.0",
     "date": "2026-07-08",
     "changes": [
-      { "type": "feat", "text": "Pause (KG & Plug) mit Grund-Auswahl (Reinigung/Toilette): nur erlaubte Gründe je Gerät, Maximaldauer und Tageslimit je Grund aus den Einstellungen; Überzug erzeugt weiterhin eine Strafe an der Grund-Dauer." },
-      { "type": "fix", "text": "Pause-Einträge wurden in der Liste fälschlich als „Verschluss\" angezeigt — jetzt korrekt „Pause\"/„Pause Ende\" inkl. Gerät (KG/Plug) und Grund." }
+      {
+        "type": "feat",
+        "text": "Pause (KG & Plug) mit Grund-Auswahl (Reinigung/Toilette): nur erlaubte Gründe je Gerät, Maximaldauer und Tageslimit je Grund aus den Einstellungen; Überzug erzeugt weiterhin eine Strafe an der Grund-Dauer."
+      },
+      {
+        "type": "fix",
+        "text": "Pause-Einträge wurden in der Liste fälschlich als „Verschluss\" angezeigt — jetzt korrekt „Pause\"/„Pause Ende\" inkl. Gerät (KG/Plug) und Grund."
+      }
     ]
   },
   {
     "version": "4.64.4",
     "date": "2026-07-08",
     "changes": [
-      { "type": "feat", "text": "Plug-Toilette ist jetzt immer erlaubt und ohne Tageslimit — der Ein/Aus-Schalter und die 'Max. Öffnungen pro Tag'-Einstellung entfallen; nur die maximale Dauer bleibt konfigurierbar." },
-      { "type": "feat", "text": "AI-Keyholderin: expliziter Hinweis im Prompt, dass bei Limits maxPausesPerDay null bzw. 0 'unbegrenzte Anzahl' bedeutet und nicht 'keine Öffnungen'." }
+      {
+        "type": "feat",
+        "text": "Plug-Toilette ist jetzt immer erlaubt und ohne Tageslimit — der Ein/Aus-Schalter und die 'Max. Öffnungen pro Tag'-Einstellung entfallen; nur die maximale Dauer bleibt konfigurierbar."
+      },
+      {
+        "type": "feat",
+        "text": "AI-Keyholderin: expliziter Hinweis im Prompt, dass bei Limits maxPausesPerDay null bzw. 0 'unbegrenzte Anzahl' bedeutet und nicht 'keine Öffnungen'."
+      }
     ]
   },
   {
     "version": "4.63.6",
     "date": "2026-07-08",
     "changes": [
-      { "type": "fix", "text": "AI-Keyholder: ReinigungView + ToiletteView haben jetzt ein explizites timeBound-Feld. timeBound=false bedeutet 'keine Zeitfenster konfiguriert → jederzeit erlaubt'. Zuvor interpretierte die KI windows=[] fälschlicherweise als 'Fenster unbekannt'." }
+      {
+        "type": "fix",
+        "text": "AI-Keyholder: ReinigungView + ToiletteView haben jetzt ein explizites timeBound-Feld. timeBound=false bedeutet 'keine Zeitfenster konfiguriert → jederzeit erlaubt'. Zuvor interpretierte die KI windows=[] fälschlicherweise als 'Fenster unbekannt'."
+      }
     ]
   },
   {
     "version": "4.63.5",
     "date": "2026-07-08",
     "changes": [
-      { "type": "feat", "text": "AI-Keyholder kennt jetzt alle Öffnungsregeln: Toiletten-Regeln (KG + Plug), Plug-Reinigungsregeln, toiletteErlaubt auf aktiver Sperrzeit, offene Session-Anforderungen und custom Orgasmus-Arten im Kontext-Snapshot." },
-      { "type": "feat", "text": "AI-Keyholder Chat: Strafbuch-Details (Vergehen, Urteile) werden jetzt auch im Chat-Prompt geladen — bisher nur im autonomen Run." }
+      {
+        "type": "feat",
+        "text": "AI-Keyholder kennt jetzt alle Öffnungsregeln: Toiletten-Regeln (KG + Plug), Plug-Reinigungsregeln, toiletteErlaubt auf aktiver Sperrzeit, offene Session-Anforderungen und custom Orgasmus-Arten im Kontext-Snapshot."
+      },
+      {
+        "type": "feat",
+        "text": "AI-Keyholder Chat: Strafbuch-Details (Vergehen, Urteile) werden jetzt auch im Chat-Prompt geladen — bisher nur im autonomen Run."
+      }
     ]
   },
   {
     "version": "4.63.4",
     "date": "2026-07-08",
     "changes": [
-      { "type": "fix", "text": "AI-Keyholder: orgasmusVorgegebeneArt im autonomen Run-Prompt jetzt mit exakten Pflicht-Werten (null|\"Orgasmus\"|\"ruinierter Orgasmus\"|\"feuchter Traum\") statt generischem null|string." }
+      {
+        "type": "fix",
+        "text": "AI-Keyholder: orgasmusVorgegebeneArt im autonomen Run-Prompt jetzt mit exakten Pflicht-Werten (null|\"Orgasmus\"|\"ruinierter Orgasmus\"|\"feuchter Traum\") statt generischem null|string."
+      }
     ]
   },
   {
     "version": "4.63.3",
     "date": "2026-07-08",
     "changes": [
-      { "type": "fix", "text": "AI-Keyholder: create_orgasmus schlug fehl wenn orgasmusVorgegebeneArt gesetzt war. Ursache: KI-Prompt instruierte den falschen Kurzwert \"ruiniert\" statt des validen Vollwerts \"ruinierter Orgasmus\". Prompt in beiden Stellen (Chat + Autonomer Run) korrigiert." }
+      {
+        "type": "fix",
+        "text": "AI-Keyholder: create_orgasmus schlug fehl wenn orgasmusVorgegebeneArt gesetzt war. Ursache: KI-Prompt instruierte den falschen Kurzwert \"ruiniert\" statt des validen Vollwerts \"ruinierter Orgasmus\". Prompt in beiden Stellen (Chat + Autonomer Run) korrigiert."
+      }
     ]
   },
   {
     "version": "4.63.2",
     "date": "2026-07-08",
     "changes": [
-      { "type": "fix", "text": "iPhone Frontkamera: Foto-Upload funktioniert jetzt zuverlässig. Fix 1: Datei-Bytes werden jetzt zwingend gepuffert, bevor das File-Input geleert wird — iOS gibt den Datei-Backing-Speicher sonst zu früh frei (Race Condition). Fix 2: compressImage nutzt jetzt createImageBitmap als Fallback für gespiegelte/Portrait-HEIC-Dateien, die im img-Element hängenbleiben. Timeout von 15 s auf 8 s reduziert." }
+      {
+        "type": "fix",
+        "text": "iPhone Frontkamera: Foto-Upload funktioniert jetzt zuverlässig. Fix 1: Datei-Bytes werden jetzt zwingend gepuffert, bevor das File-Input geleert wird — iOS gibt den Datei-Backing-Speicher sonst zu früh frei (Race Condition). Fix 2: compressImage nutzt jetzt createImageBitmap als Fallback für gespiegelte/Portrait-HEIC-Dateien, die im img-Element hängenbleiben. Timeout von 15 s auf 8 s reduziert."
+      }
     ]
   },
   {
     "version": "4.63.1",
     "date": "2026-07-08",
     "changes": [
-      { "type": "fix", "text": "Dockerfile: Prisma Query-Engine-Binary wird jetzt aus dem Builder-Stage in den Runner kopiert. Dadurch schlägt prisma migrate deploy beim Containerstart nicht mehr fehl, weil versucht wird das Binary vom Internet zu laden (NAS hat keinen Zugang zu binaries.prisma.sh)." }
+      {
+        "type": "fix",
+        "text": "Dockerfile: Prisma Query-Engine-Binary wird jetzt aus dem Builder-Stage in den Runner kopiert. Dadurch schlägt prisma migrate deploy beim Containerstart nicht mehr fehl, weil versucht wird das Binary vom Internet zu laden (NAS hat keinen Zugang zu binaries.prisma.sh)."
+      }
     ]
   },
   {
     "version": "4.63.0",
     "date": "2026-07-08",
     "changes": [
-      { "type": "ui", "text": "Dashboard: Tagesform-Widget erscheint jetzt oberhalb der Statistik statt ganz unten." },
-      { "type": "feat", "text": "AI Keyholderin: Kennt jetzt die Tagesform des Users (letzte 3 Tage). Niedrige Körperwerte (≤2) deaktivieren automatisch Sperrzeiten und Einschluss-Druck. Hohe Erregung (≥4) signalisiert eine gute Gelegenheit für Aufgaben. Sehr niedrige mentale Verfassung (1) schaltet die KI in einen sanften, straffreien Modus." }
+      {
+        "type": "ui",
+        "text": "Dashboard: Tagesform-Widget erscheint jetzt oberhalb der Statistik statt ganz unten."
+      },
+      {
+        "type": "feat",
+        "text": "AI Keyholderin: Kennt jetzt die Tagesform des Users (letzte 3 Tage). Niedrige Körperwerte (≤2) deaktivieren automatisch Sperrzeiten und Einschluss-Druck. Hohe Erregung (≥4) signalisiert eine gute Gelegenheit für Aufgaben. Sehr niedrige mentale Verfassung (1) schaltet die KI in einen sanften, straffreien Modus."
+      }
     ]
   },
   {
     "version": "4.62.0",
     "date": "2026-07-08",
     "changes": [
-      { "type": "feat", "text": "Tagesform-Widget: Neues Dashboard-Widget zur täglichen Selbsteinschätzung in drei Dimensionen — 🔥 Erregung/Frustration, 💪 Körperliches Wohlbefinden, 🧠 Mentale Verfassung — je 1–5 Punkte, mit optionaler Notiz. Einmal täglich per Upsert speicherbar." },
-      { "type": "feat", "text": "Tagesform-Verlauf: Stats-Seite zeigt die letzten 14 Tage als kompaktes Dot-Grid mit farblicher Intensitäts-Codierung (blau, 5 Stufen) pro Dimension." },
-      { "type": "feat", "text": "Plug-Banner: «Plug tragen angefordert»-Box enthält jetzt einen Direkt-Link zur Wear-Begin-Seite mit vorausgewählter Plug-Kategorie — analog zu den Kontroll-Bannern." },
-      { "type": "fix", "text": "Admin-Übersicht: Verschluss- und Plug-Anforderungen werden jetzt getrennt ausgewiesen. Plug-Anforderungen erscheinen mit korrektem Label «Plug tragen angefordert» statt «Verschluss angefordert»." }
+      {
+        "type": "feat",
+        "text": "Tagesform-Widget: Neues Dashboard-Widget zur täglichen Selbsteinschätzung in drei Dimensionen — 🔥 Erregung/Frustration, 💪 Körperliches Wohlbefinden, 🧠 Mentale Verfassung — je 1–5 Punkte, mit optionaler Notiz. Einmal täglich per Upsert speicherbar."
+      },
+      {
+        "type": "feat",
+        "text": "Tagesform-Verlauf: Stats-Seite zeigt die letzten 14 Tage als kompaktes Dot-Grid mit farblicher Intensitäts-Codierung (blau, 5 Stufen) pro Dimension."
+      },
+      {
+        "type": "feat",
+        "text": "Plug-Banner: «Plug tragen angefordert»-Box enthält jetzt einen Direkt-Link zur Wear-Begin-Seite mit vorausgewählter Plug-Kategorie — analog zu den Kontroll-Bannern."
+      },
+      {
+        "type": "fix",
+        "text": "Admin-Übersicht: Verschluss- und Plug-Anforderungen werden jetzt getrennt ausgewiesen. Plug-Anforderungen erscheinen mit korrektem Label «Plug tragen angefordert» statt «Verschluss angefordert»."
+      }
     ]
   },
   {
     "version": "4.61.0",
     "date": "2026-07-08",
     "changes": [
-      { "type": "feat", "text": "Plug-Banner: «Plug tragen angefordert»-Box enthält jetzt einen Direkt-Link zur Wear-Begin-Seite." },
-      { "type": "fix", "text": "Admin-Übersicht: Plug-Anforderungen werden mit korrektem Label angezeigt." }
+      {
+        "type": "feat",
+        "text": "Plug-Banner: «Plug tragen angefordert»-Box enthält jetzt einen Direkt-Link zur Wear-Begin-Seite."
+      },
+      {
+        "type": "fix",
+        "text": "Admin-Übersicht: Plug-Anforderungen werden mit korrektem Label angezeigt."
+      }
     ]
   },
   {
     "version": "4.60.0",
     "date": "2026-07-08",
     "changes": [
-      { "type": "feat", "text": "Orgasmus-Ziel: Session-Kategorien können jetzt ein Ziel tragen (Kein Ziel / Orgasmus erforderlich / Orgasmus verboten). Im Formular erscheint ein farbiger Badge und die Ziel-Checkbox passt ihren Text entsprechend an." },
-      { "type": "feat", "text": "Admin Aktionen: Neuer Eintrag «Session anfordern» — der Keyholder kann den User direkt per Push + E-Mail auffordern, eine Session mit einer bestimmten Kategorie zu starten, optional mit Frist." },
-      { "type": "fix", "text": "AI Keyholderin sieht jetzt auch die Devices der Session-Kategorien im Kontext (nicht nur den Kategorienamen)." }
+      {
+        "type": "feat",
+        "text": "Orgasmus-Ziel: Session-Kategorien können jetzt ein Ziel tragen (Kein Ziel / Orgasmus erforderlich / Orgasmus verboten). Im Formular erscheint ein farbiger Badge und die Ziel-Checkbox passt ihren Text entsprechend an."
+      },
+      {
+        "type": "feat",
+        "text": "Admin Aktionen: Neuer Eintrag «Session anfordern» — der Keyholder kann den User direkt per Push + E-Mail auffordern, eine Session mit einer bestimmten Kategorie zu starten, optional mit Frist."
+      },
+      {
+        "type": "fix",
+        "text": "AI Keyholderin sieht jetzt auch die Devices der Session-Kategorien im Kontext (nicht nur den Kategorienamen)."
+      }
     ]
   },
   {
     "version": "4.59.0",
     "date": "2026-07-08",
     "changes": [
-      { "type": "feat", "text": "Session-Kategorie: Neue Gerätekategorie für Trainings-Sessions (Dildo/Toy ohne Schloss). Admins aktivieren Session-Tracking per Toggle, setzen Max-Dauer und ob Video-Beweis nötig ist." },
-      { "type": "feat", "text": "SESSION_BEGIN / SESSION_END: Neue Eintragstypen erfassen Start und Ende einer Trainings-Session mit optionalem Video-Upload (mp4/mov/webm) und Orgasmus-Ziel-Flag." },
-      { "type": "feat", "text": "Session-Formular: Dedizierte /dashboard/new/session-begin und /dashboard/new/session-end Seiten mit Echtzeit-Timer, Ziel-Checkbox, Video-Upload (sofortiger Upload, Vorschau) und Geräteauswahl." },
-      { "type": "feat", "text": "Dashboard: Session-Kategorien erscheinen als inaktive Karten (mit «nicht trainiert seit»-Dauer) und als aktive Session-Karten — getrennt von den KG-Wear-Kategorien." },
-      { "type": "feat", "text": "Admin: Session-Anforderung via POST /api/admin/session-anforderung — Keyholder kann den User per Push + E-Mail auffordern, eine Session zu starten, optional mit Frist." },
-      { "type": "feat", "text": "AI Keyholderin: Neue Aktion create_session_anforderung — die KI kann autonom oder aus dem Chat heraus Session-Anforderungen stellen. Erscheint als blaue «Session-Anforderung»-Event-Karte in der Chat-Timeline." },
-      { "type": "feat", "text": "Video-Upload: Neue /api/upload-video Route mit Magic-Byte-Validierung für mp4/mov/webm/m4v, max. 200 MB, auth-geschützte Auslieferung." }
+      {
+        "type": "feat",
+        "text": "Session-Kategorie: Neue Gerätekategorie für Trainings-Sessions (Dildo/Toy ohne Schloss). Admins aktivieren Session-Tracking per Toggle, setzen Max-Dauer und ob Video-Beweis nötig ist."
+      },
+      {
+        "type": "feat",
+        "text": "SESSION_BEGIN / SESSION_END: Neue Eintragstypen erfassen Start und Ende einer Trainings-Session mit optionalem Video-Upload (mp4/mov/webm) und Orgasmus-Ziel-Flag."
+      },
+      {
+        "type": "feat",
+        "text": "Session-Formular: Dedizierte /dashboard/new/session-begin und /dashboard/new/session-end Seiten mit Echtzeit-Timer, Ziel-Checkbox, Video-Upload (sofortiger Upload, Vorschau) und Geräteauswahl."
+      },
+      {
+        "type": "feat",
+        "text": "Dashboard: Session-Kategorien erscheinen als inaktive Karten (mit «nicht trainiert seit»-Dauer) und als aktive Session-Karten — getrennt von den KG-Wear-Kategorien."
+      },
+      {
+        "type": "feat",
+        "text": "Admin: Session-Anforderung via POST /api/admin/session-anforderung — Keyholder kann den User per Push + E-Mail auffordern, eine Session zu starten, optional mit Frist."
+      },
+      {
+        "type": "feat",
+        "text": "AI Keyholderin: Neue Aktion create_session_anforderung — die KI kann autonom oder aus dem Chat heraus Session-Anforderungen stellen. Erscheint als blaue «Session-Anforderung»-Event-Karte in der Chat-Timeline."
+      },
+      {
+        "type": "feat",
+        "text": "Video-Upload: Neue /api/upload-video Route mit Magic-Byte-Validierung für mp4/mov/webm/m4v, max. 200 MB, auth-geschützte Auslieferung."
+      }
     ]
   },
   {
     "version": "4.25.0",
     "date": "2026-06-10",
     "changes": [
-      { "type": "feat", "text": "AI Keyholderin: Die KI kann autonom Einschluss-Anforderungen stellen (create_anforderung) — mit konfigurierbarer Frist und Mindest-Tragedauer. Sendet E-Mail + Push an den User, erscheint sofort im Dashboard-Banner." },
-      { "type": "feat", "text": "AI Keyholderin: Die KI kann autonom Sperrzeiten setzen (create_sperrzeit) — der User darf sich für die gesetzte Dauer nicht öffnen. Sendet E-Mail + Push automatisch." },
-      { "type": "feat", "text": "AI Keyholderin: Einschluss-Anforderungen und Sperrzeiten erscheinen als farbige Event-Karten in der Keyholder-Chat-Timeline (rot für Anforderung, grün für Sperrzeit)." },
-      { "type": "ui", "text": "Keyholder-Chat: KI-erstellte VerschlussAnforderungen werden automatisch im bestehenden Dashboard-Banner angezeigt (keine separaten UI-Änderungen nötig)." }
+      {
+        "type": "feat",
+        "text": "AI Keyholderin: Die KI kann autonom Einschluss-Anforderungen stellen (create_anforderung) — mit konfigurierbarer Frist und Mindest-Tragedauer. Sendet E-Mail + Push an den User, erscheint sofort im Dashboard-Banner."
+      },
+      {
+        "type": "feat",
+        "text": "AI Keyholderin: Die KI kann autonom Sperrzeiten setzen (create_sperrzeit) — der User darf sich für die gesetzte Dauer nicht öffnen. Sendet E-Mail + Push automatisch."
+      },
+      {
+        "type": "feat",
+        "text": "AI Keyholderin: Einschluss-Anforderungen und Sperrzeiten erscheinen als farbige Event-Karten in der Keyholder-Chat-Timeline (rot für Anforderung, grün für Sperrzeit)."
+      },
+      {
+        "type": "ui",
+        "text": "Keyholder-Chat: KI-erstellte VerschlussAnforderungen werden automatisch im bestehenden Dashboard-Banner angezeigt (keine separaten UI-Änderungen nötig)."
+      }
     ]
   },
   {
     "version": "4.24.0",
     "date": "2026-06-10",
     "changes": [
-      { "type": "feat", "text": "AI Keyholderin: Admin-Status-Panel mit Live-Medien-Queue-Zählern (ausstehend/generierend/bereit/zugewiesen/fehlgeschlagen), autonomem Aktivitätslog, Medien-Thumbnails und Trigger-Buttons für media-poll und Einzel-Generierung." },
-      { "type": "feat", "text": "AI Keyholderin: Die KI kann autonom Foto-Kontrollen anfordern (create_kontrolle) — sendet automatisch E-Mail und Push-Notification mit Code und Frist an den User." },
-      { "type": "feat", "text": "AI Keyholderin: Die KI kann autonom Strafen verhängen (create_strafe) — erstellt StrafeRecord und informiert den User per Push und Chat." },
-      { "type": "feat", "text": "AI Keyholderin: Kontrolle- und Strafe-Events erscheinen als farbige Event-Karten in der Chat-Timeline (nicht als normale Nachrichten-Bubble)." },
-      { "type": "ui", "text": "Keyholder-Chat: Assistenten-Nachrichten rendern jetzt einfaches Markdown (fett, kursiv, Aufzählungslisten, Zeilenumbrüche)." },
-      { "type": "ui", "text": "Keyholder-Chat: Vollständige i18n-Unterstützung (de/en) — alle Strings via next-intl, keine hardcodierten Texte mehr." }
+      {
+        "type": "feat",
+        "text": "AI Keyholderin: Admin-Status-Panel mit Live-Medien-Queue-Zählern (ausstehend/generierend/bereit/zugewiesen/fehlgeschlagen), autonomem Aktivitätslog, Medien-Thumbnails und Trigger-Buttons für media-poll und Einzel-Generierung."
+      },
+      {
+        "type": "feat",
+        "text": "AI Keyholderin: Die KI kann autonom Foto-Kontrollen anfordern (create_kontrolle) — sendet automatisch E-Mail und Push-Notification mit Code und Frist an den User."
+      },
+      {
+        "type": "feat",
+        "text": "AI Keyholderin: Die KI kann autonom Strafen verhängen (create_strafe) — erstellt StrafeRecord und informiert den User per Push und Chat."
+      },
+      {
+        "type": "feat",
+        "text": "AI Keyholderin: Kontrolle- und Strafe-Events erscheinen als farbige Event-Karten in der Chat-Timeline (nicht als normale Nachrichten-Bubble)."
+      },
+      {
+        "type": "ui",
+        "text": "Keyholder-Chat: Assistenten-Nachrichten rendern jetzt einfaches Markdown (fett, kursiv, Aufzählungslisten, Zeilenumbrüche)."
+      },
+      {
+        "type": "ui",
+        "text": "Keyholder-Chat: Vollständige i18n-Unterstützung (de/en) — alle Strings via next-intl, keine hardcodierten Texte mehr."
+      }
     ]
   },
   {
     "version": "4.23.0",
     "date": "2026-06-10",
     "changes": [
-      { "type": "feat", "text": "AI Keyholderin: Neue autonome KI-Keyholderin pro Benutzer — chatbasierte Oberfläche unter /dashboard/keyholder, Streaming-Antworten via SSE. Die KI kennt den aktuellen Einschluss-Status und Trainingsziele." },
-      { "type": "feat", "text": "AI Keyholderin: Unterstützt Anthropic Claude und lokale Ollama-Modelle (z.B. qwen2.5:32b auf Mac Mini M4) als KI-Backend — konfigurierbar pro Benutzer." },
-      { "type": "feat", "text": "AI Keyholderin: Autonomer Betrieb per konfigurierbarem Cron-Schedule — die KI agiert proaktiv, sendet Nachrichten und stellt Aufgaben ohne Nutzerinteraktion." },
-      { "type": "feat", "text": "AI Keyholderin: Aufgaben-System — die KI kann Aufgaben mit optionalem Medienbezug (ComfyUI) zuweisen, der Nutzer antwortet per Text, die KI reagiert auf die Antwort." },
-      { "type": "feat", "text": "AI Keyholderin: Admin-Konfiguration unter /admin/users/[id]/ai-keyholder — System-Prompt, LLM-Provider, Ollama-URL/Modell, Cron-Ausdruck, ComfyUI-URL und Medien-Themen einstellbar. «Jetzt ausführen»-Button für sofortigen autonomen Lauf." },
-      { "type": "feat", "text": "AI Keyholderin: Web-Push-Benachrichtigungen beim autonomen Lauf (sofern der Nutzer Push aktiviert hat)." }
+      {
+        "type": "feat",
+        "text": "AI Keyholderin: Neue autonome KI-Keyholderin pro Benutzer — chatbasierte Oberfläche unter /dashboard/keyholder, Streaming-Antworten via SSE. Die KI kennt den aktuellen Einschluss-Status und Trainingsziele."
+      },
+      {
+        "type": "feat",
+        "text": "AI Keyholderin: Unterstützt Anthropic Claude und lokale Ollama-Modelle (z.B. qwen2.5:32b auf Mac Mini M4) als KI-Backend — konfigurierbar pro Benutzer."
+      },
+      {
+        "type": "feat",
+        "text": "AI Keyholderin: Autonomer Betrieb per konfigurierbarem Cron-Schedule — die KI agiert proaktiv, sendet Nachrichten und stellt Aufgaben ohne Nutzerinteraktion."
+      },
+      {
+        "type": "feat",
+        "text": "AI Keyholderin: Aufgaben-System — die KI kann Aufgaben mit optionalem Medienbezug (ComfyUI) zuweisen, der Nutzer antwortet per Text, die KI reagiert auf die Antwort."
+      },
+      {
+        "type": "feat",
+        "text": "AI Keyholderin: Admin-Konfiguration unter /admin/users/[id]/ai-keyholder — System-Prompt, LLM-Provider, Ollama-URL/Modell, Cron-Ausdruck, ComfyUI-URL und Medien-Themen einstellbar. «Jetzt ausführen»-Button für sofortigen autonomen Lauf."
+      },
+      {
+        "type": "feat",
+        "text": "AI Keyholderin: Web-Push-Benachrichtigungen beim autonomen Lauf (sofern der Nutzer Push aktiviert hat)."
+      }
     ]
   },
   {

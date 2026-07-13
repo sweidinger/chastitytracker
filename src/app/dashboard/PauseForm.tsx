@@ -38,6 +38,7 @@ export default function PauseForm({ kind, device, reasons = [], activePauseSince
   const [startTime, setStartTime] = useState(nowDefault);
   const [note, setNote] = useState("");
   const [grund, setGrund] = useState<"REINIGUNG" | "TOILETTE" | "">(reasons.length === 1 ? reasons[0].grund : "");
+  const [erektionGemeldet, setErektionGemeldet] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,6 +85,7 @@ export default function PauseForm({ kind, device, reasons = [], activePauseSince
           imageExifTime: imageExifTime || null,
           note: note.trim() || null,
           oeffnenGrund: kind === "begin" && grund ? grund : null,
+          erektionGemeldet: kind === "end" && erektionGemeldet ? true : undefined,
         }),
       });
       if (!res.ok) {
@@ -192,6 +194,24 @@ export default function PauseForm({ kind, device, reasons = [], activePauseSince
           placeholder={t("notePlaceholder")}
         />
       </Card>
+
+      {/* Erektion (nur beim Pause-Ende) — wird im Strafbuch erkannt (kein Auto-Urteil). */}
+      {kind === "end" && (
+        <Card padding="default">
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={erektionGemeldet}
+              onChange={(e) => setErektionGemeldet(e.target.checked)}
+              className="mt-0.5 w-4 h-4 shrink-0"
+            />
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium text-foreground">{tOpen("erektionLabel")}</span>
+              <span className="text-xs text-foreground-muted">{tOpen("erektionHint")}</span>
+            </div>
+          </label>
+        </Card>
+      )}
 
       <FormError message={error} />
 

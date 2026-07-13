@@ -24,6 +24,8 @@ interface Category {
   maxSessionMinutes: number;
   requiresVideo: boolean;
   orgasmusZiel: string;
+  /** Nur bei orgasmusZiel=ERFORDERLICH: der geforderte Orgasmus muss ruiniert sein (aus der Anforderung). */
+  orgasmusRuiniert?: boolean;
 }
 
 interface DeviceOption {
@@ -173,7 +175,9 @@ export default function SessionForm({ kind, category, devices, activeSession, no
               ? "bg-[var(--color-warn-bg)] border-[var(--color-warn-border)] text-[var(--color-warn)]"
               : "bg-[var(--color-request-bg)] border-[var(--color-request-border,var(--color-border))] text-[var(--color-request)]"
           }`}>
-            {category.orgasmusZiel === "ERFORDERLICH" ? t("orgasmusZielBadgeRequired") : t("orgasmusZielBadgeForbidden")}
+            {category.orgasmusZiel === "ERFORDERLICH"
+              ? (category.orgasmusRuiniert ? t("orgasmusZielBadgeRequiredRuined") : t("orgasmusZielBadgeRequired"))
+              : t("orgasmusZielBadgeForbidden")}
           </div>
         )}
 
@@ -209,7 +213,7 @@ export default function SessionForm({ kind, category, devices, activeSession, no
           <Checkbox
             label={
               category.orgasmusZiel === "ERFORDERLICH"
-                ? t("goalAchievedRequired")
+                ? (category.orgasmusRuiniert ? t("goalAchievedRequiredRuined") : t("goalAchievedRequired"))
                 : category.orgasmusZiel === "VERBOTEN"
                   ? t("goalAchievedForbidden")
                   : t("goalAchieved")

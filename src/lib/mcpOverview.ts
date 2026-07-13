@@ -13,7 +13,9 @@ import { autoKontrolleSettingsFromUser, type AutoKontrolleSettings } from "@/lib
 import { buildCategoryWearGoals, hasAnyGoal } from "@/lib/categoryGoals";
 import { proratedVorgabeTargets } from "@/lib/goalFulfillment";
 import { buildStrafbuch, type StrafbuchControlOffense } from "@/lib/strafbuch";
-import { collectDetectedOffenses } from "@/lib/strafurteilService";
+import { getBelohnungState, computeBelohnbar } from "@/lib/belohnung";
+import { getActiveHealthHold } from "@/lib/healthHoldService";
+import { collectDetectedOffenses, computeSeverities, OFFENSE_SEVERITY, type OffenseSeverity } from "@/lib/strafurteilService";
 import { round1, msToHours, pct, isoWithOffset } from "@/lib/mcp/format";
 
 /** Zeitformat der MCP-Ausgabe: V1-Tools nutzen das Instanz-lokale Human-Format (bewusster V1-
@@ -112,6 +114,17 @@ export interface TrackerOverview {
   /** Jüngste private Keyholder-Notizen (Beobachtungen zum Trageverhalten je KG/Kategorie).
    *  Volle Historie über list_keyholder_notes. Nur über den MCP sichtbar. */
   keyholderNotes: { id: string; kg: string | null; kategorie: string | null; text: string; at: string }[];
+  /** Belohnungs-Ökonomie: verdiente Orgasmen (verfügbar/vorgemerkt) + erreichte, noch nicht
+   *  gutgeschriebene Trainingsziele. Grant via grant_reward, credit via credit_reward. */
+  belohnung: {
+    available: number;
+    reserved: number;
+    activeWindowEndsAt: string | null;
+    rewardableGoals: { category: string; period: string; hours: number; targetHours: number }[];
+  };
+  /** Gesundheits-Stopp: vom Sub selbst gesetztes Fürsorge-Signal. Ist er aktiv, dürfen KEINE neuen
+   *  Anforderungen/Strafen gestellt werden (wird serverseitig zusätzlich hart blockiert). */
+  healthHold: { active: boolean; reason: string; since: string } | null;
 }
 
 /** Geräte-Check eines Eintrags ins MCP-Format (status/detected/expected) oder null. */
@@ -227,6 +240,13 @@ export async function buildOverview(username: string, opts: McpFormatOptions = {
 
   // ── Wearing hours + KG training goal ──
   const { tagH, wocheH, monatH } = calculateWearingHoursByRange(entries, now, reinigung);
+
+  // ── Belohnungs-Ökonomie + Gesundheits-Stopp ──
+  const [belohnungState, belohnbar, healthHold] = await Promise.all([
+    getBelohnungState(userId, now),
+    computeBelohnbar(userId, now),
+    getActiveHealthHold(userId),
+  ]);
 
   return {
     schemaVersion: 1 as const,
@@ -346,6 +366,15 @@ export async function buildOverview(username: string, opts: McpFormatOptions = {
     keyholderNotes: recentNotes.map((n) => ({
       id: n.id, kg: n.kg, kategorie: n.kategorie, text: n.text, at: fmt(n.createdAt),
     })),
+    belohnung: {
+      available: belohnungState.available,
+      reserved: belohnungState.reserved,
+      activeWindowEndsAt: belohnungState.activeWindow ? fmt(belohnungState.activeWindow.endetAt) : null,
+      rewardableGoals: belohnbar.map((b) => ({
+        category: b.categoryName, period: b.periodType, hours: round1(b.istH), targetHours: round1(b.sollH),
+      })),
+    },
+    healthHold: healthHold ? { active: true, reason: healthHold.reason, since: fmt(healthHold.since) } : null,
   };
 }
 
@@ -585,7 +614,17 @@ export interface OffenseJudgment {
   /** Bei judgment="punished": ob die Strafe bereits erledigt ist. */
   done: boolean;
   doneAt: string | null;
+  /** Der Sub hat die Erledigung gemeldet und wartet auf Prüfung (bestätigen/ablehnen). */
+  completionReport: { reportedAt: string; note: string | null; proofUrl: string | null } | null;
+  /** Begründung der letzten abgelehnten Erledigungs-Meldung (Strafe ist wieder offen). */
+  completionRejected: string | null;
   ref: { type: string; id: string };
+  /** Effektive Schwere (inkl. Wiederholungs-Eskalation) — Orientierung fürs Strafmaß. */
+  severity: OffenseSeverity;
+  /** Basis-Schwere ohne Eskalation. */
+  baseSeverity: OffenseSeverity;
+  /** true = durch Wiederholung hochgestuft. */
+  escalated: boolean;
 }
 
 /** A Kontroll-based offense formatted for the MCP `get_strafbuch` tool. */
@@ -613,13 +652,24 @@ export interface StrafbuchOverview {
   openOffenseCount: number;
   /** Bestrafte Vergehen, deren Strafe noch nicht als erledigt markiert ist. */
   pendingPenaltyCount: number;
+  /** Strafen, deren Erledigung der Sub gemeldet hat und die auf DEINE Prüfung warten
+   *  (judge_offense action="complete" = bestätigen, "reject_completion" = ablehnen). */
+  completionReportCount: number;
+  /** Die gemeldeten Erledigungen selbst — inkl. Strafen ohne erkanntes Vergehen (z.B. AI-verhängte). */
+  completionReports: {
+    ref: string;
+    penalty: string | null;
+    reportedAt: string;
+    note: string | null;
+    proofUrl: string | null;
+  }[];
   unauthorizedOpenings: ({
     time: string; note: string | null;
     lockPeriodEndedAt: string | null; lockPeriodIndefinite: boolean;
   } & OffenseJudgment)[];
   lateControls: StrafbuchControlRow[];
   rejectedControls: StrafbuchControlRow[];
-  cleaningLimitViolations: ({ time: string | null; note: string | null } & OffenseJudgment)[];
+  missedLockRequests: ({ windowEndedAt: string; message: string | null; categoryName: string | null } & OffenseJudgment)[];
   /** Lock entries where a different device than the Anforderung specified was worn. */
   wrongDeviceViolations: ({ time: string | null; note: string | null; deviceName: string | null } & OffenseJudgment)[];
   /** Mandatory orgasm directives (ANWEISUNG) whose window ended without a matching orgasm. */
@@ -628,6 +678,8 @@ export interface StrafbuchOverview {
   missedSessions: ({ windowEndedAt: string; message: string | null; categoryName: string | null } & OffenseJudgment)[];
   /** Openings (Reinigung or Toilette) where an erection was reported. */
   erektionViolations: ({ time: string | null; oeffnenGrund: string | null; note: string | null } & OffenseJudgment)[];
+  /** Completed pauses that exceeded the configured max duration. */
+  pauseOverageViolations: ({ time: string | null; device: string | null; grund: string | null; dauerMin: number; maxMin: number } & OffenseJudgment)[];
 }
 
 /** Builds the Strafbuch snapshot for the user. Throws if the user does not exist. */
@@ -640,6 +692,7 @@ export async function mcpStrafbuch(username: string, opts: McpFormatOptions = {}
   // Urteil pro Vergehen (per refId aufgelöst).
   const judgmentByRef = new Map(sb.strafeRecords.map((r) => [r.refId, r]));
   const detected = collectDetectedOffenses(sb);
+  const sevMap = computeSeverities(sb, now);
 
   // Relevanz in einem Durchlauf: pending-penalty ⊂ open (= unbeurteilt ODER bestraft-nicht-erledigt).
   let openOffenseCount = 0;
@@ -651,9 +704,23 @@ export async function mcpStrafbuch(username: string, opts: McpFormatOptions = {}
     if (pendingPenalty) pendingPenaltyCount++;
   }
 
+  // Gemeldete Erledigungen direkt aus den Straf-Records — so sind auch Strafen ohne erkanntes
+  // Vergehen (z.B. von der AI im Chat verhängte, offenseType AI_KEYHOLDER) dabei.
+  const completionReports = sb.strafeRecords
+    .filter((r) => r.status === "PUNISHED" && r.erledigtAt == null && r.gemeldetAt != null)
+    .map((r) => ({
+      ref: r.refId,
+      penalty: r.reason ?? r.notiz,
+      reportedAt: fmt(r.gemeldetAt as Date),
+      note: r.erledigungNotiz,
+      proofUrl: r.nachweisUrl,
+    }));
+
   const judge = (canonicalType: string, refId: string): OffenseJudgment => {
     const rec = judgmentByRef.get(refId);
     const judgment = rec ? (rec.status === "PUNISHED" ? "punished" : "dismissed") : "open";
+    const sev = sevMap.get(refId);
+    const base = sev?.base ?? OFFENSE_SEVERITY[canonicalType as keyof typeof OFFENSE_SEVERITY] ?? "mittel";
     return {
       judgment,
       penalty: judgment === "punished" ? (rec?.reason ?? null) : null,
@@ -662,7 +729,14 @@ export async function mcpStrafbuch(username: string, opts: McpFormatOptions = {}
       judgedAt: rec ? fmt(rec.bestraftDatum) : null,
       done: judgment === "punished" ? rec?.erledigtAt != null : false,
       doneAt: rec?.erledigtAt ? fmt(rec.erledigtAt) : null,
+      completionReport: rec?.gemeldetAt && !rec.erledigtAt
+        ? { reportedAt: fmt(rec.gemeldetAt), note: rec.erledigungNotiz, proofUrl: rec.nachweisUrl }
+        : null,
+      completionRejected: rec?.ablehnungGrund ?? null,
       ref: { type: canonicalType, id: refId },
+      severity: sev?.severity ?? base,
+      baseSeverity: base,
+      escalated: sev?.escalated ?? false,
     };
   };
 
@@ -685,6 +759,8 @@ export async function mcpStrafbuch(username: string, opts: McpFormatOptions = {}
     detectedOffenseCount: detected.length,
     openOffenseCount,
     pendingPenaltyCount,
+    completionReportCount: completionReports.length,
+    completionReports,
     unauthorizedOpenings: sb.unauthorizedOpenings.map((o) => ({
       time: fmt(o.startTime),
       note: o.note,
@@ -694,10 +770,11 @@ export async function mcpStrafbuch(username: string, opts: McpFormatOptions = {}
     })),
     lateControls: sb.lateControls.map(toControlRow("late_control")),
     rejectedControls: sb.rejectedControls.map(toControlRow("rejected_control")),
-    cleaningLimitViolations: sb.reinigungLimitViolations.map((v) => ({
-      time: v.startTime ? fmt(v.startTime) : null,
-      note: v.note,
-      ...judge("cleaning_limit", v.entryId),
+    missedLockRequests: sb.missedLockRequests.map((m) => ({
+      windowEndedAt: fmt(m.endetAt),
+      message: m.nachricht,
+      categoryName: m.categoryName,
+      ...judge("missed_lock", m.id),
     })),
     wrongDeviceViolations: sb.wrongDeviceViolations.map((v) => ({
       time: v.startTime ? fmt(v.startTime) : null,
@@ -722,6 +799,14 @@ export async function mcpStrafbuch(username: string, opts: McpFormatOptions = {}
       oeffnenGrund: v.oeffnenGrund,
       note: v.note,
       ...judge("erektion", v.entryId),
+    })),
+    pauseOverageViolations: sb.pauseOverageViolations.map((v) => ({
+      time: v.startTime ? fmt(v.startTime) : null,
+      device: v.device,
+      grund: v.grund,
+      dauerMin: v.dauerMin,
+      maxMin: v.maxMin,
+      ...judge("pause_overage", v.entryId),
     })),
   };
 }

@@ -14,7 +14,7 @@ export default async function AdminSessionAnforderungPage({ params }: { params: 
     where: { userId: id, isSessionCategory: true },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     select: {
-      id: true, name: true, maxSessionMinutes: true, requiresVideo: true,
+      id: true, name: true, maxSessionMinutes: true, requiresVideo: true, orgasmusZiel: true,
       devices: { where: { archivedAt: null }, orderBy: { name: "asc" }, select: { id: true, name: true } },
     },
   });

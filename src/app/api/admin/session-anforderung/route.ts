@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { userId, deviceCategoryId, nachricht, deadlineHours, minMinuten, requireVideo, delayMinutes, deviceId } = body;
+  const { userId, deviceCategoryId, nachricht, deadlineHours, minMinuten, requireVideo, delayMinutes, deviceId, istStrafe, orgasmusZiel, orgasmusRuiniert } = body;
 
   if (!userId || typeof userId !== "string") {
     return NextResponse.json({ error: "userId ist erforderlich" }, { status: 400 });
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     prisma.user.findUnique({ where: { id: userId }, select: { id: true, username: true, email: true } }),
     prisma.deviceCategory.findUnique({
       where: { id: deviceCategoryId },
-      select: { id: true, name: true, userId: true, isSessionCategory: true, maxSessionMinutes: true, requiresVideo: true },
+      select: { id: true, name: true, userId: true, isSessionCategory: true, maxSessionMinutes: true, requiresVideo: true, orgasmusZiel: true },
     }),
   ]);
   if (!user) return NextResponse.json({ error: "Benutzer nicht gefunden" }, { status: 404 });
@@ -87,6 +87,14 @@ export async function POST(req: NextRequest) {
     ? Math.min(Math.round(minMinuten), category.maxSessionMinutes)
     : null;
 
+  // Video-Pflicht + Orgasmus-Ziel sind pro Anforderung wählbar (Formular füllt sie mit dem Kategorie-
+  // Standard vor). Ist orgasmusZiel nicht mitgeschickt, gilt der Kategorie-Wert.
+  const ziel = typeof orgasmusZiel === "string" && ["KEINE", "ERFORDERLICH", "VERBOTEN"].includes(orgasmusZiel)
+    ? orgasmusZiel
+    : category.orgasmusZiel;
+  // „Ruiniert" nur sinnvoll, wenn ein Orgasmus überhaupt gefordert ist.
+  const ruiniert = ziel === "ERFORDERLICH" && Boolean(orgasmusRuiniert);
+
   const anforderung = await prisma.sessionAnforderung.create({
     data: {
       userId,
@@ -94,9 +102,12 @@ export async function POST(req: NextRequest) {
       nachricht: typeof nachricht === "string" ? nachricht.trim() || null : null,
       endetAt,
       minMinuten: minMin,
-      requireVideo: Boolean(requireVideo) || category.requiresVideo,
+      requireVideo: Boolean(requireVideo),
+      orgasmusZiel: ziel,
+      orgasmusRuiniert: ruiniert,
       wirksamAb,
       deviceId: validDeviceId,
+      istStrafe: Boolean(istStrafe),
     },
     include: {
       deviceCategory: { select: { id: true, name: true, maxSessionMinutes: true, requiresVideo: true } },

@@ -154,11 +154,16 @@ export default function VerschlussFormCore({
           )}
           <Select
             label={tForm("selectDevice")}
-            options={[
-              { value: "", label: tForm("noDevice") },
-              ...devices.map((d) => ({ value: d.id, label: d.name })),
-            ]}
+            // Bei einer Anforderung mit vorgegebenem Gerät ist das Feld auf genau dieses Gerät begrenzt
+            // und gesperrt — der Sub kann es nicht ändern.
+            options={anforderungDeviceId
+              ? [{ value: anforderungDeviceId, label: devices.find((d) => d.id === anforderungDeviceId)?.name ?? "?" }]
+              : [
+                  { value: "", label: tForm("noDevice") },
+                  ...devices.map((d) => ({ value: d.id, label: d.name })),
+                ]}
             value={deviceId}
+            disabled={!!anforderungDeviceId}
             onChange={(e) => { setDeviceId(e.target.value); setDeviceManuallySet(true); }}
             hint={devices.length >= 2 && !anforderungDeviceId ? tForm("selectDeviceHint") : undefined}
           />

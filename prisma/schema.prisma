@@ -60,6 +60,10 @@ model User {
   oeffnenGruendeConfig  String?
   // Free-text keyholder rules the human admin sets for the MCP AI keyholder (soft guidance, read-only to the agent).
   mcpKeyholderInstructions String?
+  // Belohnungs-Ökonomie: verfügbares Guthaben verdienter Orgasmen (Untergrenze 0, nie negativ). Beim
+  // Gewähren eines Belohnungs-Fensters wird 1 vorgemerkt (Guthaben −1); Straf-Aktion Entzug reduziert
+  // ebenfalls. Vorgemerkte werden über offene istBelohnung-GELEGENHEITEN gezählt (nicht hier).
+  verdienteOrgasmen     Int                    @default(0)
   entries               Entry[]
   notificationPrefs     NotificationPreference[]
   vorgaben              TrainingVorgabe[]
@@ -88,6 +92,44 @@ model User {
   appointments            Appointment[]
   sessionAnforderungen    SessionAnforderung[]
   tagesformen             Tagesform[]
+  belohnungGutschriften   OrgasmusBelohnungGutschrift[]
+  belohnungEvents         BelohnungEvent[]
+}
+
+// Belohnungs-Ökonomie: Ereignis-Protokoll (Kontoauszug des Guthabens). Jede Bewegung wird hier
+// festgehalten — zusammen mit StrafeRecord ergibt das die Belohnungs-/Straf-Historie.
+// type: VERDIENT (+1, Ziel gutgeschrieben) | GEWAEHRT (−1, Fenster geöffnet) | EINGELOEST (0, Orgasmus
+//       im Fenster erfasst) | VERFALLEN (0, Fenster ungenutzt abgelaufen) | ENTZOGEN (−1, Strafe)
+//       | VERSCHOBEN (0, Fenster als Strafe verschoben)
+// delta = Guthaben-Änderung, balanceAfter = Guthaben nach dem Ereignis (Kontostand für den Verlauf).
+model BelohnungEvent {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type         String
+  delta        Int      @default(0)
+  balanceAfter Int      @default(0)
+  detail       String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// Belohnungs-Ökonomie: Register der bereits gutgeschriebenen erreichten Trainingsziele. Verhindert,
+// dass dasselbe Ziel (Kategorie × Zeitraum) mehrfach belohnt wird ("einmal pro Zeitraum je Ziel").
+// categoryId = null → Keuschheitsgürtel (KG-Vorgabe). periodType = day|week|month|year.
+// periodKey = stabiler Perioden-Schlüssel in User-Zeitzone (z.B. "2026-07-09", "2026-W28", "2026-07", "2026").
+model OrgasmusBelohnungGutschrift {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoryId String?  // null = KG
+  periodType String   // day | week | month | year
+  periodKey  String
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, categoryId, periodType, periodKey])
+  @@index([userId])
 }
 
 // Gesundheits-Zurückhaltung (§8): ein Signal, dass aus Gesundheitsgründen (Migräne/Aura, Schlaf,
@@ -229,6 +271,9 @@ model DeviceCategory {
   maxSessionMinutes  Int     @default(30)    // Maximale Sitzungsdauer in Minuten
   requiresVideo      Boolean @default(false) // when true: SESSION_END braucht videoUrl
   orgasmusZiel       String  @default("KEINE") // KEINE | ERFORDERLICH | VERBOTEN
+  // Körperregion für die anatomische Exklusivität: zwei Geräte derselben Region (!= "other") können
+  // nicht gleichzeitig aktiv sein (z.B. Anal-Plug + Anal-Dildo-Session). "other" = keine Einschränkung.
+  region          String   @default("other") // genital | anal | other
   sortOrder       Int      @default(0)
   createdAt       DateTime @default(now())
 
@@ -355,8 +400,11 @@ model SessionAnforderung {
   endetAt          DateTime?      // Frist; null = keine Deadline
   minMinuten       Int?           // Mindest-/Zieldauer der Session in Minuten (null = keine)
   requireVideo     Boolean        @default(false) // Nachweis (Video/Foto) beim Beenden verpflichtend
+  orgasmusZiel     String         @default("KEINE") // KEINE | ERFORDERLICH | VERBOTEN — pro Anforderung (überschreibt Kategorie-Standard)
+  orgasmusRuiniert Boolean        @default(false) // nur bei orgasmusZiel=ERFORDERLICH: der geforderte Orgasmus muss ruiniert sein
   wirksamAb        DateTime?      // geplante Auslösung; bis dahin inaktiv/unsichtbar
   deviceId         String?        // bestimmtes Gerät der Kategorie (null = beliebiges Gerät)
+  istStrafe        Boolean        @default(false) // als Strafe angeordnet → strengere Eskalation bei Nicht-Erfüllung
   fulfilledAt      DateTime?      // gesetzt wenn SESSION_END die Anforderung erfüllt
   withdrawnAt      DateTime?
   sessionEndId     String?        // Entry-ID des erfüllenden SESSION_END
@@ -443,6 +491,11 @@ model StrafeRecord {
   reason        String?  // DAS eine Freitextfeld: Strafe-Text bei PUNISHED, optionaler Grund bei DISMISSED
   judgedBy      String?  // "ai" | "admin" | "system"
   erledigtAt    DateTime? // nur PUNISHED: null = Strafe offen, gesetzt = erledigt (Loop geschlossen)
+  // Erledigungs-Meldung durch den Sub (Loop: offen → gemeldet → bestätigt/abgelehnt)
+  gemeldetAt      DateTime? // Sub hat die Strafe als erledigt gemeldet → wartet auf Prüfung
+  nachweisUrl     String?   // optionales Nachweis-Foto zur Meldung
+  erledigungNotiz String?   // optionale Notiz des Subs zur Meldung
+  ablehnungGrund  String?   // gesetzt bei abgelehnter Meldung (gemeldetAt wird geleert)
   createdAt     DateTime @default(now())
 
   @@index([userId])
@@ -459,6 +512,8 @@ model Device {
   imageUrl      String?
   purchasePrice Float?
   currency      String?   // "CHF" | "EUR" | "USD"
+  // Größen-Reihenfolge innerhalb der Kategorie (z.B. Plug): kleiner = kleiner. Für "nächstgrößeres Gerät" (Strafe).
+  sortOrder     Int       @default(0)
   createdAt     DateTime  @default(now())
   archivedAt    DateTime? // Soft-delete: null = active, set = archived
 
@@ -571,8 +626,10 @@ model Entry {
   deviceCheck         String?
   deviceCheckNote     String?              // erkanntes Gerät (Name) oder null, wenn keins erkannt
   deviceCheckExpected String?              // erwartetes (verschlossenes) Gerät zur Check-Zeit
-  // OEFFNEN-Einträge (Reinigung/Toilette): war eine Erektion vorhanden? → automatischer StrafeRecord(EREKTION).
+  // OEFFNEN/WEAR_END-Einträge (Reinigung/Toilette): war eine Erektion vorhanden? → wird im Strafbuch erkannt (kein Auto-Urteil).
   erektionGemeldet    Boolean              @default(false)
+  // VERSCHLUSS-Einträge: wurde ein anderes Gerät verwendet als die Anforderung vorgab? → wird im Strafbuch erkannt (kein Auto-Urteil).
+  falschesGeraet      Boolean              @default(false)
   // SESSION_END-Einträge: Ziel (analer Orgasmus) erreicht? + Video-Beweis
   sessionGoalAchieved Boolean?
   videoUrl            String?
@@ -602,6 +659,9 @@ model OrgasmusAnforderung {
   endetAt        DateTime  // Fenster-Ende
   vorgegebeneArt String?   // erforderliche orgasmusArt-Basis (aus ORGASMUS_ARTEN); null = egal
   oeffnenErlaubt Boolean   @default(false) // während des Fensters darf zum Orgasmus geöffnet werden, ohne Sperre zu brechen / Strafe
+  istStrafe      Boolean   @default(false) // als Strafe angeordnet (z.B. ruinierter Orgasmus als Pflicht) → strengere Eskalation bei Nicht-Erfüllung
+  istBelohnung   Boolean   @default(false) // als Belohnungs-Fenster gewährt (GELEGENHEIT, vorgegebeneArt="Belohnung") → beim Gewähren wurde 1 Guthaben vorgemerkt
+  fotoPflicht    Boolean   @default(false) // Foto-Nachweis beim Erfassen des Orgasmus erforderlich (sonst freiwillig)
   createdAt      DateTime  @default(now())
   fulfilledAt    DateTime? // gesetzt wenn passender ORGASMUS-Eintrag im Fenster erstellt
   entryId        String?   @unique
@@ -711,6 +771,10 @@ model AiKeyholderConfig {
   llmProvider          String   @default("anthropic") // "anthropic" | "ollama"
   ollamaBaseUrl        String?  // e.g. "http://192.168.1.10:11434"
   ollamaModel          String?  // e.g. "qwen2.5:32b"
+  // Intensität 1–5: steuert Häufigkeit proaktiver Aktionen + Härte/Ton (NICHT die Regeln). 3 = ausgewogen.
+  intensity            Int      @default(3)
+  // Vision: Fotos des Subs werden dem Modell wirklich mitgeschickt (nur mit vision-fähigem Modell).
+  visionEnabled        Boolean  @default(true)
   // Persona / instructions
   systemPrompt         String?  // dominant persona + rules for the AI keyholder
   currentPersonaId     String?  // FK to AiPersona (set when a persona template is applied; cleared on manual edit)

@@ -36,6 +36,7 @@ export default function DeviceForm({ onClose, onSaved, device, categories, userI
     ?? categories?.[0]?.id
     ?? "";
   const showCategoryPicker = (categories?.length ?? 0) > 1;
+  // Größen-Reihenfolge ist nur für Plug-Geräte relevant (Strafaktion „nächstgrößerer Plug").
 
   const [name, setName] = useState(device?.name ?? "");
   const [description, setDescription] = useState(device?.description ?? "");
@@ -44,6 +45,7 @@ export default function DeviceForm({ onClose, onSaved, device, categories, userI
   const [price, setPrice] = useState(device?.purchasePrice != null ? String(device.purchasePrice) : "");
   const [currency, setCurrency] = useState(device?.currency ?? "CHF");
   const [categoryId, setCategoryId] = useState<string>(defaultCategoryId);
+  const [sortOrder, setSortOrder] = useState(device?.sortOrder != null ? String(device.sortOrder) : "0");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -90,6 +92,7 @@ export default function DeviceForm({ onClose, onSaved, device, categories, userI
       purchasePrice: parsedPrice,
       currency: parsedPrice !== null ? currency : null,
       categoryId: categoryId || null,
+      sortOrder: Number.isFinite(parseInt(sortOrder, 10)) ? parseInt(sortOrder, 10) : 0,
     };
     if (userId) payload.userId = userId;
 
@@ -200,6 +203,18 @@ export default function DeviceForm({ onClose, onSaved, device, categories, userI
               />
             </div>
           </div>
+
+          {categories?.find((c) => c.id === categoryId)?.slug === "plug" && (
+            <Input
+              label={t("sortOrder")}
+              type="number"
+              inputMode="numeric"
+              step="1"
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value)}
+              hint={t("sortOrderHint")}
+            />
+          )}
 
           <FormError message={error} />
 

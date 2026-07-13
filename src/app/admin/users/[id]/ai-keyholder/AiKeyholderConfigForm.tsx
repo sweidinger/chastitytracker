@@ -24,6 +24,8 @@ interface Config {
   ollamaBaseUrl: string | null;
   ollamaModel: string | null;
   systemPrompt: string | null;
+  intensity: number | null;
+  visionEnabled: boolean;
   cronExpression: string | null;
   randomIntervalMinMin: number | null;
   randomIntervalMinMax: number | null;
@@ -52,6 +54,8 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
   const [anthropicApiKeySet, setAnthropicApiKeySet] = useState(initial?.anthropicApiKeySet ?? false);
   const [clearApiKey, setClearApiKey] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState(initial?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT);
+  const [intensity, setIntensity] = useState(initial?.intensity ?? 3);
+  const [visionEnabled, setVisionEnabled] = useState(initial?.visionEnabled ?? true);
   const [randomIntervalMinMin, setRandomIntervalMinMin] = useState(initial?.randomIntervalMinMin ?? 15);
   const [randomIntervalMinMax, setRandomIntervalMinMax] = useState(initial?.randomIntervalMinMax ?? 120);
   const [nextRunAt, setNextRunAt] = useState<string | null>(initial?.nextRunAt ?? null);
@@ -101,6 +105,8 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
           ollamaBaseUrl: llmProvider === "ollama" ? (ollamaBaseUrl || null) : null,
           ollamaModel: llmProvider === "ollama" ? (ollamaModel || null) : null,
           systemPrompt: systemPrompt || null,
+          intensity,
+          visionEnabled,
           randomIntervalMinMin: minMin,
           randomIntervalMinMax: minMax,
           mediaEnabled,
@@ -246,6 +252,34 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
           <p className="text-xs font-semibold uppercase tracking-wider text-foreground-faint">{t("aikhSectionPersona")}</p>
         </div>
         <div className="px-5 py-4 flex flex-col gap-4">
+          {/* Intensitäts-Regler — steuert Häufigkeit/Härte/Ton, nicht die Regeln. */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-foreground">{t("aikhIntensity")}</label>
+              <span className="text-sm font-semibold text-accent tabular-nums">{intensity}/5 · {t(`aikhIntensityLevel${intensity}` as "aikhIntensityLevel3")}</span>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={5}
+              step={1}
+              value={intensity}
+              onChange={(e) => setIntensity(Number(e.target.value))}
+              className="w-full accent-accent"
+            />
+            <div className="flex justify-between text-[10px] text-foreground-faint px-0.5">
+              <span>{t("aikhIntensityLevel1")}</span>
+              <span>{t("aikhIntensityLevel5")}</span>
+            </div>
+            <p className="text-xs text-foreground-muted">{t("aikhIntensityHint")}</p>
+          </div>
+
+          {/* Vision: Fotos des Subs werden dem Modell wirklich mitgeschickt. */}
+          <div className="flex flex-col gap-1 border-t border-border-subtle pt-3">
+            <Toggle label={t("aikhVision")} checked={visionEnabled} onChange={setVisionEnabled} />
+            <p className="text-xs text-foreground-muted">{t("aikhVisionHint")}</p>
+          </div>
+
           <Textarea
             label={t("aikhSystemPrompt")}
             hint={t("aikhSystemPromptHint")}

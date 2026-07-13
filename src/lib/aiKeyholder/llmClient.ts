@@ -1,8 +1,15 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type { ImageMediaType } from "@/lib/imageLoad";
+
+/** Ein Inhaltsblock einer Nachricht: Text oder Bild (base64) — analog zu VisionBlock. */
+export type LlmPart =
+  | { type: "text"; text: string }
+  | { type: "image"; mediaType: ImageMediaType; base64: string };
 
 export interface LlmMessage {
   role: "user" | "assistant" | "system";
-  content: string;
+  /** String = reiner Text (Normalfall). Blöcke nur, wenn Bilder mitgeschickt werden. */
+  content: string | LlmPart[];
 }
 
 export interface LlmConfig {
@@ -11,6 +18,12 @@ export interface LlmConfig {
   ollamaModel?: string | null;
   /** Override for ANTHROPIC_API_KEY env var. Decrypted by the caller. */
   anthropicApiKey?: string | null;
+}
+
+/** Text einer Nachricht — Bild-Blöcke werden übersprungen (fürs Logging/Speichern). */
+export function messageText(content: string | LlmPart[]): string {
+  if (typeof content === "string") return content;
+  return content.filter((p): p is Extract<LlmPart, { type: "text" }> => p.type === "text").map((p) => p.text).join("\n");
 }
 
 /**
@@ -54,17 +67,28 @@ function getAnthropicClient(config: LlmConfig): Anthropic {
   return new Anthropic({ apiKey });
 }
 
+/** Blöcke → Anthropic-Content. Reiner Text bleibt ein String (identisch zum bisherigen Verhalten). */
+function toAnthropicContent(content: string | LlmPart[]): Anthropic.MessageParam["content"] {
+  if (typeof content === "string") return content;
+  return content.map((p) =>
+    p.type === "text"
+      ? ({ type: "text", text: p.text } as const)
+      : ({ type: "image", source: { type: "base64", media_type: p.mediaType, data: p.base64 } } as const),
+  );
+}
+
 function splitSystemFromMessages(messages: LlmMessage[]): {
   system: string | undefined;
   rest: Anthropic.MessageParam[];
 } {
+  // System-Nachrichten sind immer Text (Bilder gehören in die User-Nachricht).
   const systemParts = messages
     .filter((m) => m.role === "system")
-    .map((m) => m.content)
+    .map((m) => messageText(m.content))
     .join("\n\n");
   const rest = messages
     .filter((m) => m.role !== "system")
-    .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+    .map((m) => ({ role: m.role as "user" | "assistant", content: toAnthropicContent(m.content) }));
   return { system: systemParts || undefined, rest };
 }
 
@@ -109,13 +133,27 @@ function ollamaModel(config: LlmConfig): string {
   return config.ollamaModel ?? "qwen2.5:32b";
 }
 
+/** Blöcke → OpenAI-kompatibler Content (data-URI für Bilder, wie in src/lib/vision/local.ts). */
+function toOpenAiMessages(messages: LlmMessage[]) {
+  return messages.map((m) => ({
+    role: m.role,
+    content: typeof m.content === "string"
+      ? m.content
+      : m.content.map((p) =>
+          p.type === "text"
+            ? { type: "text" as const, text: p.text }
+            : { type: "image_url" as const, image_url: { url: `data:${p.mediaType};base64,${p.base64}` } },
+        ),
+  }));
+}
+
 async function ollamaChat(config: LlmConfig, messages: LlmMessage[]): Promise<string> {
   const res = await fetch(ollamaUrl(config, "/v1/chat/completions"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: ollamaModel(config),
-      messages,
+      messages: toOpenAiMessages(messages),
       stream: false,
     }),
   });
@@ -135,7 +173,7 @@ async function* ollamaStream(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: ollamaModel(config),
-      messages,
+      messages: toOpenAiMessages(messages),
       stream: true,
     }),
   });

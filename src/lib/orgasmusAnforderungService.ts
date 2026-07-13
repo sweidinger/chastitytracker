@@ -20,6 +20,12 @@ export interface CreateOrgasmusAnforderungParams {
   vorgegebeneArt?: string | null;
   /** Whether opening to perform the orgasm during the window is permitted (no Sperre break / penalty). */
   oeffnenErlaubt?: boolean;
+  /** Als Strafe angeordnet (z.B. ruinierter Orgasmus als Pflicht) — strengere Eskalation bei Nicht-Erfüllung. */
+  istStrafe?: boolean;
+  /** Als Belohnungs-Fenster gewährt — kollidiert nicht mit einer offenen Anweisung/Gelegenheit (getrennter Withdraw-Scope). */
+  istBelohnung?: boolean;
+  /** Foto-Nachweis beim Erfassen des Orgasmus erforderlich. false = ein Foto ist freiwillig möglich. */
+  fotoPflicht?: boolean;
 }
 
 /**
@@ -31,7 +37,7 @@ export interface CreateOrgasmusAnforderungParams {
 export async function createOrgasmusAnforderung(
   params: CreateOrgasmusAnforderungParams,
 ): Promise<ServiceResult<{ id: string }>> {
-  const { userId, art, nachricht, beginntAt, endetAt, vorgegebeneArt, oeffnenErlaubt } = params;
+  const { userId, art, nachricht, beginntAt, endetAt, vorgegebeneArt, oeffnenErlaubt, istStrafe, istBelohnung, fotoPflicht } = params;
 
   if (!userId) return { ok: false, status: 400, error: "userId fehlt" };
   if (!(ORGASMUS_ANFORDERUNG_ARTEN as readonly string[]).includes(art)) {
@@ -56,9 +62,13 @@ export async function createOrgasmusAnforderung(
   }
 
   // Withdraw existing open request + create the new one atomically (one active at a time).
+  // Getrennter Scope: Belohnungs-Fenster (istBelohnung) und normale Anweisungen/Gelegenheiten
+  // verdrängen sich NICHT gegenseitig — eine offene Strafe bleibt bestehen, wenn eine Belohnung
+  // gewährt wird (und umgekehrt). Das Matching in /api/entries trennt sie über vorgegebeneArt.
+  const belohnung = Boolean(istBelohnung);
   const anforderung = await prisma.$transaction(async (tx) => {
     await tx.orgasmusAnforderung.updateMany({
-      where: { userId, fulfilledAt: null, withdrawnAt: null },
+      where: { userId, fulfilledAt: null, withdrawnAt: null, istBelohnung: belohnung },
       data: { withdrawnAt: new Date() },
     });
     return tx.orgasmusAnforderung.create({
@@ -70,12 +80,16 @@ export async function createOrgasmusAnforderung(
         endetAt: endet,
         vorgegebeneArt: vorgegebeneArt || null,
         oeffnenErlaubt: Boolean(oeffnenErlaubt),
+        istStrafe: Boolean(istStrafe),
+        istBelohnung: belohnung,
+        fotoPflicht: Boolean(fotoPflicht),
       },
     });
   });
 
   await sendOrgasmusAnforderungNotifications({
     userId, user, art, nachricht, beginnt, endet, vorgegebeneArt, oeffnenErlaubt: Boolean(oeffnenErlaubt),
+    fotoPflicht: Boolean(fotoPflicht),
   });
 
   return { ok: true, data: { id: anforderung.id } };
@@ -130,8 +144,9 @@ async function sendOrgasmusAnforderungNotifications(opts: {
   endet: Date;
   vorgegebeneArt?: string | null;
   oeffnenErlaubt: boolean;
+  fotoPflicht?: boolean;
 }) {
-  const { userId, user, art, nachricht, beginnt, endet, vorgegebeneArt, oeffnenErlaubt } = opts;
+  const { userId, user, art, nachricht, beginnt, endet, vorgegebeneArt, oeffnenErlaubt, fotoPflicht } = opts;
   const istAnweisung = art === "ANWEISUNG";
   const betreff = istAnweisung ? "Orgasmus angewiesen" : "Orgasmus-Gelegenheit";
   const einleitung = istAnweisung
@@ -152,6 +167,7 @@ async function sendOrgasmusAnforderungNotifications(opts: {
       : "";
     const artHtml = artLabel ? `<p><strong>Vorgegebene Art:</strong> ${escHtml(artLabel)}</p>` : "";
     const oeffnenHtml = oeffnenErlaubt ? `<p><strong>Öffnen erlaubt:</strong> Du darfst dich in diesem Fenster zum Orgasmus öffnen.</p>` : "";
+    const fotoHtml = fotoPflicht ? `<p><strong>Foto-Nachweis:</strong> Beim Erfassen ist ein Foto erforderlich.</p>` : "";
     await sendMail(
       user.email,
       `KG-Tracker – ${betreff}`,
@@ -164,6 +180,7 @@ async function sendOrgasmusAnforderungNotifications(opts: {
           <p><strong>Fenster:</strong> ${formatDateTime(beginnt)} – ${formatDateTime(endet)}</p>
           ${artHtml}
           ${oeffnenHtml}
+          ${fotoHtml}
           <p>
             <a href="${baseUrl}/dashboard" style="display:inline-block;background:#be185d;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold">
               Zum Dashboard →
@@ -176,6 +193,7 @@ async function sendOrgasmusAnforderungNotifications(opts: {
 
   const pushParts: string[] = [`Fenster: ${formatDateTime(beginnt)} – ${formatDateTime(endet)}`];
   if (artLabel) pushParts.push(artLabel);
+  if (fotoPflicht) pushParts.push("Foto-Nachweis erforderlich");
   if (nachricht?.trim()) pushParts.push(nachricht.trim());
   sendPushToUser(userId, betreff, pushParts.join(" · "), "/dashboard").catch(() => { /* ignore push errors */ });
 }

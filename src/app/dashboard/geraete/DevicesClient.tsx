@@ -23,6 +23,7 @@ export interface DeviceRow {
   purchasePrice: number | null;
   currency: string | null;
   categoryId: string | null;
+  sortOrder?: number | null;
   createdAt: string;
   archivedAt: string | null;
   entryCount: number;
@@ -32,6 +33,7 @@ export interface CategoryOption {
   id: string;
   name: string;
   isBuiltIn: boolean;
+  slug?: string;
 }
 
 interface Props {

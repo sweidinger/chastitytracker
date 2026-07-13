@@ -6,6 +6,8 @@ import { createVorgabe, updateVorgabe, deleteVorgabe, listVorgaben } from "@/lib
 import { setReinigungSettings } from "@/lib/reinigungService";
 import { createOrgasmusAnforderung, withdrawOrgasmusAnforderung } from "@/lib/orgasmusAnforderungService";
 import { judgeOffense } from "@/lib/strafurteilService";
+import { grantBelohnung, grantGutschrift, computeBelohnbar } from "@/lib/belohnung";
+import type { PenaltyAction } from "@/lib/penaltyActions";
 import type { ServiceResult } from "@/lib/serviceResult";
 
 /**
@@ -178,6 +180,11 @@ export interface RequestOrgasmArgs {
   requiredType?: string;
   /** Allow opening the device to perform the orgasm during the window (no Sperre break / penalty). */
   openAllowed?: boolean;
+  /** Nur bei art=ANWEISUNG sinnvoll: markiert die Anweisung als Strafe (z.B. ruinierter Orgasmus als
+   *  Pflicht). Wird sie ignoriert, greift die strengere Eskalation (ab 2× → schwer). */
+  asPenalty?: boolean;
+  /** Foto-Nachweis beim Erfassen erforderlich (sonst darf der Sub freiwillig eines anhängen). */
+  requirePhoto?: boolean;
   message?: string;
 }
 export async function mcpRequestOrgasm(username: string, args: RequestOrgasmArgs) {
@@ -199,12 +206,97 @@ export async function mcpRequestOrgasm(username: string, args: RequestOrgasmArgs
     endetAt: endet,
     vorgegebeneArt: args.requiredType,
     oeffnenErlaubt: args.openAllowed,
+    istStrafe: args.art === "ANWEISUNG" ? args.asPenalty : false,
+    fotoPflicht: args.requirePhoto,
   }));
   const kind = args.art === "ANWEISUNG" ? "mandatory directive" : "opportunity";
   return {
     ok: true,
     id: data.id,
     message: `Orgasm ${kind} set (window ${beginnt.toISOString()} – ${endet.toISOString()}); the user was notified by e-mail + push.`,
+  };
+}
+
+export interface RequestSessionArgs {
+  category: string;
+  deadlineHours?: number;
+  minMinuten?: number;
+  requireVideo?: boolean;
+  orgasmusZiel?: "KEINE" | "ERFORDERLICH" | "VERBOTEN";
+  orgasmusRuiniert?: boolean;
+  message?: string;
+}
+
+/** Fordert eine Trainings-Session in einer Session-Kategorie an (SessionAnforderung). */
+export async function mcpRequestSession(username: string, args: RequestSessionArgs) {
+  const userId = await resolveTargetUserId(username);
+  const name = (args.category ?? "").trim();
+  if (!name) throw new Error("category (Session-Kategorie-Name) is required.");
+  const category = await prisma.deviceCategory.findFirst({
+    where: { userId, name, isSessionCategory: true },
+    select: { id: true, name: true, maxSessionMinutes: true },
+  });
+  if (!category) throw new Error(`No session category "${name}" found.`);
+  const endetAt = args.deadlineHours && args.deadlineHours > 0
+    ? new Date(Date.now() + args.deadlineHours * 60 * 60 * 1000) : null;
+  const minMin = args.minMinuten && args.minMinuten > 0
+    ? Math.min(Math.round(args.minMinuten), category.maxSessionMinutes) : null;
+  const ziel = args.orgasmusZiel && ["KEINE", "ERFORDERLICH", "VERBOTEN"].includes(args.orgasmusZiel) ? args.orgasmusZiel : "KEINE";
+  const ruiniert = ziel === "ERFORDERLICH" && Boolean(args.orgasmusRuiniert);
+  const anf = await prisma.sessionAnforderung.create({
+    data: {
+      userId, deviceCategoryId: category.id,
+      nachricht: args.message?.trim() || null,
+      endetAt, minMinuten: minMin,
+      requireVideo: Boolean(args.requireVideo),
+      orgasmusZiel: ziel, orgasmusRuiniert: ruiniert,
+    },
+  });
+  return { ok: true, id: anf.id, message: `Session request for "${category.name}" created${endetAt ? ` (deadline ${endetAt.toISOString()})` : ""}.` };
+}
+
+export interface GrantRewardArgs {
+  windowHours?: number;
+  openAllowed?: boolean;
+}
+
+/** Belohnungs-Fenster gewähren (Einlösen): reserviert 1 Guthaben (−1). */
+export async function mcpGrantReward(username: string, args: GrantRewardArgs) {
+  const userId = await resolveTargetUserId(username);
+  const data = unwrap(await grantBelohnung(userId, args.windowHours, args.openAllowed !== false));
+  return {
+    ok: true,
+    id: data.id,
+    message: `Reward window granted (reserved 1 credit). Remaining available credit: ${data.available}.`,
+  };
+}
+
+export interface CreditRewardArgs {
+  category?: string; // Filter nach Kategoriename (leer = KG); fehlt = alle Kategorien
+  all?: boolean;     // true = alle erreichten Ziele auf einmal; Standard = nur 1 (wie der manuelle Button)
+}
+
+/** Schreibt Guthaben für erreichte (offene) Trainingsziele gut. Standard: 1 pro Aufruf (wie der Admin-Button);
+ *  `all=true` bucht alle erreichten Ziele auf einmal. Optional nach Kategoriename gefiltert. */
+export async function mcpCreditReward(username: string, args: CreditRewardArgs) {
+  const userId = await resolveTargetUserId(username);
+  const belohnbar = await computeBelohnbar(userId);
+  const filter = typeof args.category === "string" ? args.category.trim().toLowerCase() : null;
+  const matched = filter ? belohnbar.filter((b) => b.categoryName.toLowerCase() === filter) : belohnbar;
+  const targets = args.all ? matched : matched.slice(0, 1);
+  if (targets.length === 0) {
+    return { ok: true, credited: 0, message: "No reached, uncredited goals right now — nothing credited." };
+  }
+  let credited = 0;
+  let available = 0;
+  for (const z of targets) {
+    const res = await grantGutschrift(userId, z.categoryId, z.periodType, z.periodKey);
+    if (res.ok) { credited++; available = res.data.available; }
+  }
+  return {
+    ok: true,
+    credited,
+    message: `Credited ${credited} reward(s) for reached goals. Available credit now: ${available}.`,
   };
 }
 
@@ -439,9 +531,12 @@ export async function mcpEditLockPeriod(username: string, args: EditLockPeriodAr
 export interface JudgeOffenseArgs {
   /** Vergehens-ref aus get_offenses (das Feld `ref.id`). */
   ref: string;
-  action: "dismiss" | "punish" | "complete" | "reopen";
-  /** Freitext: die Strafe (bei punish, erforderlich — z.B. „20 Schläge") bzw. ein Grund (bei dismiss). */
+  action: "dismiss" | "punish" | "complete" | "reopen" | "reject_completion";
+  /** Freitext: die Strafe (bei punish, erforderlich — z.B. „20 Schläge"), ein Grund (bei dismiss)
+   *  bzw. die Begründung der Ablehnung (bei reject_completion, erforderlich). */
   text?: string;
+  /** Optionale Straf-Aktion (Phase 3): wird bei action="punish" direkt ausgeführt. */
+  penaltyAction?: PenaltyAction | null;
 }
 export async function mcpJudgeOffense(username: string, args: JudgeOffenseArgs) {
   const userId = await resolveTargetUserId(username);
@@ -451,12 +546,14 @@ export async function mcpJudgeOffense(username: string, args: JudgeOffenseArgs) 
     action: args.action,
     text: args.text,
     judgedBy: "ai",
+    penaltyAction: args.penaltyAction ?? null,
   }));
+  const actionSuffix = r.actionMessage ? ` Aktion: ${r.actionMessage}` : r.actionError ? ` Aktion FEHLGESCHLAGEN: ${r.actionError}` : "";
   const message =
     args.action === "complete" ? "Penalty marked as completed."
     : r.status === "dismissed" ? "Offense dismissed (no penalty)."
     : r.status === "open" ? "Judgment reopened — the offense is open again."
-    : "Offense punished — the penalty was recorded; the user was notified by e-mail + push.";
+    : `Offense punished — the penalty was recorded; the user was notified by e-mail + push.${actionSuffix}`;
   return { ok: true, status: r.status, done: r.done, message };
 }
 

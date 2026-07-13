@@ -36,6 +36,7 @@ export interface CategoryRow {
   maxSessionMinutes: number;
   requiresVideo: boolean;
   orgasmusZiel: string;
+  region: string;
 }
 
 interface Props {

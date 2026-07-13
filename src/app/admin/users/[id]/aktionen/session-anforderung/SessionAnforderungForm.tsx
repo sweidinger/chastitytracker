@@ -16,6 +16,7 @@ interface SessionCategory {
   name: string;
   maxSessionMinutes: number;
   requiresVideo: boolean;
+  orgasmusZiel: string;
   devices: { id: string; name: string }[];
 }
 
@@ -38,17 +39,21 @@ export default function SessionAnforderungForm({
   const [delayMinutes, setDelayMinutes] = useState("");
   const [deviceId, setDeviceId] = useState("");
   const [requireVideo, setRequireVideo] = useState(categories[0]?.requiresVideo ?? false);
+  const [orgasmusZiel, setOrgasmusZiel] = useState(categories[0]?.orgasmusZiel ?? "KEINE");
+  const [orgasmusRuiniert, setOrgasmusRuiniert] = useState(false);
+  const [istStrafe, setIstStrafe] = useState(false);
   const [nachricht, setNachricht] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const selectedCategory = categories.find((c) => c.id === categoryId) ?? null;
-  const categoryRequiresVideo = selectedCategory?.requiresVideo ?? false;
 
   function handleCategoryChange(id: string) {
     setCategoryId(id);
     setDeviceId("");
-    setRequireVideo(categories.find((c) => c.id === id)?.requiresVideo ?? false);
+    const cat = categories.find((c) => c.id === id);
+    setRequireVideo(cat?.requiresVideo ?? false);
+    setOrgasmusZiel(cat?.orgasmusZiel ?? "KEINE");
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -75,6 +80,9 @@ export default function SessionAnforderungForm({
       const dm = parseInt(delayMinutes, 10);
       if (!isNaN(dm) && dm > 0) payload.delayMinutes = dm;
       if (deviceId) payload.deviceId = deviceId;
+      if (istStrafe) payload.istStrafe = true;
+      payload.orgasmusZiel = orgasmusZiel;
+      if (orgasmusZiel === "ERFORDERLICH") payload.orgasmusRuiniert = orgasmusRuiniert;
       const res = await fetch("/api/admin/session-anforderung", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -143,19 +151,59 @@ export default function SessionAnforderungForm({
           />
         )}
 
-        {/* Nachweis-Pflicht */}
+        {/* Nachweis-Pflicht (pro Anforderung wählbar, Standard aus der Kategorie) */}
         <div className="flex items-center gap-2">
           <input
             id="requireVideo"
             type="checkbox"
             checked={requireVideo}
-            disabled={categoryRequiresVideo}
             onChange={(e) => setRequireVideo(e.target.checked)}
-            className="size-4 rounded border-border accent-foreground disabled:opacity-50"
+            className="size-4 rounded border-border accent-foreground"
           />
           <label htmlFor="requireVideo" className="text-sm text-foreground-muted select-none cursor-pointer">
             {t("sessionAnforderungRequireVideo")}
-            {categoryRequiresVideo && <span className="text-xs text-foreground-faint ml-1">({t("sessionAnforderungRequireVideoForced")})</span>}
+          </label>
+        </div>
+
+        {/* Orgasmus-Ziel (pro Anforderung wählbar, Standard aus der Kategorie) */}
+        <Select
+          label={t("orgasmusZiel")}
+          value={orgasmusZiel}
+          onChange={(e) => setOrgasmusZiel(e.target.value)}
+          options={[
+            { value: "KEINE", label: t("orgasmusZielNone") },
+            { value: "ERFORDERLICH", label: t("orgasmusZielRequired") },
+            { value: "VERBOTEN", label: t("orgasmusZielForbidden") },
+          ]}
+        />
+
+        {/* Ruinierter Orgasmus — nur wenn ein Orgasmus gefordert ist. */}
+        {orgasmusZiel === "ERFORDERLICH" && (
+          <div className="flex items-center gap-2 pl-1">
+            <input
+              id="orgasmusRuiniert"
+              type="checkbox"
+              checked={orgasmusRuiniert}
+              onChange={(e) => setOrgasmusRuiniert(e.target.checked)}
+              className="size-4 rounded border-border accent-foreground"
+            />
+            <label htmlFor="orgasmusRuiniert" className="text-sm text-foreground-muted select-none cursor-pointer">
+              {t("orgasmusZielRuiniert")}
+            </label>
+          </div>
+        )}
+
+        {/* Als Strafe markieren */}
+        <div className="flex items-center gap-2">
+          <input
+            id="sessionIstStrafe"
+            type="checkbox"
+            checked={istStrafe}
+            onChange={(e) => setIstStrafe(e.target.checked)}
+            className="size-4 rounded border-border accent-foreground"
+          />
+          <label htmlFor="sessionIstStrafe" className="text-sm text-foreground-muted select-none cursor-pointer">
+            {t("sessionAnforderungIstStrafe")}
           </label>
         </div>
 

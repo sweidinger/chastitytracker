@@ -116,8 +116,8 @@ export default async function EditEntryPage({
       {entry.type === "ORGASMUS" && (
         <OrgasmusForm initial={{
           id: entry.id, startTime: entry.startTime.toISOString(),
-          note: entry.note, orgasmusArt: entry.orgasmusArt,
-        }} artOptions={artOptions} maxTime={maxTime} tz={tz} nowDefault={nowDefault} redirectTo={redirectTo} />
+          note: entry.note, orgasmusArt: entry.orgasmusArt, imageUrl: entry.imageUrl,
+        }} artOptions={artOptions} maxTime={maxTime} tz={tz} nowDefault={nowDefault} mobileDesktopMode={mobileDesktopMode} redirectTo={redirectTo} />
       )}
       {(entry.type === "WEAR_BEGIN" || entry.type === "WEAR_END") && entry.device?.category && (
         <WearForm

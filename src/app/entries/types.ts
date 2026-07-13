@@ -15,6 +15,9 @@ export interface OrgasmusPayload {
   startTime: string;
   orgasmusArt: string;
   note: string | null;
+  /** Optionaler Foto-Nachweis — Pflicht, wenn die offene Anforderung `fotoPflicht` setzt. */
+  imageUrl: string | null;
+  imageExifTime: string | null;
 }
 
 export interface PruefungPayload {

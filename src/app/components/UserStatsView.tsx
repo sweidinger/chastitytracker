@@ -1,4 +1,5 @@
 import StatsMain from "@/app/components/StatsMain";
+import HistorieCard from "@/app/components/HistorieCard";
 import WearStatsByCategory from "@/app/dashboard/stats/WearStatsByCategory";
 import { deviceCategoriesEnabled } from "@/lib/constants";
 
@@ -13,6 +14,9 @@ export default function UserStatsView({ userId }: { userId: string }) {
           <WearStatsByCategory userId={userId} />
         </div>
       )}
+      <div className="mt-4">
+        <HistorieCard userId={userId} />
+      </div>
     </>
   );
 }

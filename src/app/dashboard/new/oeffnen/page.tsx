@@ -32,7 +32,11 @@ export default async function NewOeffnenPage() {
 
   const tn = await getTranslations("newEntry");
   const tf = await getTranslations("openForm");
-  const grundOptions = resolveReasonList(effectiveOeffnenGruende(user?.oeffnenGruendeConfig), "opening", tf);
+  // Reinigung/Toilette laufen ausschließlich über die Pause-Funktion → hier nicht als Öffnungsgrund anbieten.
+  const grundOptions = resolveReasonList(
+    effectiveOeffnenGruende(user?.oeffnenGruendeConfig).filter((r) => r.code !== "REINIGUNG" && r.code !== "TOILETTE"),
+    "opening", tf,
+  );
 
   return (
     <div className="w-full max-w-2xl mx-auto px-4 py-6">

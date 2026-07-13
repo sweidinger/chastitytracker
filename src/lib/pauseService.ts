@@ -9,7 +9,7 @@
  *   - Max. 1 aktive Pause pro Gerät gleichzeitig
  *   - Cage und Plug können gleichzeitig pausiert sein
  *   - PAUSE_END Foto ist Pflicht (wird in der API-Route geprüft)
- *   - Bei Überschreitung maxMinuten → StrafeRecord(PAUSE_OVERAGE) auto-erstellt
+ *   - Bei Überschreitung maxMinuten → im Strafbuch erkannt (keine Auto-Bestrafung)
  */
 
 import { prisma } from "@/lib/prisma";
@@ -212,31 +212,6 @@ export function pauseMsInRange(
   return total;
 }
 
-/** Auto-creates StrafeRecord(PAUSE_OVERAGE) when a PAUSE_END exceeds maxMinuten.
- *  Returns true if a Strafe was created. */
-export async function maybeCreatePauseOverageStrafe(
-  tx: PrismaTx,
-  userId: string,
-  pauseEndEntryId: string,
-  pauseBeginTime: Date,
-  pauseEndTime: Date,
-  maxMinuten: number,
-): Promise<boolean> {
-  const durationMs = pauseEndTime.getTime() - pauseBeginTime.getTime();
-  const durationMin = durationMs / 60_000;
-
-  if (durationMin <= maxMinuten) return false;
-
-  await (tx as typeof prisma).strafeRecord.create({
-    data: {
-      userId,
-      offenseType: "PAUSE_OVERAGE",
-      refId: pauseEndEntryId,
-      bestraftDatum: pauseEndTime,
-      status: "PUNISHED",
-      judgedBy: "system",
-      reason: `Pause ${Math.round(durationMin)} Min (erlaubt: ${maxMinuten} Min)`,
-    },
-  });
-  return true;
-}
+// Pause-Überzug wird nicht mehr automatisch bestraft (kein StrafeRecord beim PAUSE_END).
+// Die Erkennung passiert live in buildStrafbuch (Pause-Paare vs. konfigurierte Maximaldauer);
+// das Urteil fällt die Keyholderin (AI) oder der Admin.

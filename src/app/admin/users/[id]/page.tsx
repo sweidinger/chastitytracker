@@ -26,6 +26,9 @@ import WithdrawButton from "@/app/admin/WithdrawButton";
 import SessionList from "@/app/dashboard/SessionList";
 import WearSessionList from "@/app/dashboard/WearSessionList";
 import CategoryGoalsToday from "@/app/dashboard/CategoryGoalsToday";
+import BelohnungAdminPanel from "@/app/admin/users/[id]/BelohnungAdminPanel";
+import { computeBelohnbar, getBelohnungState } from "@/lib/belohnung";
+import { getActiveHealthHold } from "@/lib/healthHoldService";
 import Card from "@/app/components/Card";
 import Link from "next/link";
 import { Lock, ClipboardList, Droplets, ChevronRight } from "lucide-react";
@@ -73,6 +76,26 @@ export default async function AdminUserOverview({ params }: { params: Promise<{ 
     flagOn ? getActiveWearSessions(id) : Promise.resolve([]),
     flagOn ? getNonKgTrackingCategories(id) : Promise.resolve([]),
   ]);
+
+  // Belohnungs-Ökonomie + Gesundheits-Stopp.
+  const [belohnungState, belohnbar, healthHold] = await Promise.all([
+    getBelohnungState(id, now),
+    computeBelohnbar(id, now),
+    getActiveHealthHold(id),
+  ]);
+  const belohnungLabels = {
+    title: t("belohnungTitle"),
+    available: t("belohnungAvailable"),
+    reserved: t("belohnungReserved"),
+    activeWindowUntil: t("belohnungActiveWindowUntil"),
+    grant: t("belohnungGrant"),
+    grantHint: t("belohnungGrantHint"),
+    credit: t("belohnungCredit"),
+    belohnbarTitle: t("belohnungBelohnbarTitle"),
+    none: t("belohnungNone"),
+    periods: { day: ts("today"), week: ts("thisWeek"), month: ts("thisMonth"), year: ts("thisYear") },
+    hoursUnit: t("belohnungHoursUnit"),
+  };
 
   const reinigung: ReinigungSettings = { erlaubt: user.reinigungErlaubt, maxMinuten: user.reinigungMaxMinuten };
   // Aktiv offene Kontrolle für das grosse Banner — geplante (wirksamAb in der Zukunft) ausschliessen:
@@ -130,6 +153,16 @@ export default async function AdminUserOverview({ params }: { params: Promise<{ 
 
   return (
     <>
+      {healthHold && (
+        <div className="rounded-2xl border border-warn-border bg-warn-bg px-5 py-4 flex flex-col gap-1">
+          <p className="text-sm font-bold text-warn-text">{t("healthHoldAdminTitle")}</p>
+          <p className="text-sm text-warn">„{healthHold.reason}"</p>
+          <p className="text-xs text-warn opacity-80">
+            {t("healthHoldAdminSince", { date: fmtDual(healthHold.since) })}
+          </p>
+          <p className="text-xs text-warn opacity-80">{t("healthHoldAdminHint")}</p>
+        </div>
+      )}
       {activePair ? (
         <LaufendeSessionCard
           sessionStart={activePair.verschluss.startTime}
@@ -150,6 +183,15 @@ export default async function AdminUserOverview({ params }: { params: Promise<{ 
       ) : (
         <StatusBanner type={currentStatus?.type ?? null} since={currentStatus?.since ?? null} tz={tz} />
       )}
+
+      <BelohnungAdminPanel
+        userId={id}
+        available={belohnungState.available}
+        reserved={belohnungState.reserved}
+        activeWindowEndetAt={belohnungState.activeWindow ? belohnungState.activeWindow.endetAt.toISOString() : null}
+        belohnbar={belohnbar}
+        labels={belohnungLabels}
+      />
 
       {wearSessions.length > 0 && (
         <ActiveWearSessions

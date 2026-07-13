@@ -28,7 +28,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const body = await req.json();
   const { name, color, icon, sortOrder, trackingEnabled, requirePhoto, allowVorgaben,
-          isSessionCategory, maxSessionMinutes, requiresVideo, orgasmusZiel } = body;
+          isSessionCategory, maxSessionMinutes, requiresVideo, orgasmusZiel, region } = body;
 
   const validationError = validateCategoryInput({ name, color, icon });
   if (validationError) return NextResponse.json({ error: validationError.error }, { status: 400 });
@@ -51,6 +51,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (maxSessionMinutes !== undefined && typeof maxSessionMinutes === "number") data.maxSessionMinutes = Math.max(1, Math.min(120, maxSessionMinutes));
   if (requiresVideo !== undefined && typeof requiresVideo === "boolean") data.requiresVideo = requiresVideo;
   if (orgasmusZiel !== undefined && typeof orgasmusZiel === "string" && ["KEINE","ERFORDERLICH","VERBOTEN"].includes(orgasmusZiel)) data.orgasmusZiel = orgasmusZiel;
+  if (region !== undefined && typeof region === "string" && ["genital","anal","other"].includes(region)) data.region = region;
 
   const updated = await prisma.deviceCategory.update({ where: { id }, data });
   return NextResponse.json(updated);

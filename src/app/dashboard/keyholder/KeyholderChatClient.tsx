@@ -1,8 +1,20 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { Send, Lock, CheckCircle, Clock, AlertTriangle, ShieldAlert, KeyRound, Timer, MessageCircle, Target, Zap, PlayCircle } from "lucide-react";
+import { Send, Lock, CheckCircle, Clock, AlertTriangle, ShieldAlert, KeyRound, Timer, MessageCircle, Target, Zap, PlayCircle, ArrowRight } from "lucide-react";
+
+/** Actionable AI-Anweisungen → Start-/Erfüllungs-Seite im Tracker (CTA-Button unter der Status-Pill).
+ *  Nur Aktionen, die der Sub aktiv erfüllt; reine Keyholder-Aktionen (Sperrzeit/Strafe/Vorgabe) haben keinen Button. */
+type CtaKey = "ctaWearBegin" | "ctaSessionBegin" | "ctaOrgasmus" | "ctaVerschluss" | "ctaKontrolle";
+const ACTION_START_ROUTES: Record<string, { href: string; key: CtaKey }> = {
+  create_wear_anforderung: { href: "/dashboard/new/wear-begin", key: "ctaWearBegin" },
+  create_session_anforderung: { href: "/dashboard/new/session-begin", key: "ctaSessionBegin" },
+  create_orgasmus: { href: "/dashboard/new/orgasmus", key: "ctaOrgasmus" },
+  create_anforderung: { href: "/dashboard/new/verschluss", key: "ctaVerschluss" },
+  create_kontrolle: { href: "/dashboard", key: "ctaKontrolle" },
+};
 import Card from "@/app/components/Card";
 import Button from "@/app/components/Button";
 import Spinner from "@/app/components/Spinner";
@@ -95,43 +107,43 @@ const EVENT_PATTERNS = [
   {
     prefix: "[Kontrolle]",
     icon: ShieldAlert,
-    color: "bg-[var(--color-info-bg)] border-[var(--color-info-border)] text-[var(--color-info)]",
+    color: "bg-[var(--color-inspect-bg)] border-[var(--color-inspect-border)] text-[var(--color-inspect-text)]",
     labelKey: "eventKontrolle" as const,
   },
   {
     prefix: "[Strafe]",
     icon: AlertTriangle,
-    color: "bg-[var(--color-warn-bg)] border-[var(--color-warn-border)] text-[var(--color-warn)]",
+    color: "bg-[var(--color-warn-bg)] border-[var(--color-warn-border)] text-[var(--color-warn-text)]",
     labelKey: "eventStrafe" as const,
   },
   {
     prefix: "[Anforderung]",
     icon: KeyRound,
-    color: "bg-[var(--color-error-bg)] border-[var(--color-error-border)] text-[var(--color-error)]",
+    color: "bg-[var(--color-request-bg)] border-[var(--color-request-border)] text-[var(--color-request-text)]",
     labelKey: "eventAnforderung" as const,
   },
   {
     prefix: "[Sperrzeit]",
     icon: Timer,
-    color: "bg-[var(--color-success-bg)] border-[var(--color-success-border)] text-[var(--color-success)]",
+    color: "bg-[var(--color-sperrzeit-bg)] border-[var(--color-sperrzeit-border)] text-[var(--color-sperrzeit-text)]",
     labelKey: "eventSperrzeit" as const,
   },
   {
     prefix: "[Vorgabe]",
     icon: Target,
-    color: "bg-[var(--color-info-bg)] border-[var(--color-info-border)] text-[var(--color-info)]",
+    color: "bg-[var(--color-unlock-bg)] border-[var(--color-unlock-border)] text-[var(--color-unlock-text)]",
     labelKey: "eventVorgabe" as const,
   },
   {
     prefix: "[Wear-Anforderung]",
     icon: Zap,
-    color: "bg-[var(--color-warn-bg)] border-[var(--color-warn-border)] text-[var(--color-warn)]",
+    color: "bg-[var(--color-warn-bg)] border-[var(--color-warn-border)] text-[var(--color-warn-text)]",
     labelKey: "eventWearAnforderung" as const,
   },
   {
     prefix: "[Session-Anforderung]",
     icon: PlayCircle,
-    color: "bg-[var(--color-info-bg)] border-[var(--color-info-border)] text-[var(--color-info)]",
+    color: "bg-[var(--color-unlock-bg)] border-[var(--color-unlock-border)] text-[var(--color-unlock-text)]",
     labelKey: "eventSessionAnforderung" as const,
   },
 ];
@@ -171,16 +183,27 @@ function SystemEventBubble({ message, t }: { message: ChatMessage; t: ReturnType
 
 // ── Chat bubble ───────────────────────────────────────────────────────────────
 
-function ActionPillBubble({ pill }: { pill: ActionPill }) {
+function ActionPillBubble({ pill, t }: { pill: ActionPill; t: ReturnType<typeof useTranslations<"keyholderChat">> }) {
   const color = pill.ok
-    ? "bg-[var(--color-success-bg)] border-[var(--color-success-border)] text-[var(--color-success)]"
-    : "bg-[var(--color-warn-bg)] border-[var(--color-warn-border)] text-[var(--color-warn)]";
+    ? "bg-[var(--color-ok-bg)] border-[var(--color-ok-border)] text-[var(--color-ok-text)]"
+    : "bg-[var(--color-warn-bg)] border-[var(--color-warn-border)] text-[var(--color-warn-text)]";
   const Icon = pill.ok ? CheckCircle : AlertTriangle;
+  const route = pill.ok ? ACTION_START_ROUTES[pill.actionType] : undefined;
   return (
-    <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${color}`}>
-      <Icon size={11} />
-      {pill.label}
-      {!pill.ok && pill.error && <span className="opacity-70">· {pill.error}</span>}
+    <div className="inline-flex items-center gap-1.5 flex-wrap">
+      <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${color}`}>
+        <Icon size={11} />
+        {pill.label}
+        {!pill.ok && pill.error && <span className="opacity-70">· {pill.error}</span>}
+      </div>
+      {route && (
+        <Link href={route.href}
+          className="inline-flex items-center gap-1 rounded-full border border-[var(--color-ok)] bg-[var(--color-ok-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--color-ok-text)] hover:opacity-80 transition">
+          <PlayCircle size={12} />
+          {t(route.key)}
+          <ArrowRight size={11} />
+        </Link>
+      )}
     </div>
   );
 }
@@ -227,7 +250,7 @@ function ChatBubble({ message, t }: { message: ChatMessage; t: ReturnType<typeof
       {!isUser && message.actionPills && message.actionPills.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mt-1.5 max-w-[80%]">
           {message.actionPills.map((pill, i) => (
-            <ActionPillBubble key={i} pill={pill} />
+            <ActionPillBubble key={i} pill={pill} t={t} />
           ))}
         </div>
       )}

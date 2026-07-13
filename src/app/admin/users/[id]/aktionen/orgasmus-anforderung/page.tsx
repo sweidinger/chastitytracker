@@ -3,8 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { assertAdmin } from "@/lib/authGuards";
 import { getUserTimezone } from "@/lib/queries";
 import { nowDatetimeLocal } from "@/lib/utils";
-import { getTranslations } from "next-intl/server";
-import { effectiveOrgasmusArten, resolveReasonList } from "@/lib/reasonsService";
 import OrgasmusAnforderungForm from "./OrgasmusAnforderungForm";
 
 export default async function AdminOrgasmusAnforderungPage({ params }: { params: Promise<{ id: string }> }) {
@@ -13,15 +11,11 @@ export default async function AdminOrgasmusAnforderungPage({ params }: { params:
   const { id } = await params;
 
   // The directive sets times FOR the sub → the sub's tz governs the datetime-local defaults + submit.
-  // The vorgegebeneArt list is the SUB's resolved orgasm types (their custom config, or built-in defaults).
-  const [user, tz, tOrgasm] = await Promise.all([
-    prisma.user.findUnique({ where: { id }, select: { orgasmusArtenConfig: true } }),
+  const [user, tz] = await Promise.all([
+    prisma.user.findUnique({ where: { id }, select: { id: true } }),
     getUserTimezone(id),
-    getTranslations("orgasmForm"),
   ]);
   if (!user) redirect("/admin");
 
-  const artOptions = resolveReasonList(effectiveOrgasmusArten(user.orgasmusArtenConfig), "orgasm", tOrgasm);
-
-  return <OrgasmusAnforderungForm userId={id} artOptions={artOptions} tz={tz} nowDefault={nowDatetimeLocal(tz)} />;
+  return <OrgasmusAnforderungForm userId={id} tz={tz} nowDefault={nowDatetimeLocal(tz)} />;
 }

@@ -69,12 +69,13 @@ export function visionMaxTotalRefs(): number {
 export function heimdallEnabled(): boolean {
   return !!process.env.HEIMDALL_SYNC_SECRET;
 }
-export const ORGASMUS_ARTEN = ["Orgasmus", "ruinierter Orgasmus", "feuchter Traum"] as const;
+export const ORGASMUS_ARTEN = ["Orgasmus", "ruinierter Orgasmus", "feuchter Traum", "Belohnung"] as const;
 /** Maps each ORGASMUS_ARTEN value to its orgasmForm i18n key (shared by entry + Anforderung forms). */
 export const ORGASMUS_ART_I18N_KEYS: Record<string, string> = {
   "Orgasmus": "artOrgasmus",
   "ruinierter Orgasmus": "artRuiniert",
   "feuchter Traum": "artTraum",
+  "Belohnung": "artBelohnung",
 };
 /** Translates an orgasmusArt base value via the orgasmForm namespace, falling back to the raw value. */
 export function orgasmusArtLabel(art: string, t: (key: string) => string): string {
@@ -92,6 +93,10 @@ export function orgasmusAnforderungArtLabel(art: OrgasmusAnforderungArt, t: (key
 }
 export const OEFFNEN_GRUENDE = ["REINIGUNG", "TOILETTE", "KEYHOLDER", "NOTFALL", "ANDERES"] as const;
 export type OeffnenGrund = typeof OEFFNEN_GRUENDE[number];
+/** Standard-Öffnungsgründe für das Öffnen/Trage-Ende. Reinigung/Toilette laufen ausschließlich über
+ *  die Pause-Funktion und sind hier bewusst ausgenommen — ihre Codes/Labels bleiben in OEFFNEN_GRUENDE
+ *  erhalten (Pause-Labels + Bestands-Einträge). */
+export const DEFAULT_OEFFNEN_GRUENDE = ["KEYHOLDER", "NOTFALL", "ANDERES"] as const;
 
 /** Maps OEFFNEN_GRUENDE values to openForm i18n keys */
 export const GRUND_I18N_KEYS: Record<typeof OEFFNEN_GRUENDE[number], string> = {

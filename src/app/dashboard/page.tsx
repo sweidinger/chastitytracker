@@ -14,7 +14,7 @@ import { proratedVorgabeTargets } from "@/lib/goalFulfillment";
 import { buildSessionEvents, buildPlugSessionEvents } from "@/lib/sessionHelpers";
 import { buildCategoryWearGoals } from "@/lib/categoryGoals";
 import { getActiveVorgabe, getActiveSperrzeit, getActiveWearSessions, getNonKgTrackingCategories, getSessionCategories, getActiveOrgasmusAnforderung, getActivePlugAnforderung, getActivePlugSperrzeit, aktiveKontrolleWhere, activeVerschlussAnforderungWhere } from "@/lib/queries";
-import { getActiveSessionsAllCategories } from "@/lib/sessionService";
+import { getActiveSessionsAllCategories, getAllActiveSessionAnforderungen } from "@/lib/sessionService";
 import { plugCategoryId } from "@/lib/deviceCategories";
 import { deviceCategoriesEnabled } from "@/lib/constants";
 import { getActivePause } from "@/lib/pauseService";
@@ -29,6 +29,11 @@ import ActiveWearSessions from "./ActiveWearSessions";
 import CategoriesPromoCard from "./CategoriesPromoCard";
 import CategoryGoalsToday from "./CategoryGoalsToday";
 import CategoryGoalsLive from "./CategoryGoalsLive";
+import BelohnungBanner from "./BelohnungBanner";
+import HealthHoldCard from "./HealthHoldCard";
+import StrafenBanner from "./StrafenBanner";
+import { getBelohnungState } from "@/lib/belohnung";
+import { getActiveHealthHold } from "@/lib/healthHoldService";
 import TimerDisplay from "@/app/components/TimerDisplay";
 import { LockOpen } from "lucide-react";
 import TagesformWidget from "@/app/components/TagesformWidget";
@@ -42,9 +47,31 @@ export default async function DashboardPage() {
 
   const t = await getTranslations("dashboard");
   const tOrgasm = await getTranslations("orgasmForm");
+  const tCommon = await getTranslations("common");
   const dl = toDateLocale(await getLocale());
   const tz = session.user.timezone ?? APP_TZ;
   const now = new Date();
+  const healthHold = await getActiveHealthHold(userId);
+  const healthHoldLabels = {
+    activeTitle: t("healthHoldActiveTitle"),
+    activeHint: t("healthHoldActiveHint"),
+    since: t("healthHoldSince"),
+    end: t("healthHoldEnd"),
+    trigger: t("healthHoldTrigger"),
+    triggerHint: t("healthHoldTriggerHint"),
+    reasonLabel: t("healthHoldReasonLabel"),
+    reasonPlaceholder: t("healthHoldReasonPlaceholder"),
+    submit: t("healthHoldSubmit"),
+    cancel: tCommon("cancel"),
+  };
+  const belohnungState = await getBelohnungState(userId, now);
+  const belohnungBannerLabels = {
+    title: t("belohnungBannerTitle"),
+    available: t("belohnungAvailable"),
+    reserved: t("belohnungReserved"),
+    windowLabel: t("belohnungWindowLabel"),
+    oeffnenAllowed: t("belohnungOeffnenAllowed"),
+  };
 
   // ── Parallel data fetch ──
   const flagOn = deviceCategoriesEnabled();
@@ -145,6 +172,9 @@ export default async function DashboardPage() {
 
   const wearSessionRows = buildWearSessionRows(allNonKgCategories, entries, now, dl);
 
+  // Offene Session-Anforderungen (von Admin/AI-Keyholderin) → Banner mit „Session starten"-Button.
+  const sessionAnforderungen = flagOn ? await getAllActiveSessionAnforderungen(userId) : [];
+
   // ── Aktive PLUG-Session → große Karte (analog KG) ──
   const activePlugSession = flagOn ? (wearSessions.find((s) => s.categoryId === plugCatId) ?? null) : null;
   let plugCardData: {
@@ -225,6 +255,7 @@ export default async function DashboardPage() {
       nachricht: offenePlugAnf.nachricht,
       endetAtLabel: offenePlugAnf.endetAt ? t("plugWearRequestUntil", { date: formatDateTime(offenePlugAnf.endetAt, dl, tz) }) : null,
       categoryId: plugCatId,
+      overdue: offenePlugAnf.endetAt ? offenePlugAnf.endetAt < now : false,
     } : null,
 
     activePlugSperrzeit: activePlugSperrzeit ? {
@@ -237,7 +268,16 @@ export default async function DashboardPage() {
       label: offeneOrgasmusAnf.art === "ANWEISUNG" ? t("orgasmInstructed") : t("orgasmOpportunity"),
       nachricht: [orgasmusVorgabeLabel ? t("orgasmRequiredArt", { art: orgasmusVorgabeLabel }) : null, offeneOrgasmusAnf.nachricht].filter(Boolean).join(" · ") || null,
       windowLabel: t("orgasmWindowFromUntil", { from: formatDateTime(offeneOrgasmusAnf.beginntAt, dl, tz), until: formatDateTime(offeneOrgasmusAnf.endetAt, dl, tz) }),
+      overdue: offeneOrgasmusAnf.endetAt < now,
     } : null,
+
+    sessionAnforderungen: sessionAnforderungen.map((s) => ({
+      categoryId: s.deviceCategoryId,
+      categoryName: s.deviceCategory?.name ?? "?",
+      nachricht: s.nachricht,
+      endetAtLabel: s.endetAt ? t("sessionRequestUntil", { date: formatDateTime(s.endetAt, dl, tz) }) : null,
+      overdue: s.endetAt ? s.endetAt < now : false,
+    })),
 
     tagH,
     wocheH,
@@ -255,6 +295,18 @@ export default async function DashboardPage() {
       <div className="w-full max-w-2xl mx-auto px-4 pt-6">
         <h1 className="text-xl font-bold text-foreground">{t("userTitle", { name: username })}</h1>
       </div>
+      <HealthHoldCard
+        initial={healthHold ? { reason: healthHold.reason, since: healthHold.since.toISOString() } : null}
+        labels={healthHoldLabels}
+      />
+      <BelohnungBanner
+        available={belohnungState.available}
+        reserved={belohnungState.reserved}
+        activeWindowEndetAt={belohnungState.activeWindow ? belohnungState.activeWindow.endetAt.toISOString() : null}
+        oeffnenErlaubt={belohnungState.activeWindow?.oeffnenErlaubt ?? false}
+        labels={belohnungBannerLabels}
+      />
+      <StrafenBanner userId={userId} />
       {cageOpen && currentStatus && (
         <div className="w-full max-w-2xl mx-auto px-4 pt-4">
           <div className="rounded-2xl overflow-hidden border border-unlock-border">
@@ -361,7 +413,7 @@ export default async function DashboardPage() {
         serverNow={now.toISOString()}
       />
       {flagOn && <CategoriesPromoCard show={allNonKgCategories.length === 0} />}
-      {flagOn && <CategoryGoalsToday userId={userId} activeWearSessions={wearSessions} />}
+      {flagOn && <CategoryGoalsToday userId={userId} activeWearSessions={wearSessions} excludeCategoryIds={plugCardData ? [plugCatId] : []} />}
       <div className="w-full max-w-2xl mx-auto px-4 pb-2">
         <TagesformWidget />
       </div>

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { mcpStrafbuch, type OffenseJudgment } from "@/lib/mcpOverview";
+import { SEVERITY_RANK, SEVERITY_PENALTY_SUGGESTIONS, type OffenseSeverity } from "@/lib/strafurteilService";
 import { resolveUserContext, notesForEntities, entityKey, makeIso, type NoteDTO } from "@/lib/mcp/common";
 
 /** Disziplin-Ledger (§4) — vereinheitlicht die getrennten Strafbuch-Kategorien zu EINER
@@ -15,12 +16,19 @@ import { resolveUserContext, notesForEntities, entityKey, makeIso, type NoteDTO 
 /** Kanonische Offense-Taxonomie (entspricht den ref.type-Werten aus mcpStrafbuch). */
 export const OFFENSE_TYPES = [
   "unauthorized_opening", "late_control", "rejected_control",
-  "cleaning_limit", "wrong_device", "missed_orgasm",
+  "wrong_device", "missed_orgasm", "missed_session", "missed_lock",
+  "erektion", "pause_overage",
 ] as const;
 
 export interface OffenseRow {
   id: string;
   type: string;
+  /** Effektive Schwere-Stufe (inkl. Wiederholungs-Eskalation) — Orientierung fürs Strafmaß. */
+  severity: OffenseSeverity;
+  /** Basis-Schwere ohne Eskalation. */
+  baseSeverity: OffenseSeverity;
+  /** true = durch Wiederholung hochgestuft. */
+  escalated: boolean;
   /** ISO-8601 mit Offset (mcpStrafbuch wird mit iso:true komponiert). */
   detectedAt: string | null;
   status: "open" | "judged";
@@ -43,6 +51,8 @@ export interface LedgerResult {
   detectedOffenseCount: number;
   openOffenseCount: number;
   pendingPenaltyCount: number;
+  /** Straf-Vorschläge je Schwere-Stufe (Orientierung, nicht bindend). */
+  penaltySuggestionsBySeverity: Record<OffenseSeverity, string[]>;
   offenses: OffenseRow[];
 }
 
@@ -51,6 +61,9 @@ function toRow(detectedAt: string | null, j: OffenseJudgment, context: Record<st
   return {
     id: j.ref.id,
     type: j.ref.type,
+    severity: j.severity,
+    baseSeverity: j.baseSeverity,
+    escalated: j.escalated,
     detectedAt,
     status: j.judgment === "open" ? "open" : "judged",
     judgment: j.judgment,
@@ -77,7 +90,7 @@ export async function getOffenses(username: string): Promise<LedgerResult> {
     ...sb.unauthorizedOpenings.map((o) => toRow(o.time, o, { note: o.note, lockPeriodEndedAt: o.lockPeriodEndedAt, lockPeriodIndefinite: o.lockPeriodIndefinite })),
     ...sb.lateControls.map((c) => toRow(c.entryTime ?? c.deadline, c, { code: c.code, deadline: c.deadline, fulfilledAt: c.fulfilledAt, backdated: c.backdated, comment: c.comment, entryNote: c.entryNote })),
     ...sb.rejectedControls.map((c) => toRow(c.entryTime ?? c.deadline, c, { code: c.code, deadline: c.deadline, fulfilledAt: c.fulfilledAt, comment: c.comment, entryNote: c.entryNote })),
-    ...sb.cleaningLimitViolations.map((v) => toRow(v.time, v, { note: v.note })),
+    ...sb.missedLockRequests.map((m) => toRow(m.windowEndedAt, m, { message: m.message, categoryName: m.categoryName })),
     ...sb.wrongDeviceViolations.map((v) => {
       const dev = v.deviceName ? clusterByName.get(v.deviceName) : null;
       return toRow(v.time, v, {
@@ -91,11 +104,16 @@ export async function getOffenses(username: string): Promise<LedgerResult> {
     }),
     ...sb.missedOrgasmInstructions.map((m) => toRow(m.windowEndedAt, m, { message: m.message, requiredType: m.requiredType })),
     ...sb.missedSessions.map((m) => toRow(m.windowEndedAt, m, { message: m.message, categoryName: m.categoryName })),
+    ...sb.erektionViolations.map((v) => toRow(v.time, v, { oeffnenGrund: v.oeffnenGrund, note: v.note })),
+    ...sb.pauseOverageViolations.map((v) => toRow(v.time, v, { device: v.device, grund: v.grund, dauerMin: v.dauerMin, maxMin: v.maxMin })),
   ];
 
   // Inline-Notes je Offense in EINEM Query.
   const notesByEntity = await notesForEntities(userId, rows.map((r) => ({ entityType: "offense" as const, entityId: r.id })), {}, undefined, timezone);
   for (const r of rows) r.notes = notesByEntity.get(entityKey("offense", r.id)) ?? [];
+
+  // Schwere zuerst (schwer→leicht), dann neueste zuerst.
+  rows.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || (b.detectedAt ?? "").localeCompare(a.detectedAt ?? ""));
 
   return {
     schemaVersion: 2,
@@ -105,6 +123,11 @@ export async function getOffenses(username: string): Promise<LedgerResult> {
     detectedOffenseCount: sb.detectedOffenseCount,
     openOffenseCount: sb.openOffenseCount,
     pendingPenaltyCount: sb.pendingPenaltyCount,
+    penaltySuggestionsBySeverity: {
+      schwer: SEVERITY_PENALTY_SUGGESTIONS.schwer.map((s) => s.label),
+      mittel: SEVERITY_PENALTY_SUGGESTIONS.mittel.map((s) => s.label),
+      leicht: SEVERITY_PENALTY_SUGGESTIONS.leicht.map((s) => s.label),
+    },
     offenses: rows,
   };
 }

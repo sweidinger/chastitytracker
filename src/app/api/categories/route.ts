@@ -62,6 +62,7 @@ export async function GET(req: NextRequest) {
       maxSessionMinutes: true,
       requiresVideo: true,
       orgasmusZiel: true,
+      region: true,
       sortOrder: true,
       createdAt: true,
       _count: { select: { devices: true, vorgaben: true } },
@@ -83,6 +84,7 @@ export async function GET(req: NextRequest) {
       maxSessionMinutes: c.maxSessionMinutes,
       requiresVideo: c.requiresVideo,
       orgasmusZiel: c.orgasmusZiel,
+      region: c.region,
       sortOrder: c.sortOrder,
       createdAt: c.createdAt.toISOString(),
       deviceCount: c._count.devices,
@@ -101,7 +103,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
   const { name, color, icon, sortOrder, trackingEnabled, requirePhoto, allowVorgaben,
-          isSessionCategory, maxSessionMinutes, requiresVideo, orgasmusZiel } = body;
+          isSessionCategory, maxSessionMinutes, requiresVideo, orgasmusZiel, region } = body;
 
   let userId = session.user.id;
   if (body.userId && body.userId !== session.user.id) {
@@ -138,6 +140,7 @@ export async function POST(req: NextRequest) {
       maxSessionMinutes: typeof maxSessionMinutes === "number" ? Math.max(1, Math.min(120, maxSessionMinutes)) : 30,
       requiresVideo: typeof requiresVideo === "boolean" ? requiresVideo : false,
       orgasmusZiel: isSession && typeof orgasmusZiel === "string" && ["KEINE","ERFORDERLICH","VERBOTEN"].includes(orgasmusZiel) ? orgasmusZiel : "KEINE",
+      region: typeof region === "string" && ["genital","anal","other"].includes(region) ? region : "other",
       sortOrder: typeof sortOrder === "number" ? sortOrder : 0,
     },
   });
