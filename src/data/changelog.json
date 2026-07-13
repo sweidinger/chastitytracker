@@ -1,5 +1,18 @@
 [
   {
+    "version": "4.99.2",
+    "date": "2026-07-13",
+    "changes": [
+      {
+        "type": "fix",
+        "text": {
+          "de": "Beim Upstream-Merge war eine doppelte Datenbank-Migration entstanden: Sie legte Spalten an (Sprache, Kontroll-Eskalation), die die Migrationen aus dem Upstream bereits mitbringen. Beim Deploy wäre die Migration mit „duplicate column name“ abgebrochen. Entfernt — die Upstream-Migrationen decken alles ab.",
+          "en": "The upstream merge had produced a duplicate database migration: it added columns (language, inspection escalation) that the upstream migrations already create. On deploy it would have failed with “duplicate column name”. Removed — the upstream migrations cover everything."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.99.1",
     "date": "2026-07-13",
     "changes": [
