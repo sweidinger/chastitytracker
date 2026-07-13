@@ -6,6 +6,7 @@ import {
   DEFAULT_OEFFNEN_GRUENDE,
   ORGASMUS_ART_I18N_KEYS,
   GRUND_I18N_KEYS,
+  SYSTEM_ONLY_OPENING_CODES,
   parseOrgasmusArtBase,
   orgasmusArtLabel,
   ART_SEP,
@@ -285,12 +286,18 @@ export function resolveOrgasmusOptions(cfg: ReasonEntry[], t: (key: string) => s
 }
 
 /** Löst eine ganze Config zu anzeigefertigen `{code,label}` auf (Select-Optionen + Zeilen). */
+/** Builds the picker options for a reason config. For "opening", system-only codes (e.g.
+ *  AUTO_ENTFERNT — protected like REINIGUNG but never meant to be user-chosen, see
+ *  SYSTEM_ONLY_OPENING_CODES) are excluded — every current caller is a selection dropdown, never
+ *  a display-only label lookup (that goes through resolveReasonLabel directly on stored entries,
+ *  unaffected by this filter). */
 export function resolveReasonList(
   cfg: ReasonEntry[],
   kind: ReasonKind,
   t: (key: string) => string,
 ): ResolvedReason[] {
-  return cfg.map((e) => ({ code: e.code, label: resolveReasonLabel(e.code, cfg, kind, t) }));
+  const selectable = kind === "opening" ? cfg.filter((e) => !SYSTEM_ONLY_OPENING_CODES.includes(e.code)) : cfg;
+  return selectable.map((e) => ({ code: e.code, label: resolveReasonLabel(e.code, cfg, kind, t) }));
 }
 
 /** Speichert eine Reason-Config (validiert/normalisiert via parseReasonConfig). Geteilt von der

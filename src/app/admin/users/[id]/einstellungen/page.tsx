@@ -6,11 +6,13 @@ import ReinigungToggle from "@/app/admin/ReinigungToggle";
 import ToiletteToggle from "@/app/admin/ToiletteToggle";
 import PlugToggle from "@/app/admin/PlugToggle";
 import AutoKontrolleToggle from "@/app/admin/AutoKontrolleToggle";
+import InspectionEscalationToggle from "@/app/admin/InspectionEscalationToggle";
 import { parseReinigungsFenster } from "@/lib/reinigungService";
 import { parseReasonConfig, resolveOrgasmusOptions, ART_SEP, PROTECTED_OPENING_CODES } from "@/lib/reasonsService";
 import ReasonsEditor from "@/app/admin/ReasonsEditor";
 import { ORGASMUS_ARTEN, OEFFNEN_GRUENDE, ORGASMUS_ART_I18N_KEYS, GRUND_I18N_KEYS } from "@/lib/constants";
 import AccountSection from "./AccountSection";
+import UserLocaleSelect from "@/app/admin/UserLocaleSelect";
 import MobileUploadToggle from "@/app/admin/MobileUploadToggle";
 import KeyholderInstructionsForm from "@/app/admin/KeyholderInstructionsForm";
 import KeyholderManager from "@/app/admin/KeyholderManager";
@@ -96,6 +98,11 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
         </SettingsSection>
       )}
 
+      {/* Sprache des Subs — App, E-Mails, Push */}
+      <SettingsSection title={t("sectionLanguage")} description={t("sectionLanguageDesc")} bodyPadded>
+        <UserLocaleSelect userId={user.id} initialLocale={user.locale} />
+      </SettingsSection>
+
       {/* Käfig — Reinigung + Toilette in einer Box */}
       <SettingsSection title={t("sectionCage")} description={t("sectionCageDesc")} bodyPadded>
         <div className="flex flex-col gap-5">
@@ -171,6 +178,17 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
           initialRuheBis={user.autoKontrolleRuheBis}
           initialFristVon={user.autoKontrolleFristVon}
           initialFristBis={user.autoKontrolleFristBis}
+        />
+      </SettingsSection>
+
+      {/* Kontroll-Eskalation: Mahnung (Stufe 1) + optional automatisch als abgelegt markieren (Stufe 2) */}
+      <SettingsSection title={t("sectionInspectionEscalation")} description={t("sectionInspectionEscalationDesc")} bodyPadded>
+        <InspectionEscalationToggle
+          userId={user.id}
+          initialReminderEnabled={user.inspectionReminderEnabled}
+          initialReminderDelayMinutes={user.inspectionReminderDelayMinutes}
+          initialAutoMarkEnabled={user.inspectionAutoMarkEnabled}
+          initialAutoMarkDelayMinutes={user.inspectionAutoMarkDelayMinutes}
         />
       </SettingsSection>
 

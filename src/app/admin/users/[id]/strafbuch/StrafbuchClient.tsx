@@ -7,6 +7,7 @@ import ImageViewer from "@/app/components/ImageViewer";
 
 export type OffenseStoredType =
   | "KONTROLLANFORDERUNG"
+  | "AUTO_ENTFERNT"
   | "OEFFNEN_ENTRY"
   | "VERSCHLUSS_ANFORDERUNG"
   | "FALSCHES_GERAET"

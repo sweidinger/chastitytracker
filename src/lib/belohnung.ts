@@ -168,8 +168,9 @@ export async function grantGutschrift(
     ]);
     await logBelohnungEvent(userId, "VERDIENT", 1, user.verdienteOrgasmen, `${match.categoryName} · ${PERIOD_LABEL[match.periodType]} ${match.periodKey}`);
     await notifyUser(userId, {
-      subject: "Belohnung verdient",
-      message: `Du hast ein Trainingsziel erreicht (${match.categoryName}) — dir wurde 1 Belohnung gutgeschrieben. Verfügbares Guthaben: ${user.verdienteOrgasmen}.`,
+      subjectKey: "rewardEarnedSubject",
+      messageKey: "rewardEarnedMessage",
+      params: { category: match.categoryName, available: user.verdienteOrgasmen },
     });
     return { ok: true, data: { available: user.verdienteOrgasmen } };
   } catch {
@@ -260,8 +261,9 @@ export async function denyReward(userId: string): Promise<ServiceResult<{ availa
   });
   await logBelohnungEvent(userId, "ENTZOGEN", -1, updated.verdienteOrgasmen, "Strafe: Guthaben entzogen");
   await notifyUser(userId, {
-    subject: "Orgasmus-Entzug",
-    message: `Dir wurde als Strafe 1 Belohnung entzogen. Verfügbares Guthaben: ${updated.verdienteOrgasmen}.`,
+    subjectKey: "rewardRevokedSubject",
+    messageKey: "rewardRevokedMessage",
+    params: { available: updated.verdienteOrgasmen },
   });
   return { ok: true, data: { available: updated.verdienteOrgasmen } };
 }
@@ -276,8 +278,9 @@ export async function delayReward(userId: string, hours: number): Promise<Servic
   await prisma.orgasmusAnforderung.update({ where: { id: win.id }, data: { endetAt: neu } });
   await logBelohnungEvent(userId, "VERSCHOBEN", 0, await currentBalance(userId), `Strafe: Fenster um ${hours} h verschoben`);
   await notifyUser(userId, {
-    subject: "Belohnung verschoben",
-    message: `Deine Belohnungs-Gelegenheit wurde als Strafe um ${hours} h verschoben.`,
+    subjectKey: "rewardPostponedSubject",
+    messageKey: "rewardPostponedMessage",
+    params: { hours },
   });
   return { ok: true, data: { endetAt: neu } };
 }

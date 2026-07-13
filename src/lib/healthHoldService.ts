@@ -49,8 +49,9 @@ export async function startHealthHold(userId: string, reason: string): Promise<S
     const controllers = await getControllersOfUser(userId);
     for (const c of controllers) {
       await notifyUser(c.id, {
-        subject: "Gesundheits-Stopp aktiviert",
-        message: `Dein Sub hat einen Gesundheits-Stopp aktiviert: „${text}". Die AI-Keyholderin stellt bis auf Weiteres keine neuen Anforderungen.`,
+        subjectKey: "healthHoldOnSubject",
+        messageKey: "healthHoldOnMessage",
+        params: { text },
       });
     }
   } catch { /* Benachrichtigung darf den Stopp nie verhindern */ }
@@ -69,8 +70,8 @@ export async function resolveHealthHold(userId: string): Promise<ServiceResult<{
       const controllers = await getControllersOfUser(userId);
       for (const c of controllers) {
         await notifyUser(c.id, {
-          subject: "Gesundheits-Stopp beendet",
-          message: "Dein Sub hat den Gesundheits-Stopp beendet.",
+          subjectKey: "healthHoldOffSubject",
+          messageKey: "healthHoldOffMessage",
         });
       }
     } catch { /* egal */ }

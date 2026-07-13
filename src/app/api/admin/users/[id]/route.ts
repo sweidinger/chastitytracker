@@ -3,12 +3,13 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { requireAdminApi, requireKeyholderOrAdminApi } from "@/lib/authGuards";
 import bcrypt from "bcryptjs";
-import { isValidEmail, passwordErrorCode } from "@/lib/constants";
+import { isValidEmail, passwordErrorCode, isValidLocale } from "@/lib/constants";
 import { getActiveSperrzeit } from "@/lib/queries";
 import { isUniqueConstraintOn } from "@/lib/prismaErrors";
 import { setReinigungSettings, parseReinigungsFenster } from "@/lib/reinigungService";
 import { setToiletteSettings } from "@/lib/toiletteService";
 import { setAutoKontrolleSettings } from "@/lib/autoKontrolleService";
+import { setInspectionEscalationSettings } from "@/lib/inspectionEscalationService";
 import { setReasonConfig } from "@/lib/reasonsService";
 import { deleteUploadedFiles } from "@/lib/imageUtils";
 
@@ -138,6 +139,17 @@ export async function PATCH(
     return NextResponse.json({ ok: true });
   }
 
+  if (
+    body.inspectionReminderEnabled !== undefined || body.inspectionReminderDelayMinutes !== undefined ||
+    body.inspectionAutoMarkEnabled !== undefined || body.inspectionAutoMarkDelayMinutes !== undefined
+  ) {
+    await setInspectionEscalationSettings(id, {
+      reminderEnabled: body.inspectionReminderEnabled, reminderDelayMinutes: body.inspectionReminderDelayMinutes,
+      autoMarkEnabled: body.inspectionAutoMarkEnabled, autoMarkDelayMinutes: body.inspectionAutoMarkDelayMinutes,
+    });
+    return NextResponse.json({ ok: true });
+  }
+
   if (body.orgasmusArtenConfig !== undefined) {
     const config = await setReasonConfig(id, "orgasm", body.orgasmusArtenConfig);
     return NextResponse.json({ ok: true, config });
@@ -149,6 +161,14 @@ export async function PATCH(
 
   if (body.mobileDesktopUpload !== undefined) {
     await prisma.user.update({ where: { id }, data: { mobileDesktopUpload: Boolean(body.mobileDesktopUpload) } });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.locale !== undefined) {
+    if (!isValidLocale(body.locale)) {
+      return NextResponse.json({ error: "invalidLocale" }, { status: 400 });
+    }
+    await prisma.user.update({ where: { id }, data: { locale: body.locale } });
     return NextResponse.json({ ok: true });
   }
 

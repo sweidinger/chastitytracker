@@ -108,6 +108,13 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
       detail: null, note: v.note, sortAt: v.startTime?.getTime() ?? 0,
     });
   }
+  for (const k of sb.autoRemovedControls) {
+    offenses.push({
+      refId: k.id, offenseType: "AUTO_ENTFERNT", severity: OFFENSE_SEVERITY["auto_removed_control"], typeLabel: t("strafbuchAutoEntfernt"),
+      headline: `${t("strafbuchKontrollePrefix")} ${k.code} — ${t("strafbuchAutoEntferntAm")} ${fmtDual(k.deadline)}`,
+      detail: t("strafbuchAutoEntferntDetail"), note: k.kommentar ?? k.entryNote, sortAt: k.deadline.getTime(),
+    });
+  }
   // Effektive Schwere (Phase 2: Wiederholungs-Eskalation) je Vergehen anwenden.
   const sevMap = computeSeverities(sb, now);
   for (const o of offenses) {
@@ -205,6 +212,7 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
     unauthorized_opening: t("strafbuchUnerlaubteOeffnungen"),
     late_control: t("strafbuchZuSpaet"),
     rejected_control: t("strafbuchAbgelehnt"),
+    auto_removed_control: t("strafbuchAutoEntfernt"),
     wrong_device: t("strafbuchFalschesGeraet"),
     missed_lock: t("strafbuchVerpassteVerschluss"),
     missed_session: t("strafbuchVersaeumteSession"),

@@ -1,3 +1,22 @@
+export const VALID_LOCALES = ["de", "en"] as const;
+export type Locale = (typeof VALID_LOCALES)[number];
+/** Single source for locale validation — shared by i18n/request.ts, the settings API and the sync. */
+export function isValidLocale(v: unknown): v is Locale {
+  return typeof v === "string" && (VALID_LOCALES as readonly string[]).includes(v);
+}
+
+/** Clamp any value to a valid locale, falling back to "de" (the default). */
+export function toLocale(v: unknown): Locale {
+  return isValidLocale(v) ? v : "de";
+}
+
+/** Public marketing site — hosts the user-facing how-to / FAQ content linked from the app. */
+export const MARKETING_URL = "https://chastitytracker.ch";
+/** Locale-aware link to the public inspection explanation (marketing FAQ; EN lives under /en). */
+export function inspectionHelpUrl(locale: string): string {
+  return locale === "en" ? `${MARKETING_URL}/en/faq` : `${MARKETING_URL}/faq`;
+}
+
 export const LOCALES = [
   { value: "de", label: "DE" },
   { value: "en", label: "EN" },
@@ -91,12 +110,19 @@ export type OrgasmusAnforderungArt = typeof ORGASMUS_ANFORDERUNG_ARTEN[number];
 export function orgasmusAnforderungArtLabel(art: OrgasmusAnforderungArt, t: (key: string) => string): string {
   return art === "ANWEISUNG" ? t("orgasmReqModeAnweisung") : t("orgasmReqModeGelegenheit");
 }
-export const OEFFNEN_GRUENDE = ["REINIGUNG", "TOILETTE", "KEYHOLDER", "NOTFALL", "ANDERES"] as const;
+// AUTO_ENTFERNT: system-only reason for the auto-created OEFFNEN entry when a Kontrolle's
+// escalation reminder is ignored (see inspectionEscalationService.ts). Protected like REINIGUNG
+// (reservedCodes() covers all of OEFFNEN_GRUENDE), but unlike REINIGUNG it must never be
+// user-selectable — see SYSTEM_ONLY_OPENING_CODES below, filtered out of the sub's own dropdown.
+export const AUTO_ENTFERNT_REASON = "AUTO_ENTFERNT";
+export const OEFFNEN_GRUENDE = ["REINIGUNG", "TOILETTE", "KEYHOLDER", "NOTFALL", "ANDERES", AUTO_ENTFERNT_REASON] as const;
 export type OeffnenGrund = typeof OEFFNEN_GRUENDE[number];
 /** Standard-Öffnungsgründe für das Öffnen/Trage-Ende. Reinigung/Toilette laufen ausschließlich über
  *  die Pause-Funktion und sind hier bewusst ausgenommen — ihre Codes/Labels bleiben in OEFFNEN_GRUENDE
- *  erhalten (Pause-Labels + Bestands-Einträge). */
+ *  erhalten (Pause-Labels + Bestands-Einträge). AUTO_ENTFERNT ist system-only (siehe unten). */
 export const DEFAULT_OEFFNEN_GRUENDE = ["KEYHOLDER", "NOTFALL", "ANDERES"] as const;
+/** Reserved AND hidden from the user-facing opening-reason picker — system-only codes. */
+export const SYSTEM_ONLY_OPENING_CODES: readonly string[] = [AUTO_ENTFERNT_REASON];
 
 /** Maps OEFFNEN_GRUENDE values to openForm i18n keys */
 export const GRUND_I18N_KEYS: Record<typeof OEFFNEN_GRUENDE[number], string> = {
@@ -105,6 +131,7 @@ export const GRUND_I18N_KEYS: Record<typeof OEFFNEN_GRUENDE[number], string> = {
   KEYHOLDER: "grundKeyholder",
   NOTFALL: "grundNotfall",
   ANDERES: "grundAnderes",
+  AUTO_ENTFERNT: "grundAutoEntfernt",
 };
 
 // ── Entry display constants (shared by dashboard + admin entry lists) ─────────
@@ -250,6 +277,13 @@ export function validateEntryPayload(
     return { error: "Device-Kategorien sind nicht aktiviert", status: 400 };
   }
   if (type === "OEFFNEN") {
+    // System-only reason codes (e.g. AUTO_ENTFERNT) are reserved/protected like REINIGUNG, but
+    // must NEVER be user-submittable — otherwise a sub could pick the "auto-marked" label
+    // themselves via a hand-crafted request, even though `source` (system vs. user) is never
+    // client-controlled. Block unconditionally, before the openingCodes/OEFFNEN_GRUENDE check.
+    if (oeffnenGrund && SYSTEM_ONLY_OPENING_CODES.includes(oeffnenGrund)) {
+      return { error: "Grund der Öffnung ist erforderlich", status: 400 };
+    }
     const openingOk = reasonCtx?.openingCodes
       ? !!oeffnenGrund && reasonCtx.openingCodes.has(oeffnenGrund)
       : !!oeffnenGrund && OEFFNEN_GRUENDE.includes(oeffnenGrund as (typeof OEFFNEN_GRUENDE)[number]);
