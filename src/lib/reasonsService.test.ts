@@ -52,11 +52,15 @@ describe("parseReasonConfig — Reinigung/Toilette (Pause-Funktion)", () => {
 
 describe("parseReasonConfig — normalization", () => {
   it("dedups by code (first wins)", () => {
-    expect(parseReasonConfig([{ code: "Orgasmus" }, { code: "Orgasmus", label: "dup" }], "orgasm")).toEqual([{ code: "Orgasmus" }]);
+    // "Belohnung" ist ein geschützter Built-in und wird immer angehängt (PROTECTED_ORGASM_CODES).
+    expect(parseReasonConfig([{ code: "Orgasmus" }, { code: "Orgasmus", label: "dup" }], "orgasm"))
+      .toEqual([{ code: "Orgasmus" }, { code: "Belohnung" }]);
   });
-  it("caps at 12 entries", () => {
+  it("caps at 12 entries (geschützte Built-ins kommen zusätzlich obendrauf)", () => {
     const many = Array.from({ length: 15 }, (_, i) => ({ code: `c_${"0".repeat(8)}${i}` }));
-    expect(parseReasonConfig(many, "orgasm").length).toBe(12);
+    const out = parseReasonConfig(many, "orgasm");
+    expect(out.filter((e) => e.code !== "Belohnung").length).toBe(12);
+    expect(out.map((e) => e.code)).toContain("Belohnung");
   });
   it("strips control chars but KEEPS internal spaces, trims, caps 40", () => {
     const TAB = String.fromCharCode(9), NUL = String.fromCharCode(0);
@@ -69,13 +73,15 @@ describe("parseReasonConfig — normalization", () => {
     expect(parseReasonConfig([{ code: "Orgasmus", label: "sanfter Hoehepunkt" }], "orgasm")[0].label).toBe("sanfter Hoehepunkt");
   });
   it("whitespace-only label → no label field", () => {
-    expect(parseReasonConfig([{ code: "Orgasmus", label: "   " }], "orgasm")).toEqual([{ code: "Orgasmus" }]);
+    expect(parseReasonConfig([{ code: "Orgasmus", label: "   " }], "orgasm"))
+      .toEqual([{ code: "Orgasmus" }, { code: "Belohnung" }]);
   });
   it("a row without a valid code gets a generated custom code", () => {
     const out = parseReasonConfig([{ label: "Quickie" }], "orgasm");
-    expect(out).toHaveLength(1);
+    expect(out).toHaveLength(2); // Quickie + geschütztes "Belohnung"
     expect(out[0].code).toMatch(/^c_[0-9a-f]{8,}$/);
     expect(out[0].label).toBe("Quickie");
+    expect(out[1]).toEqual({ code: "Belohnung" });
   });
   it("preserves an existing custom code", () => {
     expect(parseReasonConfig([{ code: "c_0011223344", label: "Quickie" }], "orgasm")[0].code).toBe("c_0011223344");
@@ -136,7 +142,8 @@ describe("orgasm sub-types (Kaskade)", () => {
       { code: "c_2222222222", label: "Baz | Qux" },
       { code: "c_3333333333", label: "Ga - Zonk" },
     ], "orgasm");
-    expect(out.map((e) => e.label)).toEqual(["Foo / Bar", "Baz | Qux", "Ga – Zonk"]);
+    expect(out.filter((e) => e.code !== "Belohnung").map((e) => e.label))
+      .toEqual(["Foo / Bar", "Baz | Qux", "Ga – Zonk"]);
   });
   it("does NOT split an un-spaced hyphen inside a word", () => {
     expect(parseReasonConfig([{ code: "c_4444444444", label: "Anal-Sex" }], "orgasm")[0].label).toBe("Anal-Sex");

@@ -1,5 +1,18 @@
 [
   {
+    "version": "4.99.1",
+    "date": "2026-07-13",
+    "changes": [
+      {
+        "type": "fix",
+        "text": {
+          "de": "Tests: Die Erwartungen in constants.test.ts und reasonsService.test.ts waren seit den neuen Eintrags-Typen (Session, Pause) und dem festen Built-in „Belohnung“ veraltet und schlugen fehl, obwohl der Code korrekt war. Nachgezogen — die Suite ist wieder vollständig grün (275/275).",
+          "en": "Tests: expectations in constants.test.ts and reasonsService.test.ts were stale since the new entry types (session, pause) and the built-in “Belohnung” reward type, and failed even though the code was correct. Updated — the suite is fully green again (275/275)."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.99.0",
     "date": "2026-07-13",
     "changes": [
