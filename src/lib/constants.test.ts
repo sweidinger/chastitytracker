@@ -4,8 +4,13 @@ import { validateEntryPayload, deviceCategoriesEnabled, VALID_TYPES, KG_ENTRY_TY
 const FUTURE_SAFE_TIME = "2030-01-01T10:00:00Z";
 
 describe("VALID_TYPES", () => {
-  it("contains VERSCHLUSS, OEFFNEN, PRUEFUNG, ORGASMUS, WEAR_BEGIN, WEAR_END", () => {
-    expect(VALID_TYPES).toEqual(["VERSCHLUSS", "OEFFNEN", "PRUEFUNG", "ORGASMUS", "WEAR_BEGIN", "WEAR_END"]);
+  it("contains KG-, Wear-, Session- und Pause-Typen", () => {
+    expect(VALID_TYPES).toEqual([
+      "VERSCHLUSS", "OEFFNEN", "PRUEFUNG", "ORGASMUS",
+      "WEAR_BEGIN", "WEAR_END",
+      "SESSION_BEGIN", "SESSION_END",
+      "PAUSE_BEGIN", "PAUSE_END",
+    ]);
   });
 
   it("KG_ENTRY_TYPES contains exactly VERSCHLUSS and OEFFNEN", () => {
