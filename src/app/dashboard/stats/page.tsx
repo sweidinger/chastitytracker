@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import StatsMain from "@/app/components/StatsMain";
+import HistorieCard from "@/app/components/HistorieCard";
 import WearStatsByCategory from "./WearStatsByCategory";
 import { deviceCategoriesEnabled } from "@/lib/constants";
 
@@ -11,10 +12,13 @@ export default async function StatsPage() {
     <>
       <StatsMain userId={userId} compact />
       {deviceCategoriesEnabled() && (
-        <div className="w-full max-w-2xl mx-auto px-4 pb-6">
+        <div className="w-full max-w-2xl mx-auto px-4 pb-4">
           <WearStatsByCategory userId={userId} />
         </div>
       )}
+      <div className="w-full max-w-2xl mx-auto px-4 pb-6">
+        <HistorieCard userId={userId} />
+      </div>
     </>
   );
 }

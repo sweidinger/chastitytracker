@@ -10,10 +10,11 @@ import {
   resolveOrgasmusArtDisplay,
   backfillOrgasmusArtenConfig,
   DEFAULT_ORGASM_ARTEN,
-  PROTECTED_OPENING_CODE,
   type ReasonEntry,
 } from "./reasonsService";
-import { OEFFNEN_GRUENDE } from "./constants";
+import { OEFFNEN_GRUENDE, DEFAULT_OEFFNEN_GRUENDE } from "./constants";
+
+const OPENING_DEFAULT = DEFAULT_OEFFNEN_GRUENDE.map((code) => ({ code }));
 
 const ORGASM_DEFAULT = DEFAULT_ORGASM_ARTEN.map((code) => ({ code }));
 
@@ -23,12 +24,12 @@ describe("parseReasonConfig — defaults & backward-compat", () => {
   it("null → built-in orgasm list (combos preserving the sub-types)", () => {
     expect(parseReasonConfig(null, "orgasm")).toEqual(ORGASM_DEFAULT);
   });
-  it("null → built-in opening list (REINIGUNG first)", () => {
-    expect(parseReasonConfig(null, "opening")).toEqual(OEFFNEN_GRUENDE.map((code) => ({ code })));
+  it("null → built-in opening list (ohne Reinigung/Toilette — die laufen über Pausen)", () => {
+    expect(parseReasonConfig(null, "opening")).toEqual(OPENING_DEFAULT);
   });
   it("garbage string → defaults", () => {
     expect(parseReasonConfig("not json", "orgasm")).toEqual(ORGASM_DEFAULT);
-    expect(parseReasonConfig("{}", "opening")).toEqual(OEFFNEN_GRUENDE.map((code) => ({ code })));
+    expect(parseReasonConfig("{}", "opening")).toEqual(OPENING_DEFAULT);
   });
   it("accepts a JSON string (stored form)", () => {
     const stored = JSON.stringify([{ code: "KEYHOLDER" }, { code: "REINIGUNG", label: "Putzen" }]);
@@ -36,13 +37,13 @@ describe("parseReasonConfig — defaults & backward-compat", () => {
   });
 });
 
-describe("parseReasonConfig — REINIGUNG invariant", () => {
-  it("re-injects REINIGUNG at front when missing", () => {
+describe("parseReasonConfig — Reinigung/Toilette (Pause-Funktion)", () => {
+  it("erzwingt REINIGUNG NICHT mehr (kein geschützter Öffnungsgrund)", () => {
     const out = parseReasonConfig([{ code: "KEYHOLDER" }], "opening");
-    expect(out[0]).toEqual({ code: PROTECTED_OPENING_CODE });
-    expect(out.map((e) => e.code)).toContain("KEYHOLDER");
+    expect(out).toEqual([{ code: "KEYHOLDER" }]);
+    expect(out.map((e) => e.code)).not.toContain("REINIGUNG");
   });
-  it("preserves a renamed REINIGUNG label + position", () => {
+  it("behält eine explizit gespeicherte (umbenannte) REINIGUNG als stabilen Code", () => {
     const out = parseReasonConfig([{ code: "KEYHOLDER" }, { code: "REINIGUNG", label: "Putzen" }], "opening");
     expect(out.find((e) => e.code === "REINIGUNG")).toEqual({ code: "REINIGUNG", label: "Putzen" });
     expect(out.map((e) => e.code)).toEqual(["KEYHOLDER", "REINIGUNG"]);
@@ -115,17 +116,16 @@ describe("resolveReasonLabel — fallback chain", () => {
 describe("resolveReasonList (opening) + validOeffnenCodes", () => {
   it("resolveReasonList maps every opening entry to a display label", () => {
     expect(resolveReasonList(parseReasonConfig(null, "opening"), "opening", t)).toEqual([
-      { code: "REINIGUNG", label: "T:grundReinigung" },
       { code: "KEYHOLDER", label: "T:grundKeyholder" },
       { code: "NOTFALL", label: "T:grundNotfall" },
       { code: "ANDERES", label: "T:grundAnderes" },
     ]);
   });
-  it("validOeffnenCodes returns built-ins for null config", () => {
-    expect(validOeffnenCodes(null)).toEqual(new Set(OEFFNEN_GRUENDE));
+  it("validOeffnenCodes returns built-ins (ohne Reinigung/Toilette) for null config", () => {
+    expect(validOeffnenCodes(null)).toEqual(new Set(DEFAULT_OEFFNEN_GRUENDE));
   });
-  it("valid opening codes always include REINIGUNG", () => {
-    expect(validOeffnenCodes([{ code: "KEYHOLDER" }]).has("REINIGUNG")).toBe(true);
+  it("valid opening codes erzwingen REINIGUNG nicht (Pause-Funktion)", () => {
+    expect(validOeffnenCodes([{ code: "KEYHOLDER" }]).has("REINIGUNG")).toBe(false);
   });
 });
 

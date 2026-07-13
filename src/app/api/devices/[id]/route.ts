@@ -90,6 +90,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (purchasePrice !== undefined) data.purchasePrice = purchasePrice ?? null;
   if (currency !== undefined) data.currency = currency || null;
   if (categoryId !== undefined) data.categoryId = categoryId || null;
+  if (body.sortOrder !== undefined && Number.isFinite(Number(body.sortOrder))) data.sortOrder = Math.trunc(Number(body.sortOrder));
 
   const updated = await prisma.device.update({ where: { id }, data });
 

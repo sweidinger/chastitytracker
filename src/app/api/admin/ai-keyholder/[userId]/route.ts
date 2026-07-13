@@ -51,6 +51,8 @@ export async function PATCH(
     ollamaBaseUrl?: string | null;
     ollamaModel?: string | null;
     systemPrompt?: string | null;
+    intensity?: number | null;
+    visionEnabled?: boolean;
     cronExpression?: string | null;
     randomIntervalMinMin?: number | null;
     randomIntervalMinMax?: number | null;
@@ -75,6 +77,8 @@ export async function PATCH(
   if ("ollamaBaseUrl" in body) data.ollamaBaseUrl = body.ollamaBaseUrl ?? null;
   if ("ollamaModel" in body) data.ollamaModel = body.ollamaModel ?? null;
   if ("systemPrompt" in body) data.systemPrompt = body.systemPrompt ?? null;
+  if (typeof body.intensity === "number") data.intensity = Math.max(1, Math.min(5, Math.round(body.intensity)));
+  if (typeof body.visionEnabled === "boolean") data.visionEnabled = body.visionEnabled;
   if ("cronExpression" in body) data.cronExpression = body.cronExpression ?? null;
   if ("randomIntervalMinMin" in body) data.randomIntervalMinMin = body.randomIntervalMinMin ?? null;
   if ("randomIntervalMinMax" in body) data.randomIntervalMinMax = body.randomIntervalMinMax ?? null;

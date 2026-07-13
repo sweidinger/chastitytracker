@@ -10,7 +10,8 @@ import { orgasmusValueAllowed, validOeffnenCodes, effectiveOrgasmusArten, effect
 import { isDevBypassEnabled } from "@/lib/devMode";
 import { validateDeviceOwnership, releaseSperrzeitenOnOpen, prepareWearEntry, activeVerschlussAnforderungWhere, aktiveKontrolleWhere } from "@/lib/queries";
 import { getActiveSessionForCategory, fulfillSessionAnforderung, getActiveSessionAnforderung } from "@/lib/sessionService";
-import { getActivePause, pauseSettingsForDevice, pauseReasonsForDevice, maybeCreatePauseOverageStrafe, type PauseDevice } from "@/lib/pauseService";
+import { findRegionConflict } from "@/lib/bodyRegion";
+import { getActivePause, pauseReasonsForDevice, type PauseDevice } from "@/lib/pauseService";
 import { parseReinigungsFenster, aktivesReinigungsFenster } from "@/lib/reinigungService";
 import { gatherDeviceReferences } from "@/lib/deviceReferenceService";
 import { checkDeviceInPhoto } from "@/lib/detectDevice";
@@ -60,13 +61,16 @@ export async function POST(req: NextRequest) {
   });
   if (validationError) return NextResponse.json({ error: validationError.error }, { status: validationError.status });
 
+  // Reinigung/Toilette laufen ausschließlich über die Pause-Funktion — nicht über ein volles Öffnen/Trage-Ende.
+  if ((type === "OEFFNEN" || type === "WEAR_END") && (oeffnenGrund === "REINIGUNG" || oeffnenGrund === "TOILETTE")) {
+    return NextResponse.json({ error: "Reinigung/Toilette erfolgt über die Pause-Funktion, nicht über Öffnen/Trage-Ende." }, { status: 400 });
+  }
+
   // Wrap state-check + create in a transaction to prevent TOCTOU races
   let entry: Awaited<ReturnType<typeof prisma.entry.create>>;
   let withdrawnSperrzeit = false;
   let lockStartTime: Date | null = null;
   let fulfilledAnforderungDeviceId: string | null = null;
-  let pauseBeginTime: Date | null = null;
-  let pauseMaxMinuten: number | null = null;
   try {
     entry = await prisma.$transaction(async (tx) => {
       // Validate deviceId ownership inside transaction (VERSCHLUSS / WEAR_* / SESSION_*)
@@ -80,6 +84,11 @@ export async function POST(req: NextRequest) {
       if (type === "WEAR_BEGIN" || type === "WEAR_END") {
         wearResult = await prepareWearEntry(tx, session.user.id, type, deviceId, startTime, imageUrl);
         if (!wearResult.ok) throw Object.assign(new Error(), { _code: wearResult.code });
+        // Körperregion-Exklusivität: kein zweites Gerät derselben Region gleichzeitig (z.B. Plug + Anal-Session).
+        if (type === "WEAR_BEGIN") {
+          const conflict = await findRegionConflict(session.user.id, wearResult.categoryId);
+          if (conflict) throw Object.assign(new Error(), { _code: "REGION_CONFLICT", _blocking: conflict.blockingCategoryName });
+        }
       }
 
       // SESSION_BEGIN / SESSION_END: validate against active session state for this category
@@ -99,14 +108,36 @@ export async function POST(req: NextRequest) {
         if (type === "SESSION_BEGIN" && active) {
           throw Object.assign(new Error(), { _code: "SESSION_ALREADY_ACTIVE" });
         }
+        // Körperregion-Exklusivität: kein zweites Gerät derselben Region (z.B. Anal-Session bei getragenem Plug).
+        if (type === "SESSION_BEGIN") {
+          const conflict = await findRegionConflict(session.user.id, dev.categoryId);
+          if (conflict) throw Object.assign(new Error(), { _code: "REGION_CONFLICT", _blocking: conflict.blockingCategoryName });
+        }
         if (type === "SESSION_END") {
           if (!active) throw Object.assign(new Error(), { _code: "SESSION_NOT_ACTIVE" });
           if (new Date(startTime) <= active.startTime) throw Object.assign(new Error(), { _code: "TIME_BEFORE" });
-          if (dev.category.requiresVideo && !videoUrl) {
+          // Video-Pflicht: eine offene Session-Anforderung (Admin/AI) überschreibt den Kategorie-Standard.
+          const anf = await getActiveSessionAnforderung(session.user.id, dev.categoryId, tx);
+          const effRequireVideo = anf ? anf.requireVideo : dev.category.requiresVideo;
+          if (effRequireVideo && !videoUrl) {
             throw Object.assign(new Error(), { _code: "SESSION_VIDEO_REQUIRED" });
           }
           sessionBeginTime = active.startTime;
         }
+      }
+
+      // Foto-Pflicht aus einer offenen Orgasmus-Anforderung: verlangt die Anforderung im Fenster einen
+      // Nachweis, wird ein Orgasmus ohne Foto abgelehnt (das Formular prüft nur vorab).
+      if (type === "ORGASMUS" && !imageUrl) {
+        const entryTime = new Date(startTime);
+        const fotoAnforderung = await tx.orgasmusAnforderung.findFirst({
+          where: {
+            userId: session.user.id, fulfilledAt: null, withdrawnAt: null, fotoPflicht: true,
+            beginntAt: { lte: entryTime }, endetAt: { gte: entryTime },
+          },
+          select: { id: true },
+        });
+        if (fotoAnforderung) throw Object.assign(new Error(), { _code: "ORGASMUS_PHOTO_REQUIRED" });
       }
 
       // PAUSE_BEGIN / PAUSE_END validation
@@ -173,29 +204,7 @@ export async function POST(req: NextRequest) {
         if (type === "PAUSE_END") {
           if (!activePause) throw Object.assign(new Error(), { _code: "PAUSE_NOT_ACTIVE" });
           if (new Date(startTime) <= activePause.startTime) throw Object.assign(new Error(), { _code: "TIME_BEFORE" });
-          pauseBeginTime = activePause.startTime;
-
-          // Look up pause settings to check for overage later
-          const user = await tx.user.findUnique({
-            where: { id: session.user.id },
-            select: {
-              reinigungErlaubt: true, reinigungMaxMinuten: true, reinigungMaxProTag: true,
-              toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true,
-              plugReinigungErlaubt: true, plugReinigungMaxMinuten: true, plugReinigungMaxProTag: true,
-              plugToiletteMaxMinuten: true,
-            },
-          });
-          if (user) {
-            const settings = pauseSettingsForDevice(user, dev);
-            pauseMaxMinuten = settings.maxMinuten;
-            // Grund-spezifische Maximaldauer: falls die Pause einen Reinigung/Toilette-Grund hat,
-            // gilt die konfigurierte Dauer dieses Grunds statt des Geräte-Maximums.
-            const beginEntry = await tx.entry.findUnique({ where: { id: activePause.id }, select: { oeffnenGrund: true } });
-            if (beginEntry?.oeffnenGrund) {
-              const reason = pauseReasonsForDevice(user, dev).find((r) => r.grund === beginEntry.oeffnenGrund);
-              if (reason) pauseMaxMinuten = reason.maxMinuten;
-            }
-          }
+          // Pause-Überzug wird nicht mehr hier bestraft, sondern im Strafbuch erkannt (buildStrafbuch).
         }
       }
 
@@ -247,7 +256,7 @@ export async function POST(req: NextRequest) {
           codeImageUrl: type === "VERSCHLUSS" ? (codeImageUrl || null) : null,
           codeReadable: type === "VERSCHLUSS" && codeImageUrl ? (codeReadable ?? null) : null,
           // Erektion-Flag: für OEFFNEN und WEAR_END (Plug) bei REINIGUNG/TOILETTE
-          erektionGemeldet: (type === "OEFFNEN" || type === "WEAR_END") && erektionGemeldet === true ? true : undefined,
+          erektionGemeldet: type === "PAUSE_END" && erektionGemeldet === true ? true : undefined,
           // Session: Video-Beweis + Ziel-erreicht (nur SESSION_END)
           videoUrl: type === "SESSION_END" ? (videoUrl || null) : null,
           sessionGoalAchieved: type === "SESSION_END" && typeof sessionGoalAchieved === "boolean" ? sessionGoalAchieved : undefined,
@@ -364,9 +373,12 @@ export async function POST(req: NextRequest) {
       }
 
       // OrgasmusAnforderung als erfüllt markieren, wenn ein passender Orgasmus im Fenster erfasst wird.
-      // Matching auf vorgegebene Art (Basis), wenn gesetzt; sonst zählt jeder Orgasmus.
+      // Matching direkt auf die vorgegebene Art (Basis) ODER art-agnostische Fenster — so können ein
+      // Straf-Fenster (z.B. ruinierter Orgasmus, Pflicht) und ein Belohnungs-Fenster (Art "Belohnung")
+      // gleichzeitig offen sein und je nach erfasster Art das RICHTIGE Fenster erfüllen.
       if (type === "ORGASMUS") {
         const entryTime = new Date(startTime);
+        const base = parseOrgasmusArtBase(orgasmusArt) ?? null;
         const offeneAnforderung = await tx.orgasmusAnforderung.findFirst({
           where: {
             userId: session.user.id,
@@ -374,18 +386,25 @@ export async function POST(req: NextRequest) {
             withdrawnAt: null,
             beginntAt: { lte: entryTime },
             endetAt: { gte: entryTime },
+            OR: [{ vorgegebeneArt: null }, { vorgegebeneArt: base }],
           },
           orderBy: { createdAt: "desc" },
         });
-        if (
-          offeneAnforderung &&
-          (!offeneAnforderung.vorgegebeneArt ||
-            offeneAnforderung.vorgegebeneArt === parseOrgasmusArtBase(orgasmusArt))
-        ) {
+        if (offeneAnforderung) {
           await tx.orgasmusAnforderung.update({
             where: { id: offeneAnforderung.id },
             data: { fulfilledAt: new Date(), entryId: created.id },
           });
+          // Belohnungs-Fenster genutzt → Kontoauszug-Eintrag (Guthaben wurde beim Gewähren abgebucht, delta 0).
+          if (offeneAnforderung.istBelohnung) {
+            const u = await tx.user.findUnique({ where: { id: session.user.id }, select: { verdienteOrgasmen: true } });
+            await tx.belohnungEvent.create({
+              data: {
+                userId: session.user.id, type: "EINGELOEST", delta: 0,
+                balanceAfter: u?.verdienteOrgasmen ?? 0, detail: "Belohnung eingelöst",
+              },
+            });
+          }
         }
       }
 
@@ -393,6 +412,12 @@ export async function POST(req: NextRequest) {
     });
   } catch (e: unknown) {
     const code = (e as { _code?: string })?._code;
+    if (code === "REGION_CONFLICT") {
+      const blocking = (e as { _blocking?: string })?._blocking;
+      return NextResponse.json({ error: blocking
+        ? `Nicht möglich: „${blocking}" wird gerade in derselben Körperregion getragen. Erst ablegen, dann dieses Gerät starten.`
+        : "Nicht möglich: In dieser Körperregion ist bereits ein Gerät aktiv." }, { status: 409 });
+    }
     if (code === "INVALID_DEVICE") return NextResponse.json({ error: "Ungültiges Gerät" }, { status: 400 });
     if (code === "ALREADY_LOCKED") return NextResponse.json({ error: "Verschluss nur möglich wenn aktuell offen" }, { status: 400 });
     if (code === "NOT_LOCKED") return NextResponse.json({ error: "Öffnen nur möglich wenn aktuell verschlossen" }, { status: 400 });
@@ -410,6 +435,7 @@ export async function POST(req: NextRequest) {
     if (code === "SESSION_VIDEO_REQUIRED") return NextResponse.json({ error: "Video ist bei dieser Kategorie beim Session-Ende zwingend" }, { status: 400 });
     if (code === "PAUSE_DEVICE_REQUIRED") return NextResponse.json({ error: "Gerät (CAGE/PLUG) für Pause erforderlich" }, { status: 400 });
     if (code === "PAUSE_PHOTO_REQUIRED") return NextResponse.json({ error: "Foto ist bei Pause-Ende zwingend" }, { status: 400 });
+    if (code === "ORGASMUS_PHOTO_REQUIRED") return NextResponse.json({ error: "Die Anforderung verlangt einen Foto-Nachweis" }, { status: 400 });
     if (code === "PAUSE_ALREADY_ACTIVE") return NextResponse.json({ error: "Bereits eine aktive Pause für dieses Gerät" }, { status: 409 });
     if (code === "PAUSE_NOT_ACTIVE") return NextResponse.json({ error: "Keine aktive Pause für dieses Gerät" }, { status: 400 });
     if (code === "PAUSE_NOT_LOCKED") return NextResponse.json({ error: "Cage ist nicht verschlossen" }, { status: 400 });
@@ -420,56 +446,26 @@ export async function POST(req: NextRequest) {
     throw e;
   }
 
-  // Auto-create StrafeRecord(PAUSE_OVERAGE) when PAUSE_END exceeds maxMinuten.
-  if (type === "PAUSE_END" && pauseBeginTime && pauseMaxMinuten) {
-    try {
-      await prisma.$transaction(async (tx) => {
-        await maybeCreatePauseOverageStrafe(
-          tx, session.user.id, entry.id,
-          pauseBeginTime!, new Date(startTime), pauseMaxMinuten!,
-        );
-      });
-    } catch { /* ignore if already exists */ }
-  }
+  // Pause-Überzug wird NICHT mehr automatisch bestraft: überschreitet eine Pause die erlaubte
+  // Maximaldauer, wird das im Strafbuch nur noch ERKANNT (live in buildStrafbuch aus den Pause-Paaren
+  // abgeleitet); ob es geahndet wird, entscheidet die Keyholderin (AI) oder der Admin.
 
   // REINIGUNG-Limit wird NICHT mehr automatisch bestraft: eine Reinigungsöffnung über dem
   // Tageskontingent (auch ein Geräte-Wechsel) wird im Strafbuch nur noch ERKANNT (live in
   // buildStrafbuch abgeleitet); ob sie geahndet wird, entscheidet die Keyholderin. Das
   // Öffnen-Formular warnt weiterhin vorab — forcedReinigung bleibt rein informativ.
 
-  // Auto-create StrafeRecord(EREKTION) when user reports an erection during REINIGUNG/TOILETTE opening (KG or Plug).
-  if ((type === "OEFFNEN" || type === "WEAR_END") && erektionGemeldet === true && (oeffnenGrund === "REINIGUNG" || oeffnenGrund === "TOILETTE")) {
-    try {
-      await prisma.strafeRecord.create({
-        data: {
-          userId: session.user.id,
-          offenseType: "EREKTION",
-          refId: entry.id,
-          bestraftDatum: new Date(),
-          notiz: null,
-        },
-      });
-    } catch { /* ignore if duplicate — e.g. offline replay */ }
-  }
+  // Erektion wird NICHT mehr automatisch bestraft: eine während einer REINIGUNG/TOILETTE-Öffnung
+  // gemeldete Erektion (erektionGemeldet) wird im Strafbuch nur noch ERKANNT (live in
+  // buildStrafbuch abgeleitet); ob sie geahndet wird, entscheidet die Keyholderin oder der Admin.
 
-  // Auto-create StrafeRecord when user picked a different device than the Anforderung specified.
-  // Automatische Ahndung ohne Urteilsschritt → sofort erledigt (judgedBy=system), damit sie
-  // nicht als offene Strafe im Urteilsloop hängt.
+  // Falsches Gerät wird NICHT mehr automatisch bestraft: verschließt der Nutzer mit einem anderen
+  // Gerät als die Anforderung vorgab, markieren wir den Eintrag nur (falschesGeraet). Das Strafbuch
+  // ERKENNT den Verstoß daraus; das Urteil fällt die Keyholderin (AI) oder der Admin.
   if (type === "VERSCHLUSS" && fulfilledAnforderungDeviceId && fulfilledAnforderungDeviceId !== (deviceId || null)) {
     try {
-      const now = new Date();
-      await prisma.strafeRecord.create({
-        data: {
-          userId: session.user.id,
-          offenseType: "FALSCHES_GERAET",
-          refId: entry.id,
-          bestraftDatum: now,
-          notiz: null,
-          judgedBy: "system",
-          erledigtAt: now,
-        },
-      });
-    } catch { /* ignore if duplicate — e.g. offline replay */ }
+      await prisma.entry.update({ where: { id: entry.id }, data: { falschesGeraet: true } });
+    } catch { /* best-effort */ }
   }
 
   if (type === "PRUEFUNG" && kontrollCode) {
@@ -688,7 +684,7 @@ export async function POST(req: NextRequest) {
   // Fire-and-forget: AI keyholder reacts to the new entry (chat message; push nur bei KG-Typen).
   // WEAR_BEGIN/END bleiben aussen vor (Spam); Pausen sind für die Keyholderin relevant.
   if (["VERSCHLUSS", "OEFFNEN", "PRUEFUNG", "ORGASMUS", "PAUSE_BEGIN", "PAUSE_END"].includes(type)) {
-    reactToSubEvent(session.user.id, session.user.name ?? session.user.id, type, note ?? null).catch(() => {});
+    reactToSubEvent(session.user.id, session.user.name ?? session.user.id, type, note ?? null, imageUrl ?? null).catch(() => {});
   }
 
   return NextResponse.json(entry, { status: 201 });

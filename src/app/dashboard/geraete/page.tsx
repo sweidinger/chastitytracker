@@ -20,6 +20,7 @@ export default async function DevicesPage() {
         purchasePrice: true,
         currency: true,
         categoryId: true,
+        sortOrder: true,
         createdAt: true,
         archivedAt: true,
         _count: { select: { entries: true } },
@@ -28,7 +29,7 @@ export default async function DevicesPage() {
     prisma.deviceCategory.findMany({
       where: { userId: session.user.id },
       orderBy: [{ isBuiltIn: "desc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
-      select: { id: true, name: true, isBuiltIn: true },
+      select: { id: true, name: true, isBuiltIn: true, slug: true },
     }),
   ]);
 
@@ -43,6 +44,7 @@ export default async function DevicesPage() {
           purchasePrice: d.purchasePrice,
           currency: d.currency,
           categoryId: d.categoryId,
+          sortOrder: d.sortOrder,
           archivedAt: d.archivedAt?.toISOString() ?? null,
           createdAt: d.createdAt.toISOString(),
           entryCount: d._count.entries,

@@ -73,6 +73,8 @@ interface LargeProps {
   endetAtLabel?: string | null;
   /** Optional action button rendered below the banner content */
   action?: { label: string; href: string };
+  /** Frist überschritten → Banner in Warnfarbe (wie compact). */
+  overdue?: boolean;
 }
 
 type Props = CompactProps | LargeProps;
@@ -105,8 +107,8 @@ export default function LockRequestBanner(props: Props) {
   }
 
   // Large variant (dashboard)
-  const { colorScheme, label, nachricht, endetAtLabel, action } = props;
-  const c = COLORS[colorScheme];
+  const { colorScheme, label, nachricht, endetAtLabel, action, overdue } = props;
+  const c = overdue ? WARN : COLORS[colorScheme];
   const Icon = SCHEME_ICON[colorScheme];
 
   return (

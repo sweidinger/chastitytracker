@@ -7,6 +7,7 @@ import {
   checkMcpKeyholder, mcpRequestLock, mcpSetLockPeriod, mcpRequestInspection, mcpSetTrainingGoal, mcpWithdraw,
   mcpListTrainingGoals, mcpEditTrainingGoal, mcpDeleteTrainingGoal, mcpSetCleaning, mcpResolveInspection, mcpEditLockPeriod,
   mcpAddKeyholderNote, mcpDeleteKeyholderNote, mcpRequestOrgasm, mcpJudgeOffense,
+  mcpGrantReward, mcpCreditReward, mcpRequestSession,
 } from "@/lib/mcpWrite";
 import { ORGASMUS_ARTEN } from "@/lib/constants";
 import { verifyAccessToken } from "@/lib/oauth";
@@ -432,7 +433,7 @@ function registerTools(server: McpServer) {
         title: "Discipline ledger (unified offense list)",
         description:
           "MCP V2 — vereinheitlichtes Disziplin-Ledger: alle erkannten Vergehen (unauthorized_opening, " +
-          "late_control, rejected_control, cleaning_limit, wrong_device, missed_orgasm, missed_session) als EINE Liste mit " +
+          "late_control, rejected_control, wrong_device, missed_orgasm, missed_session, missed_lock, erektion, pause_overage) als EINE Liste mit " +
           "status (open|judged), judgment, Folge (consequence) und Kontext + inline Notes. Bei wrong_device " +
           "kommt der Cluster-Kontext des getragenen Geräts mit (possiblyClusterInternal) — Cluster-interne " +
           "Mismatches sind nie ein echtes Vergehen; urteile via judge_offense.",
@@ -598,8 +599,8 @@ function registerTools(server: McpServer) {
           "Sets a keyholder orgasm directive with a time window. art=ANWEISUNG makes it mandatory " +
           "(a missed window becomes a Strafbuch offense); art=GELEGENHEIT is a permitted opportunity " +
           "(no penalty if unused). Optionally require a specific orgasm type, allow opening the device " +
-          "during the window, and attach a message. Replaces any existing open directive (one active " +
-          "at a time). The user is notified by e-mail + push." + KEYHOLDER_NOTE,
+          "during the window, require a photo as proof, and attach a message. Replaces any existing open " +
+          "directive (one active at a time). The user is notified by e-mail + push." + KEYHOLDER_NOTE,
         inputSchema: {
           art: z.enum(["ANWEISUNG", "GELEGENHEIT"]).describe("ANWEISUNG = mandatory (penalty if missed); GELEGENHEIT = permitted opportunity (no penalty)."),
           beginsAt: z.string().optional().describe("Window start (ISO 8601). Default: now."),
@@ -609,6 +610,8 @@ function registerTools(server: McpServer) {
           // Write-Service validiert `vorgegebeneArt` gegen die effektive Liste des Ziel-Subs.
           requiredType: z.string().optional().describe(`Require a specific orgasm type (must be one of the sub's configured types; built-in defaults: ${ORGASMUS_ARTEN.join(", ")}). Omit = any orgasm counts.`),
           openAllowed: z.boolean().optional().describe("Allow opening the device to perform the orgasm during the window (no lock break / penalty)."),
+          asPenalty: z.boolean().optional().describe("Only for art=ANWEISUNG: mark this directive as a penalty (e.g. mandatory ruined orgasm). If the sub ignores it, the stricter escalation applies (≥2× in 7 days → severe)."),
+          requirePhoto: z.boolean().optional().describe("Require a photo when the sub logs the orgasm (server-enforced). Omit/false = a photo stays voluntary. You cannot see the photo; the keyholder can."),
           message: z.string().optional().describe("Message shown to the user."),
         },
       },
@@ -661,16 +664,93 @@ function registerTools(server: McpServer) {
           "Rules on a detected offense (from get_offenses). action=dismiss → no penalty (binding, " +
           "immediate); action=punish → records a free-text penalty (text, e.g. \"20 strokes\") — the " +
           "penalty is whatever you write, the field is dumb; action=complete → marks a recorded penalty " +
-          "as carried out (closes the loop); action=reopen → undoes a prior judgment. An offense stays " +
-          "relevant (openOffenseCount) until dismissed or its penalty is completed. Use the offense's " +
-          "ref.id from get_offenses." + KEYHOLDER_BASE + " On punish, the user is notified by e-mail + push; dismiss/complete/reopen are silent.",
+          "as carried out (closes the loop; also CONFIRMS a completion the sub reported); " +
+          "action=reject_completion → rejects a reported completion with a required reason (text) — the " +
+          "penalty goes back to open; action=reopen → undoes a prior judgment. An offense stays " +
+          "relevant (openOffenseCount) until dismissed or its penalty is completed. The sub can report a " +
+          "penalty as done (optionally with a proof photo + note) — see `completionReport` on each offense " +
+          "and `completionReportCount`; those await YOUR review. Use the offense's " +
+          "ref.id from get_offenses." + KEYHOLDER_BASE + " On punish, complete and reject_completion the user is notified by e-mail + push; dismiss/reopen are silent. " +
+          "Optional penaltyAction executes a real measure on punish (in addition to the free-text record).",
         inputSchema: {
           ref: z.string().describe("The offense ref.id from get_offenses."),
-          action: z.enum(["dismiss", "punish", "complete", "reopen"]).describe("dismiss = no penalty; punish = record a penalty; complete = mark penalty done; reopen = undo a prior judgment."),
-          text: z.string().optional().describe("Free text: the penalty (required for punish, e.g. \"20 strokes\") or an optional reason (dismiss)."),
+          action: z.enum(["dismiss", "punish", "complete", "reopen", "reject_completion"]).describe("dismiss = no penalty; punish = record a penalty; complete = mark penalty done / confirm the sub's report; reject_completion = reject the sub's report (text = reason, required); reopen = undo a prior judgment."),
+          text: z.string().optional().describe("Free text: the penalty (required for punish, e.g. \"20 strokes\"), an optional reason (dismiss), or the rejection reason (required for reject_completion)."),
+          penaltyAction: z.object({
+            type: z.enum(["extend_lock", "ruined_orgasm", "mandatory_session", "bigger_plug", "extra_control", "deny_orgasm", "delay_orgasm"]),
+            hours: z.number().optional().describe("extend_lock: hours to extend the active lock period (required). delay_orgasm: hours to push the active reward window (required)."),
+            windowHours: z.number().optional().describe("ruined_orgasm / mandatory_session: window resp. deadline length in hours (default 24)."),
+            oeffnenErlaubt: z.boolean().optional().describe("ruined_orgasm: allow opening the device to perform it within the window."),
+            categoryId: z.string().optional().describe("mandatory_session: session category id (default = first session category)."),
+            minMinuten: z.number().optional().describe("mandatory_session: minimum/target session duration in minutes."),
+            delayMinutes: z.number().optional().describe("mandatory_session: delayed trigger in minutes (erst ab)."),
+            deviceId: z.string().optional().describe("mandatory_session: specific device of the category (default = any)."),
+            requireVideo: z.boolean().optional().describe("mandatory_session: require video/photo proof on session end."),
+            reinigungErlaubt: z.boolean().optional().describe("extend_lock: allow cleaning pauses during the (new) lock period."),
+            toiletteErlaubt: z.boolean().optional().describe("extend_lock: allow toilet pauses during the (new) lock period."),
+            dauerH: z.number().optional().describe("bigger_plug: minimum wear duration in hours."),
+            fristH: z.number().optional().describe("bigger_plug: deadline to put on the plug in hours."),
+            device: z.enum(["CAGE", "PLUG"]).optional().describe("extra_control: device to inspect (CAGE/PLUG, default = general)."),
+            deadlineH: z.number().optional().describe("extra_control: control deadline in hours (default 4)."),
+            requireCode: z.boolean().optional().describe("extra_control: require a fresh handwritten code in the photo (default true)."),
+          }).optional().describe("Optional real measure executed on punish: extend_lock (Sperrzeit +hours; optional reinigungErlaubt/toiletteErlaubt), ruined_orgasm (mandatory ruined orgasm, marked as penalty; oeffnenErlaubt optional), mandatory_session (fully configurable: categoryId/minMinuten/delayMinutes/deviceId/requireVideo/windowHours), bigger_plug (next larger plug by size order; optional dauerH/fristH), extra_control (optional device/deadlineH/requireCode), deny_orgasm (reward-credit −1; rejected at 0), delay_orgasm (push active reward window by hours)."),
         },
       },
       (args, extra) => runWriteTool("judge_offense", extra, (u) => mcpJudgeOffense(u, args)),
+    );
+
+    server.registerTool(
+      "grant_reward",
+      {
+        title: "Grant a reward orgasm window",
+        description:
+          "Redeems 1 earned-orgasm credit: opens a reward opportunity window (orgasm type \"Belohnung\") and " +
+          "reserves 1 from the available credit (balance −1). Requires available credit ≥ 1 and no reward " +
+          "window already active. The sub records an orgasm of type \"Belohnung\" within the window to redeem it. " +
+          "See keyholder_dashboard for the current reward balance and rewardable goals." + KEYHOLDER_NOTE,
+        inputSchema: {
+          windowHours: z.number().positive().optional().describe("Window length in hours (default 24)."),
+          openAllowed: z.boolean().optional().describe("Allow opening the device to perform the reward orgasm (default true)."),
+        },
+      },
+      (args, extra) => runWriteTool("grant_reward", extra, (u) => mcpGrantReward(u, args)),
+    );
+
+    server.registerTool(
+      "credit_reward",
+      {
+        title: "Credit earned-orgasm rewards for reached goals",
+        description:
+          "Awards +1 earned-orgasm credit for every currently reached, not-yet-credited training goal " +
+          "(once per period per goal — deduped). Optionally restrict to one category by name (empty/KG = the " +
+          "chastity-belt goal). Reward is keyholder-decided; only reached goals are ever credited." + KEYHOLDER_NOTE,
+        inputSchema: {
+          category: z.string().optional().describe("Restrict to one category by name (case-insensitive; \"KG\" = chastity belt)."),
+          all: z.boolean().optional().describe("Credit ALL reached goals at once. Default: only 1 per call (like the manual button)."),
+        },
+      },
+      (args, extra) => runWriteTool("credit_reward", extra, (u) => mcpCreditReward(u, args)),
+    );
+
+    server.registerTool(
+      "request_session",
+      {
+        title: "Request a training session",
+        description:
+          "Requests a training session in a session category (SessionAnforderung). The user gets push + e-mail " +
+          "and starts/ends the session in the app. Optional deadline, minimum duration, required video/photo proof, " +
+          "and an orgasm goal (required/forbidden; ruined only when required). Session categories are listed in keyholder_dashboard." + KEYHOLDER_NOTE,
+        inputSchema: {
+          category: z.string().describe("Session category name (must match exactly a session category of the sub)."),
+          deadlineHours: z.number().positive().optional().describe("Deadline in hours from now (omit = no deadline)."),
+          minMinuten: z.number().positive().optional().describe("Minimum/target session duration in minutes (capped at the category max)."),
+          requireVideo: z.boolean().optional().describe("Require a video/photo proof on session end."),
+          orgasmusZiel: z.enum(["KEINE", "ERFORDERLICH", "VERBOTEN"]).optional().describe("Orgasm goal: none / required / forbidden (default none)."),
+          orgasmusRuiniert: z.boolean().optional().describe("Only with orgasmusZiel=ERFORDERLICH: the required orgasm must be ruined."),
+          message: z.string().optional().describe("Instruction shown to the user."),
+        },
+      },
+      (args, extra) => runWriteTool("request_session", extra, (u) => mcpRequestSession(u, args)),
     );
 
     server.registerTool(

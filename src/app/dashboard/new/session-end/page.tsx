@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { redirect, notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { deviceCategoriesEnabled } from "@/lib/constants";
-import { getActiveSessionForCategory } from "@/lib/sessionService";
+import { getActiveSessionForCategory, getActiveSessionAnforderung } from "@/lib/sessionService";
 import { nowDatetimeLocal, APP_TZ } from "@/lib/utils";
 import SessionForm from "../../SessionForm";
 
@@ -32,6 +32,12 @@ export default async function NewSessionEndPage({ searchParams }: { searchParams
     ? await prisma.device.findUnique({ where: { id: active.deviceId }, select: { id: true, name: true } })
     : null;
 
+  // Offene Session-Anforderung (Admin/AI) überschreibt Video-Pflicht + Orgasmus-Ziel der Kategorie.
+  const anforderung = await getActiveSessionAnforderung(session.user.id, categoryId);
+  const effRequiresVideo = anforderung ? anforderung.requireVideo : category.requiresVideo;
+  const effOrgasmusZiel = anforderung ? anforderung.orgasmusZiel : category.orgasmusZiel;
+  const effOrgasmusRuiniert = anforderung ? anforderung.orgasmusRuiniert : false;
+
   const tn = await getTranslations("newEntry");
   const t = await getTranslations("sessionForm");
 
@@ -41,7 +47,7 @@ export default async function NewSessionEndPage({ searchParams }: { searchParams
       <h1 className="text-xl font-bold text-foreground mt-1 mb-6">{t("titleEnd")}</h1>
       <SessionForm
         kind="end"
-        category={{ id: category.id, name: category.name, color: category.color, icon: category.icon, maxSessionMinutes: category.maxSessionMinutes, requiresVideo: category.requiresVideo, orgasmusZiel: category.orgasmusZiel }}
+        category={{ id: category.id, name: category.name, color: category.color, icon: category.icon, maxSessionMinutes: category.maxSessionMinutes, requiresVideo: effRequiresVideo, orgasmusZiel: effOrgasmusZiel, orgasmusRuiniert: effOrgasmusRuiniert }}
         activeSession={{
           beginEntryId: active.id,
           deviceId: active.deviceId ?? "",

@@ -46,6 +46,7 @@ export interface DashboardProps {
     nachricht: string | null;
     endetAtLabel: string | null;
     categoryId: string;
+    overdue: boolean;
   } | null;
 
   // Plug-Sperrdauer
@@ -60,7 +61,17 @@ export interface DashboardProps {
     label: string;
     nachricht: string | null;
     windowLabel: string;
+    overdue: boolean;
   } | null;
+
+  // Offene Session-Anforderungen (Admin/AI-Keyholderin) — je Kategorie ein Banner mit Start-Button.
+  sessionAnforderungen: {
+    categoryId: string;
+    categoryName: string;
+    nachricht: string | null;
+    endetAtLabel: string | null;
+    overdue: boolean;
+  }[];
 
   // Stats
   tagH: number;
@@ -103,6 +114,7 @@ export default function DashboardClient(props: DashboardProps) {
     offenePlugAnf,
     activePlugSperrzeit,
     offeneOrgasmusAnf,
+    sessionAnforderungen,
     tagH: baseTagH,
     wocheH: baseWocheH,
     monatH: baseMonatH,
@@ -131,6 +143,8 @@ export default function DashboardClient(props: DashboardProps) {
       label={t("lockRequested")}
       nachricht={[offeneVerschlussAnf.deviceName ? t("lockDevicePrefix", { name: offeneVerschlussAnf.deviceName }) : null, offeneVerschlussAnf.nachricht].filter(Boolean).join(" · ") || null}
       endetAtLabel={offeneVerschlussAnf.endetAtLabel}
+      overdue={offeneVerschlussAnf.overdue}
+      action={{ label: t("lockRequestAction"), href: "/dashboard/new/verschluss" }}
     />
   ) : null;
 
@@ -141,6 +155,8 @@ export default function DashboardClient(props: DashboardProps) {
       label={offeneOrgasmusAnf.label}
       nachricht={offeneOrgasmusAnf.nachricht}
       endetAtLabel={offeneOrgasmusAnf.windowLabel}
+      overdue={offeneOrgasmusAnf.overdue}
+      action={{ label: t("orgasmRequestAction"), href: "/dashboard/new/orgasmus" }}
     />
   ) : null;
 
@@ -151,9 +167,23 @@ export default function DashboardClient(props: DashboardProps) {
       label={t("plugWearRequest")}
       nachricht={offenePlugAnf.nachricht}
       endetAtLabel={offenePlugAnf.endetAtLabel}
+      overdue={offenePlugAnf.overdue}
       action={{ label: t("plugWearRequestAction"), href: `/dashboard/new/wear-begin?category=${offenePlugAnf.categoryId}` }}
     />
   ) : null;
+
+  const sessionAnforderungBanners = sessionAnforderungen.map((s) => (
+    <LockRequestBanner
+      key={s.categoryId}
+      variant="large"
+      colorScheme="request"
+      label={t("sessionRequest", { name: s.categoryName })}
+      nachricht={s.nachricht}
+      endetAtLabel={s.endetAtLabel}
+      overdue={s.overdue}
+      action={{ label: t("sessionRequestAction"), href: `/dashboard/new/session-begin?category=${s.categoryId}` }}
+    />
+  ));
 
   const plugSperrzeitBanner = activePlugSperrzeit ? (
     <LockRequestBanner
@@ -171,6 +201,7 @@ export default function DashboardClient(props: DashboardProps) {
         {lockRequestBanner}
         {orgasmusRequestBanner}
         {plugAnforderungBanner}
+        {sessionAnforderungBanners}
         {plugSperrzeitBanner}
         <EmptyState
           icon={<Lock size={48} />}
@@ -208,6 +239,8 @@ export default function DashboardClient(props: DashboardProps) {
       {orgasmusRequestBanner}
 
       {plugAnforderungBanner}
+
+      {sessionAnforderungBanners}
 
       {plugSperrzeitBanner}
 

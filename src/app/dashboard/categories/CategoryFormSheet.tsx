@@ -57,8 +57,7 @@ export default function CategoryFormSheet({ category, onClose, onSaved, userId }
   const [maxSessionMinutes, setMaxSessionMinutes] = useState<number>(
     category?.maxSessionMinutes ?? 30,
   );
-  const [requiresVideo, setRequiresVideo] = useState<boolean>(category?.requiresVideo ?? false);
-  const [orgasmusZiel, setOrgasmusZiel] = useState<string>(category?.orgasmusZiel ?? "KEINE");
+  const [region, setRegion] = useState<string>(category?.region ?? "other");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -84,8 +83,7 @@ export default function CategoryFormSheet({ category, onClose, onSaved, userId }
       allowVorgaben,
       isSessionCategory,
       maxSessionMinutes,
-      requiresVideo,
-      orgasmusZiel: isSessionCategory ? orgasmusZiel : "KEINE",
+      region,
     };
     if (userId) payload.userId = userId;
     const url = isEdit ? `/api/categories/${category!.id}` : "/api/categories";
@@ -191,6 +189,22 @@ export default function CategoryFormSheet({ category, onClose, onSaved, userId }
             <p className="text-xs text-foreground-faint">{t("isSessionCategoryHint")}</p>
           </div>
 
+          {/* Körperregion — verhindert, dass zwei Geräte derselben Region gleichzeitig aktiv sind. */}
+          <div className="flex flex-col gap-1.5">
+            <Select
+              label={t("regionLabel")}
+              value={region}
+              onChange={(e) => setRegion(e.target.value)}
+              disabled={saving}
+              options={[
+                { value: "other", label: t("regionOther") },
+                { value: "genital", label: t("regionGenital") },
+                { value: "anal", label: t("regionAnal") },
+              ]}
+            />
+            <p className="text-xs text-foreground-faint">{t("regionHint")}</p>
+          </div>
+
           {isSessionCategory ? (
             <>
               {/* Max session duration */}
@@ -207,30 +221,7 @@ export default function CategoryFormSheet({ category, onClose, onSaved, userId }
                 disabled={saving}
                 hint={t("maxSessionMinutesHint")}
               />
-
-              {/* Video proof toggle */}
-              <div className="flex flex-col gap-1.5">
-                <Toggle
-                  label={t("requiresVideo")}
-                  checked={requiresVideo}
-                  onChange={setRequiresVideo}
-                  disabled={saving}
-                />
-                <p className="text-xs text-foreground-faint">{t("requiresVideoHint")}</p>
-              </div>
-
-              {/* Orgasmus-Ziel */}
-              <Select
-                label={t("orgasmusZiel")}
-                value={orgasmusZiel}
-                onChange={(e) => setOrgasmusZiel(e.target.value)}
-                disabled={saving}
-                options={[
-                  { value: "KEINE", label: t("orgasmusZielNone") },
-                  { value: "ERFORDERLICH", label: t("orgasmusZielRequired") },
-                  { value: "VERBOTEN", label: t("orgasmusZielForbidden") },
-                ]}
-              />
+              {/* Video-Beweis + Orgasmus-Ziel werden pro „Session anfordern" gesetzt, nicht mehr an der Kategorie. */}
             </>
           ) : (
             <>

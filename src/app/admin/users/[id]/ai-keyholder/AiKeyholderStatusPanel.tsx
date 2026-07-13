@@ -45,17 +45,17 @@ interface StatusData {
 function statusColor(status: string): string {
   switch (status) {
     case "queued":
-      return "bg-[var(--color-warn-bg)] text-[var(--color-warn)] border-[var(--color-warn-border)]";
+      return "bg-[var(--color-warn-bg)] text-[var(--color-warn-text)] border-[var(--color-warn-border)]";
     case "generating":
-      return "bg-[var(--color-info-bg)] text-[var(--color-info)] border-[var(--color-info-border)]";
+      return "bg-[var(--color-unlock-bg)] text-[var(--color-unlock-text)] border-[var(--color-unlock-border)]";
     case "ready":
-      return "bg-[var(--color-success-bg)] text-[var(--color-success)] border-[var(--color-success-border)]";
+      return "bg-[var(--color-ok-bg)] text-[var(--color-ok-text)] border-[var(--color-ok-border)]";
     case "assigned":
-      return "bg-[var(--color-surface-2)] text-foreground-muted border-[var(--color-border)]";
+      return "bg-surface-raised text-foreground-muted border-[var(--color-border)]";
     case "failed":
-      return "bg-[var(--color-error-bg)] text-[var(--color-error)] border-[var(--color-error-border)]";
+      return "bg-[var(--color-warn-bg)] text-[var(--color-warn-text)] border-[var(--color-warn-border)]";
     default:
-      return "bg-[var(--color-surface-2)] text-foreground-muted border-[var(--color-border)]";
+      return "bg-surface-raised text-foreground-muted border-[var(--color-border)]";
   }
 }
 
@@ -257,7 +257,7 @@ export default function AiKeyholderStatusPanel({
               {data.activityLog.map((entry) => (
                 <div
                   key={entry.id}
-                  className="flex items-start gap-2 text-xs bg-[var(--color-surface-2)] rounded-lg px-3 py-2"
+                  className="flex items-start gap-2 text-xs bg-surface-raised rounded-lg px-3 py-2"
                 >
                   <span className="text-foreground-muted shrink-0 mt-0.5 whitespace-nowrap">
                     {formatRelative(entry.createdAt)}

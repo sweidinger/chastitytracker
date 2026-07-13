@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
-import { mapAnforderungStatus, tzDateParts } from "@/lib/utils";
+import { mapAnforderungStatus } from "@/lib/utils";
 import { activeVerschlussAnforderungWhere } from "@/lib/queries";
-import { plugCategoryId } from "@/lib/deviceCategories";
+import { pauseReasonsForDevice, pauseSettingsForDevice, type PauseDevice } from "@/lib/pauseService";
 
 /** A Kontroll-based offense (late or rejected) — raw data, formatting left to consumers. */
 export interface StrafbuchControlOffense {
@@ -28,11 +28,6 @@ export interface StrafbuchData {
   }[];
   lateControls: StrafbuchControlOffense[];
   rejectedControls: StrafbuchControlOffense[];
-  reinigungLimitViolations: {
-    entryId: string;
-    startTime: Date | null;
-    note: string | null;
-  }[];
   /** Lock entries where the user wore a different device than the Anforderung specified. */
   wrongDeviceViolations: {
     entryId: string;
@@ -46,6 +41,8 @@ export interface StrafbuchData {
     endetAt: Date;
     nachricht: string | null;
     requiredArt: string | null;
+    /** true = die Anweisung war selbst eine Strafe (strengere Eskalation bei Nicht-Erfüllung). */
+    istStrafe: boolean;
   }[];
   /** Session-Anforderungen deren Frist ohne erfüllende Session ablief. */
   missedSessions: {
@@ -53,19 +50,31 @@ export interface StrafbuchData {
     endetAt: Date;
     nachricht: string | null;
     categoryName: string | null;
+    /** true = die Session war selbst eine Strafe (strengere Eskalation bei Nicht-Erfüllung). */
+    istStrafe: boolean;
   }[];
-  /** Plug WEAR_END entries where REINIGUNG/TOILETTE daily limit was exceeded. */
-  plugReinigungLimitViolations: {
+  /** Verschluss-Anforderungen (ANFORDERUNG) deren Frist zum Einschliessen unerfüllt ablief. */
+  missedLockRequests: {
+    id: string;
+    endetAt: Date;
+    nachricht: string | null;
+    categoryName: string | null;
+  }[];
+  /** Pause-Enden (REINIGUNG/TOILETTE) where erektionGemeldet=true → nur erkannt (kein Auto-Urteil). */
+  erektionViolations: {
     entryId: string;
     startTime: Date | null;
     oeffnenGrund: string | null;
     note: string | null;
   }[];
-  /** OEFFNEN/WEAR_END entries (REINIGUNG/TOILETTE) where erektionGemeldet=true → auto StrafeRecord(EREKTION). */
-  erektionViolations: {
+  /** Abgeschlossene Pausen (PAUSE_BEGIN→END), die die konfigurierte Maximaldauer überschritten. */
+  pauseOverageViolations: {
     entryId: string;
     startTime: Date | null;
-    oeffnenGrund: string | null;
+    device: string | null;
+    grund: string | null;
+    dauerMin: number;
+    maxMin: number;
     note: string | null;
   }[];
   /** Judgment records — each marks an offense (by `refId`) as PUNISHED or DISMISSED. */
@@ -78,6 +87,11 @@ export interface StrafbuchData {
     reason: string | null;
     judgedBy: string | null;
     erledigtAt: Date | null;
+    // Erledigungs-Meldung des Subs (offen → gemeldet → bestätigt/abgelehnt)
+    gemeldetAt: Date | null;
+    nachweisUrl: string | null;
+    erledigungNotiz: string | null;
+    ablehnungGrund: string | null;
   }[];
 }
 
@@ -85,11 +99,14 @@ export interface StrafbuchData {
  *  rejected Kontrollen, REINIGUNG-limit violations, plus the punished-marker records.
  *  Single source of truth shared by the admin Strafbuch page and the MCP tool. */
 export async function buildStrafbuch(userId: string, now: Date = new Date()): Promise<StrafbuchData> {
-  const plugCatId = plugCategoryId(userId);
-  const [user, oeffnungen, plugWearEnds, sperrzeiten, kontrollAnforderungen, strafeRecordsRaw, orgasmusAnforderungen, sessionAnforderungen] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { reinigungErlaubt: true, reinigungMaxProTag: true, toiletteErlaubt: true, plugReinigungMaxProTag: true } }),
+  const [user, oeffnungen, sperrzeiten, kontrollAnforderungen, strafeRecordsRaw, orgasmusAnforderungen, sessionAnforderungen, pauseEntries, missedLockAnforderungen] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, select: {
+      reinigungErlaubt: true, reinigungMaxMinuten: true, reinigungMaxProTag: true,
+      toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true,
+      plugReinigungErlaubt: true, plugReinigungMaxMinuten: true, plugReinigungMaxProTag: true,
+      plugToiletteMaxMinuten: true,
+    } }),
     prisma.entry.findMany({ where: { userId, type: "OEFFNEN" }, orderBy: { startTime: "desc" } }),
-    prisma.entry.findMany({ where: { userId, type: "WEAR_END", device: { categoryId: plugCatId } }, orderBy: { startTime: "desc" }, select: { id: true, startTime: true, oeffnenGrund: true, note: true } }),
     prisma.verschlussAnforderung.findMany({ where: { userId, art: "SPERRZEIT", ...activeVerschlussAnforderungWhere(now) } }),
     prisma.kontrollAnforderung.findMany({
       where: { userId, entryId: { not: null } },
@@ -100,6 +117,16 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
     prisma.orgasmusAnforderung.findMany({ where: { userId } }),
     prisma.sessionAnforderung.findMany({
       where: { userId, fulfilledAt: null, withdrawnAt: null, endetAt: { lt: now }, OR: [{ wirksamAb: null }, { wirksamAb: { lte: now } }] },
+      include: { deviceCategory: { select: { name: true } } },
+    }),
+    prisma.entry.findMany({
+      where: { userId, type: { in: ["PAUSE_BEGIN", "PAUSE_END"] } },
+      orderBy: { startTime: "asc" },
+      select: { id: true, type: true, startTime: true, pauseDevice: true, oeffnenGrund: true, note: true, erektionGemeldet: true },
+    }),
+    // Versäumte Verschluss-Anforderungen: Frist (endetAt) abgelaufen, nicht erfüllt/zurückgezogen, bereits ausgelöst.
+    prisma.verschlussAnforderung.findMany({
+      where: { userId, art: "ANFORDERUNG", fulfilledAt: null, withdrawnAt: null, endetAt: { lt: now }, OR: [{ wirksamAb: null }, { wirksamAb: { lte: now } }] },
       include: { deviceCategory: { select: { name: true } } },
     }),
   ]);
@@ -114,78 +141,63 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
     );
   const userReinigungErlaubt = user?.reinigungErlaubt ?? false;
   const userToiletteErlaubt = user?.toiletteErlaubt ?? false;
-  const reinigungMaxProTag = user?.reinigungMaxProTag ?? 0;
 
-  // Erektion: StrafeRecord.refId points at the offending OEFFNEN entry.
-  const erektionRecords = strafeRecordsRaw.filter((r) => r.offenseType === "EREKTION");
-  const erektionEntryIds = erektionRecords.map((r) => r.refId);
-  const erektionEntries = erektionEntryIds.length > 0
-    ? await prisma.entry.findMany({
-        where: { id: { in: erektionEntryIds } },
-        select: { id: true, startTime: true, oeffnenGrund: true, note: true },
-      })
-    : [];
-  const erektionEntryById = new Map(erektionEntries.map((e) => [e.id, e]));
-  const erektionViolations = erektionRecords.map((r) => {
-    const entry = erektionEntryById.get(r.refId);
-    return { entryId: r.refId, startTime: entry?.startTime ?? null, oeffnenGrund: entry?.oeffnenGrund ?? null, note: entry?.note ?? null };
-  });
-
-  // Wrong-device: StrafeRecord.refId points at the offending VERSCHLUSS entry (für Geräte-Namen laden).
-  const wrongDeviceRecords = strafeRecordsRaw.filter((r) => r.offenseType === "FALSCHES_GERAET");
-  const offenseEntryIds = wrongDeviceRecords.map((r) => r.refId);
-  const offenseEntries = offenseEntryIds.length > 0
-    ? await prisma.entry.findMany({
-        where: { id: { in: offenseEntryIds } },
-        include: { device: { select: { name: true } } },
-      })
-    : [];
-  const offenseEntryById = new Map(offenseEntries.map((e) => [e.id, e]));
-  const wrongDeviceViolations = wrongDeviceRecords.map((r) => {
-    const entry = offenseEntryById.get(r.refId);
-    return { entryId: r.refId, startTime: entry?.startTime ?? null, note: entry?.note ?? null, deviceName: entry?.device?.name ?? null };
-  });
-
-  // REINIGUNG-Limit: NICHT mehr aus Auto-StrafeRecords, sondern LIVE abgeleitet — eine
-  // REINIGUNG-Öffnung über dem Tageskontingent (CH-Tag) ist eine Erkennung; ob sie bestraft
-  // wird, entscheidet die Keyholderin (punished = ein StrafeRecord referenziert den Eintrag).
-  // 0 = unbegrenzt → keine Verstösse. Wechsel laufen über diesen Pfad und werden so nicht
-  // mehr automatisch geahndet.
-  const reinigungLimitViolations: { entryId: string; startTime: Date | null; note: string | null }[] = [];
-  if (reinigungMaxProTag > 0) {
-    const perDay = new Map<string, number>();
-    const reinigungAsc = oeffnungen
-      .filter((o) => o.oeffnenGrund === "REINIGUNG")
-      .slice()
-      .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
-    for (const o of reinigungAsc) {
-      const { year, month, day } = tzDateParts(o.startTime);
-      const key = `${year}-${month}-${day}`;
-      const n = (perDay.get(key) ?? 0) + 1;
-      perDay.set(key, n);
-      if (n > reinigungMaxProTag) reinigungLimitViolations.push({ entryId: o.id, startTime: o.startTime, note: o.note });
+  // Erektion + Pause-Überzug: LIVE aus den Pausen abgeleitet (keine automatische Bestrafung mehr).
+  // Erektion wird beim Pause-Ende gemeldet; Pause-Überzug = abgeschlossene Pause über der
+  // konfigurierten Maximaldauer. Beides sind ERKENNUNGEN — Urteil durch Keyholderin (AI) oder Admin.
+  // maxMin <= 0 gilt als unbegrenzt (keine Überzug-Erkennung).
+  const erektionViolations: { entryId: string; startTime: Date | null; oeffnenGrund: string | null; note: string | null }[] = [];
+  const pauseOverageViolations: StrafbuchData["pauseOverageViolations"] = [];
+  if (user) {
+    for (const device of ["CAGE", "PLUG"] as PauseDevice[]) {
+      const devEntries = pauseEntries.filter((e) => e.pauseDevice === device);
+      const reasons = pauseReasonsForDevice(user, device);
+      const fallbackMax = pauseSettingsForDevice(user, device).maxMinuten;
+      let openBegin: (typeof devEntries)[number] | null = null;
+      for (const e of devEntries) {
+        if (e.type === "PAUSE_BEGIN") {
+          openBegin = e;
+        } else if (e.type === "PAUSE_END" && openBegin) {
+          const grund = openBegin.oeffnenGrund;
+          // Erektion beim Pause-Ende gemeldet → Erkennung.
+          if (e.erektionGemeldet)
+            erektionViolations.push({ entryId: e.id, startTime: e.startTime, oeffnenGrund: grund ?? null, note: e.note });
+          // Pause-Überzug: Dauer über der für den Grund konfigurierten Maximaldauer.
+          const max = (grund ? reasons.find((r) => r.grund === grund)?.maxMinuten : undefined) ?? fallbackMax;
+          if (max > 0) {
+            const dauerMin = (e.startTime.getTime() - openBegin.startTime.getTime()) / 60000;
+            if (dauerMin > max) {
+              pauseOverageViolations.push({
+                entryId: e.id, startTime: e.startTime, device, grund: grund ?? null,
+                dauerMin: Math.round(dauerMin), maxMin: max, note: e.note,
+              });
+            }
+          }
+          openBegin = null;
+        }
+      }
     }
-    reinigungLimitViolations.reverse(); // neueste zuerst (Anzeige)
+    erektionViolations.sort((a, b) => (b.startTime?.getTime() ?? 0) - (a.startTime?.getTime() ?? 0));
+    pauseOverageViolations.sort((a, b) => (b.startTime?.getTime() ?? 0) - (a.startTime?.getTime() ?? 0));
   }
 
-  // Plug REINIGUNG daily limit violations (WEAR_END entries for plug category).
-  // Plug-TOILETTE ist immer erlaubt & unbegrenzt → keine Tageslimit-Verstösse.
-  const plugReinigungMaxProTag = user?.plugReinigungMaxProTag ?? 0;
-  const plugReinigungLimitViolations: { entryId: string; startTime: Date | null; oeffnenGrund: string | null; note: string | null }[] = [];
-  if (plugReinigungMaxProTag > 0) {
-    const plugAsc = [...plugWearEnds]
-      .filter((e) => e.oeffnenGrund === "REINIGUNG")
-      .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
-    const perDayReinigung = new Map<string, number>();
-    for (const e of plugAsc) {
-      const { year, month, day } = tzDateParts(e.startTime);
-      const key = `${year}-${month}-${day}`;
-      const n = (perDayReinigung.get(key) ?? 0) + 1;
-      perDayReinigung.set(key, n);
-      if (n > plugReinigungMaxProTag) plugReinigungLimitViolations.push({ entryId: e.id, startTime: e.startTime, oeffnenGrund: e.oeffnenGrund, note: e.note });
-    }
-    plugReinigungLimitViolations.reverse(); // neueste zuerst
-  }
+  // Falsches Gerät: LIVE aus den Einträgen abgeleitet (Flag falschesGeraet) — keine automatische
+  // Bestrafung mehr; ob geahndet wird, entscheidet die Keyholderin (AI) oder der Admin.
+  const wrongDeviceEntries = await prisma.entry.findMany({
+    where: { userId, type: "VERSCHLUSS", falschesGeraet: true },
+    orderBy: { startTime: "desc" },
+    include: { device: { select: { name: true } } },
+  });
+  const wrongDeviceViolations = wrongDeviceEntries.map((e) => ({
+    entryId: e.id, startTime: e.startTime, note: e.note, deviceName: e.device?.name ?? null,
+  }));
+
+  // Versäumte Verschluss-Anforderungen: Frist (endetAt) abgelaufen, ohne dass eingeschlossen wurde
+  // → ERKENNUNG (analog zur versäumten Session); Urteil durch Keyholderin (AI) oder Admin.
+  const missedLockRequests = missedLockAnforderungen
+    .slice()
+    .sort((a, b) => (b.endetAt?.getTime() ?? 0) - (a.endetAt?.getTime() ?? 0))
+    .map((a) => ({ id: a.id, endetAt: a.endetAt as Date, nachricht: a.nachricht, categoryName: a.deviceCategory?.name ?? null }));
 
   // Unauthorized openings — an OEFFNEN inside an active Sperrzeit. A REINIGUNG opening is
   // permitted when both the user flag and the Sperrzeit allow cleaning.
@@ -233,17 +245,17 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
     rejectedControls: kontrollAnforderungen
       .filter((k) => k.entry?.verifikationStatus === "rejected")
       .map(toControl),
-    reinigungLimitViolations,
-    plugReinigungLimitViolations,
     wrongDeviceViolations,
+    missedLockRequests,
     erektionViolations,
+    pauseOverageViolations,
     missedOrgasmInstructions: orgasmusAnforderungen
       .filter((a) => a.art === "ANWEISUNG" && a.withdrawnAt === null && a.fulfilledAt === null && a.endetAt < now)
       .sort((a, b) => b.endetAt.getTime() - a.endetAt.getTime())
-      .map((a) => ({ id: a.id, endetAt: a.endetAt, nachricht: a.nachricht, requiredArt: a.vorgegebeneArt })),
+      .map((a) => ({ id: a.id, endetAt: a.endetAt, nachricht: a.nachricht, requiredArt: a.vorgegebeneArt, istStrafe: a.istStrafe })),
     missedSessions: sessionAnforderungen
       .sort((a, b) => (b.endetAt?.getTime() ?? 0) - (a.endetAt?.getTime() ?? 0))
-      .map((s) => ({ id: s.id, endetAt: s.endetAt as Date, nachricht: s.nachricht, categoryName: s.deviceCategory?.name ?? null })),
+      .map((s) => ({ id: s.id, endetAt: s.endetAt as Date, nachricht: s.nachricht, categoryName: s.deviceCategory?.name ?? null, istStrafe: s.istStrafe })),
     strafeRecords: strafeRecordsRaw.map((r) => ({
       refId: r.refId,
       offenseType: r.offenseType,
@@ -253,6 +265,10 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
       reason: r.reason,
       judgedBy: r.judgedBy,
       erledigtAt: r.erledigtAt,
+      gemeldetAt: r.gemeldetAt,
+      nachweisUrl: r.nachweisUrl,
+      erledigungNotiz: r.erledigungNotiz,
+      ablehnungGrund: r.ablehnungGrund,
     })),
   };
 }

@@ -7,6 +7,10 @@ import { toDatetimeLocal, fromDatetimeLocal } from "@/lib/utils";
 import { splitOrgasmusArt, type OrgasmusOption } from "@/lib/reasonsService";
 import FormError from "@/app/components/FormError";
 import RequiredHint from "@/app/components/RequiredHint";
+import PhotoCapture from "@/app/components/PhotoCapture";
+import RotatableImagePreview from "@/app/components/RotatableImagePreview";
+import Card from "@/app/components/Card";
+import { usePhotoUpload } from "@/app/hooks/usePhotoUpload";
 import DateTimePicker from "@/app/components/DateTimePicker";
 import Select from "@/app/components/Select";
 import Textarea from "@/app/components/Textarea";
@@ -23,7 +27,7 @@ function initFromStored(stored: string | null | undefined, options: OrgasmusOpti
 }
 
 interface Props {
-  initial?: { startTime: string; note?: string | null; orgasmusArt?: string | null };
+  initial?: { startTime: string; note?: string | null; orgasmusArt?: string | null; imageUrl?: string | null };
   /** Owner-scoped Kaskaden-Optionen (Built-in-Defaults, wenn der Owner keine eigene Config hat). */
   artOptions: OrgasmusOption[];
   maxTime?: string;
@@ -35,10 +39,14 @@ interface Props {
   onCancel?: () => void;
   submitVariant?: "semantic" | "primary";
   submitLabel?: string;
+  /** Offene Anforderung verlangt einen Foto-Nachweis → Foto ist Pflicht (sonst freiwillig). */
+  fotoPflicht?: boolean;
+  mobileDesktopMode?: boolean;
 }
 
 export default function OrgasmusFormCore({
   initial, artOptions, maxTime, tz, nowDefault, isEdit = false, submitFn, onSuccess, onCancel, submitVariant = "semantic", submitLabel,
+  fotoPflicht = false, mobileDesktopMode,
 }: Props) {
   const t = useTranslations("orgasmForm");
   const tc = useTranslations("common");
@@ -59,15 +67,32 @@ export default function OrgasmusFormCore({
   const [subCode, setSubCode] = useState(init.subCode); // voller Code der gewählten Unterart, "" = keine Angabe
   const [note, setNote] = useState(initial?.note ?? "");
   const { saving, error, submit } = useEntrySubmit<OrgasmusPayload>(submitFn, onSuccess);
+  const [photoMissing, setPhotoMissing] = useState(false);
+
+  const {
+    imageUrl, imageExifTime, imagePreview,
+    uploading, uploadError,
+    rotation, rotateLeft, rotateRight,
+    handleFile, clearPhoto,
+  } = usePhotoUpload({ startTime, initial: { imageUrl: initial?.imageUrl ?? null } });
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // Foto-Pflicht kommt aus der offenen Anforderung — hier nur die freundliche Vorab-Prüfung,
+    // die verbindliche Kontrolle macht der Server (/api/entries).
+    if (fotoPflicht && !imageUrl) {
+      setPhotoMissing(true);
+      return;
+    }
+    setPhotoMissing(false);
     await submit({
       type: "ORGASMUS",
       startTime: fromDatetimeLocal(startTime, tz).toISOString(),
       // Unterart gewählt → deren voller Code; sonst nur die Hauptart (Haupt-Token).
       orgasmusArt: subCode || art,
       note: note.trim() || null,
+      imageUrl: imageUrl || null,
+      imageExifTime: imageExifTime || null,
     });
   }
 
@@ -109,6 +134,36 @@ export default function OrgasmusFormCore({
         />
       )}
 
+      {/* Foto: freiwillig — Pflicht nur, wenn die Anforderung es verlangt. */}
+      <Card padding="default">
+        <p className="text-sm font-medium text-foreground mb-2">
+          {fotoPflicht ? t("photoRequired") : t("photoOptional")}
+          {fotoPflicht && <span className="text-warn ml-1">*</span>}
+        </p>
+        {imagePreview ? (
+          <div className="flex items-start gap-4">
+            <RotatableImagePreview
+              src={imagePreview}
+              rotation={rotation}
+              onRotateLeft={rotateLeft}
+              onRotateRight={rotateRight}
+            />
+            <div className="flex flex-col gap-2 flex-1 pt-1">
+              <PhotoCapture onFile={handleFile} uploading={uploading} variant="orange" compact />
+              <button type="button" onClick={clearPhoto} className="text-xs text-warn hover:opacity-80 w-fit transition">
+                {tc("removePhoto")}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <PhotoCapture onFile={handleFile} uploading={uploading} variant="orange" mobileDesktopMode={mobileDesktopMode} />
+            {uploadError && !uploading && <p className="text-xs text-warn font-medium mt-1">{uploadError}</p>}
+          </>
+        )}
+        {photoMissing && !imageUrl && <p className="text-xs text-warn font-medium mt-2">{t("photoMissing")}</p>}
+      </Card>
+
       <Textarea
         label={tc("commentOptional")}
         value={note}
@@ -130,6 +185,7 @@ export default function OrgasmusFormCore({
           semantic={submitVariant === "semantic" ? "orgasm" : undefined}
           fullWidth
           loading={saving}
+          disabled={uploading}
           icon={submitVariant === "primary" ? <Droplets size={16} /> : undefined}
         >
           {submitLabel ?? defaultLabel}

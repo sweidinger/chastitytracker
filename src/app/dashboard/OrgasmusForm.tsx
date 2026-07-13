@@ -9,15 +9,18 @@ import type { OrgasmusPayload, SubmitResult } from "@/app/entries/types";
 import type { OrgasmusOption } from "@/lib/reasonsService";
 
 interface Props {
-  initial?: { id: string; startTime: string; note?: string | null; orgasmusArt?: string | null };
+  initial?: { id: string; startTime: string; note?: string | null; orgasmusArt?: string | null; imageUrl?: string | null };
   artOptions: OrgasmusOption[];
   maxTime?: string;
   tz: string;
   nowDefault: string;
   redirectTo?: string;
+  /** Offene Anforderung verlangt einen Foto-Nachweis. */
+  fotoPflicht?: boolean;
+  mobileDesktopMode?: boolean;
 }
 
-export default function OrgasmusForm({ initial, artOptions, maxTime, tz, nowDefault, redirectTo }: Props) {
+export default function OrgasmusForm({ initial, artOptions, maxTime, tz, nowDefault, redirectTo, fotoPflicht, mobileDesktopMode }: Props) {
   const tCommon = useTranslations("common");
   const tDash = useTranslations("dashboard");
   const router = useRouter();
@@ -50,6 +53,8 @@ export default function OrgasmusForm({ initial, artOptions, maxTime, tz, nowDefa
       tz={tz}
       nowDefault={nowDefault}
       isEdit={!!initial}
+      fotoPflicht={fotoPflicht}
+      mobileDesktopMode={mobileDesktopMode}
       submitFn={submitFn}
       onSuccess={() => router.push(target)}
       onCancel={() => router.push("/dashboard")}
