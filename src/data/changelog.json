@@ -1,5 +1,18 @@
 [
   {
+    "version": "4.99.3",
+    "date": "2026-07-14",
+    "changes": [
+      {
+        "type": "fix",
+        "text": {
+          "de": "Datenbank repariert: Eine Migration aus dem Upstream baut die Tabellen Benutzer, Eintrag und Kontroll-Anforderung komplett neu auf und uebernimmt dabei nur die Spalten, die das Original kennt — alle Zusatz-Felder dieses Forks (Toiletten- und Plug-Einstellungen, Belohnungs-Guthaben, Pause-Geraet, Erektions- und Falsches-Geraet-Markierung, Session-Ziel, Video, Kontroll-Geraet und Code-Pflicht) fielen dabei heraus. Eine Korrektur-Migration legt diese 16 Spalten direkt danach wieder an. Alle Datensaetze bleiben erhalten; die Werte der betroffenen Felder starten auf ihren Standardwerten und muessen einmalig neu gesetzt werden.",
+          "en": "Database repaired: an upstream migration rebuilds the User, Entry and KontrollAnforderung tables from scratch and only carries over the columns the original knows — all of this fork's extra fields (toilet and plug settings, reward balance, pause device, erection and wrong-device flags, session goal, video, inspection device and code requirement) were dropped. A corrective migration re-creates these 16 columns right afterwards. All records are preserved; the affected fields start at their defaults and need to be set once."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.99.2",
     "date": "2026-07-13",
     "changes": [
