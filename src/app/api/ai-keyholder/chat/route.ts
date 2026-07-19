@@ -93,14 +93,17 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url);
-  const limit = Math.min(parseInt(url.searchParams.get("limit") ?? "30"), 100);
+  // parseInt("abc") = NaN → take: NaN → Prisma-Fehler → 500. Deshalb explizit absichern.
+  const parsedLimit = Number.parseInt(url.searchParams.get("limit") ?? "30", 10);
+  const limit = Math.min(Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 30, 100);
 
+  // Die NEUESTEN N laden (desc + take), dann aufsteigend zurückgeben ("newest last", wie dokumentiert).
   const messages = await prisma.aiKeyholderMessage.findMany({
     where: { userId: session.user.id, role: { in: ["user", "assistant"] } },
-    orderBy: { createdAt: "asc" },
+    orderBy: { createdAt: "desc" },
     take: limit,
     select: { id: true, role: true, content: true, mediaId: true, createdAt: true },
   });
 
-  return NextResponse.json({ messages });
+  return NextResponse.json({ messages: messages.reverse() });
 }

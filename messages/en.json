@@ -763,6 +763,8 @@
     "strafbuchVerworfenBadge": "Dismissed",
     "strafbuchBegruendung": "Reason",
     "strafbuchUrteilKI": "(AI)",
+    "strafbuchKeyholderStrafe": "Keyholder penalty",
+    "strafbuchKeyholderStrafeHint": "Issued directly (no auto-detected offense)",
     "strafbuchStrafeLabel": "Penalty",
     "strafbuchStrafePlaceholder": "e.g. 20 strokes",
     "strafbuchStrafeVerhaengen": "Impose penalty",

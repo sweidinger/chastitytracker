@@ -267,28 +267,37 @@ export async function POST(req: NextRequest) {
       // Nur bereits AUSGELÖSTE Anforderungen (wirksamAb erreicht) — sonst könnte ein zufällig
       // kollidierender Selbstkontroll-Code eine noch unsichtbare, geplante Auto-Kontrolle erfüllen.
       if (type === "PRUEFUNG") {
+        // EINE Prüfung erfüllt GENAU EINE Anforderung: KontrollAnforderung.entryId ist @unique.
+        // Liefen beide Zweige nacheinander (Code-Kontrolle erfüllt + separate Foto-Kontrolle offen —
+        // möglich, weil hasActiveKontrolle() geräte-gescopt ist und Plug-Kontrollen immer
+        // requireCode=false haben), schrieben sie DIESELBE entryId → P2002 → Transaktion rollt
+        // zurück → 500 und der PRUEFUNG-Eintrag ging verloren.
+        let fulfilledCount = 0;
         if (kontrollCode) {
           // requireCode=true: Code aus URL/Mail muss übereinstimmen.
-          await tx.kontrollAnforderung.updateMany({
+          const res = await tx.kontrollAnforderung.updateMany({
             where: {
               userId: session.user.id, code: kontrollCode, entryId: null, withdrawnAt: null,
               ...aktiveKontrolleWhere(),
             },
             data: { entryId: created.id, fulfilledAt: new Date() },
           });
+          fulfilledCount = res.count;
         }
-        // requireCode=false: Code ist "" in der DB — jede Foto-Prüfung erfüllt die älteste offene Anforderung.
-        // Nur wenn noch kein Entry verknüpft ist (nicht doppelt erfüllen).
-        const noCodeKontrolle = await tx.kontrollAnforderung.findFirst({
-          where: { userId: session.user.id, requireCode: false, entryId: null, withdrawnAt: null, ...aktiveKontrolleWhere() },
-          orderBy: { createdAt: "asc" },
-          select: { id: true },
-        });
-        if (noCodeKontrolle) {
-          await tx.kontrollAnforderung.update({
-            where: { id: noCodeKontrolle.id },
-            data: { entryId: created.id, fulfilledAt: new Date() },
+        // requireCode=false: Code ist "" in der DB — jede Foto-Prüfung erfüllt die älteste offene
+        // Anforderung. Nur, wenn der Code-Zweig nichts erfüllt hat (sonst @unique-Kollision).
+        if (fulfilledCount === 0) {
+          const noCodeKontrolle = await tx.kontrollAnforderung.findFirst({
+            where: { userId: session.user.id, requireCode: false, entryId: null, withdrawnAt: null, ...aktiveKontrolleWhere() },
+            orderBy: { createdAt: "asc" },
+            select: { id: true },
           });
+          if (noCodeKontrolle) {
+            await tx.kontrollAnforderung.update({
+              where: { id: noCodeKontrolle.id },
+              data: { entryId: created.id, fulfilledAt: new Date() },
+            });
+          }
         }
       }
 

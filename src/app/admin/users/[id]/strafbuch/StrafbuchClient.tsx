@@ -14,7 +14,9 @@ export type OffenseStoredType =
   | "ORGASMUS_ANWEISUNG"
   | "SESSION_VERSAEUMT"
   | "EREKTION"
-  | "PAUSE_OVERAGE";
+  | "PAUSE_OVERAGE"
+  /** Direkt verhängte Strafe (Keyholderin/KI im Chat) — kein automatisch erkanntes Vergehen. */
+  | "AI_KEYHOLDER";
 
 export type OffenseSeverity = "leicht" | "mittel" | "schwer";
 
@@ -48,9 +50,12 @@ export type PenaltySuggestion = { label: string; action?: string; param?: { fiel
 export interface OffenseRow {
   refId: string;
   offenseType: OffenseStoredType;
-  severity: OffenseSeverity;
+  /** null = direkt verhängte Strafe ohne Vergehen (standalone) → keine Schwere-Einstufung. */
+  severity: OffenseSeverity | null;
   /** true = Schwere wurde durch Wiederholung hochgestuft (Phase 2). */
   escalated?: boolean;
+  /** true = Zeile stammt aus einem Straf-Record ohne Vergehen (Keyholder-/KI-Strafe). */
+  standalone?: boolean;
   typeLabel: string;
   headline: string;
   detail: string | null;
@@ -94,6 +99,7 @@ interface Labels {
   strafbuchErledigtBadge: string;
   strafbuchAlsErledigt: string;
   strafbuchWiederOffen: string;
+  strafbuchKeyholderStrafe: string;
   strafbuchGemeldetBadge: string;
   strafbuchNachweis: string;
   strafbuchBestaetigen: string;
@@ -164,6 +170,11 @@ const SEV_STYLE: Record<OffenseSeverity, string> = {
 };
 
 const fieldCls = "w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus-visible:outline-2 focus-visible:outline-focus-ring transition";
+
+/** Straftext eines Records — `notiz` als Fallback für Alt-Records ohne `reason` (KI-Strafen vor v4.8x). */
+export function strafText(r: { reason: string | null; notiz: string | null }): string | null {
+  return r.reason ?? r.notiz ?? null;
+}
 
 export default function StrafbuchClient({ userId, offenses, strafeRecords, labels, suggestions, matrix, sessionCategories, verdienteOrgasmen }: Props) {
   const router = useRouter();
@@ -503,10 +514,11 @@ export default function StrafbuchClient({ userId, offenses, strafeRecords, label
     const record = strafeRecords.find(r => r.refId === refId);
     if (!record) return null;
     const aiJudged = record.judgedBy === "ai";
+    const straf = strafText(record);
     return (
       <div className="mt-1.5 flex flex-col gap-1">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-semibold text-warn border border-warn px-2 py-0.5 rounded-lg flex items-center gap-1">{labels.strafbuchStrafeBadge}{record.reason ? `: ${record.reason}` : ""}</span>
+          <span className="text-xs font-semibold text-warn border border-warn px-2 py-0.5 rounded-lg flex items-center gap-1">{labels.strafbuchStrafeBadge}{straf ? `: ${straf}` : ""}</span>
           {aiJudged && <span className="text-xs text-foreground-faint">{labels.strafbuchUrteilKI}</span>}
           <button type="button" onClick={() => handleUndo(refId)} className="text-xs text-foreground-faint underline hover:text-warn transition ml-auto">{labels.strafbuchRueckgaengig}</button>
         </div>
@@ -573,7 +585,7 @@ export default function StrafbuchClient({ userId, offenses, strafeRecords, label
             label={labels.strafbuchStrafeLabel} placeholder={labels.strafbuchStrafePlaceholder}
             submitLabel={labels.strafbuchStrafeVerhaengen} submitIcon={<CheckCircle size={12} />}
             submitClass="bg-[var(--color-ok)]" onClose={() => setOpenFormId(null)}
-            penaltySuggestions={suggestions[row.severity]} />
+            penaltySuggestions={row.severity ? suggestions[row.severity] : undefined} />
         )}
         {verwerfenOpen && (
           <JudgmentForm refId={row.refId} offenseType={row.offenseType} status="DISMISSED"
@@ -637,7 +649,9 @@ export default function StrafbuchClient({ userId, offenses, strafeRecords, label
               return (
                 <div key={`${o.offenseType}-${o.refId}`} className={`px-5 py-3 flex flex-col gap-0.5 ${judged ? "opacity-50" : ""}`}>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`text-[0.65rem] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${SEV_STYLE[o.severity]}`}>{sevLabel[o.severity]}</span>
+                    {o.severity && (
+                      <span className={`text-[0.65rem] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${SEV_STYLE[o.severity]}`}>{sevLabel[o.severity]}</span>
+                    )}
                     {o.escalated && (
                       <span className="text-[0.65rem] font-semibold uppercase tracking-wider text-warn border border-warn px-1.5 py-0.5 rounded">↑ {labels.strafbuchHochgestuft}</span>
                     )}

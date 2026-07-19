@@ -121,8 +121,30 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
     const s = sevMap.get(o.refId);
     if (s) { o.severity = s.severity; o.escalated = s.escalated; }
   }
-  // Sortierung: schwere Vergehen zuerst, innerhalb einer Stufe neueste zuerst.
-  offenses.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || b.sortAt - a.sortAt);
+
+  // ── Direkt verhängte Strafen ohne Vergehen (Keyholderin/KI im Chat, offenseType AI_KEYHOLDER) ──
+  // Diese Records hängen an keinem erkannten Vergehen. Ohne eigene Zeile wären sie im Strafbuch
+  // unsichtbar — die Keyholderin könnte eine gemeldete Erledigung nie prüfen (der Sub sieht sie aber).
+  const offenseRefIds = new Set(offenses.map((o) => o.refId));
+  for (const r of sb.strafeRecords) {
+    if (offenseRefIds.has(r.refId)) continue;
+    offenses.push({
+      refId: r.refId,
+      offenseType: "AI_KEYHOLDER",
+      severity: null,
+      standalone: true,
+      typeLabel: t("strafbuchKeyholderStrafe"),
+      headline: r.reason ?? r.notiz ?? t("strafbuchKeyholderStrafe"),
+      detail: t("strafbuchKeyholderStrafeHint"),
+      note: null,
+      sortAt: r.bestraftDatum.getTime(),
+    });
+  }
+
+  // Sortierung: direkt verhängte Strafen zuerst (verlangen ggf. eine Prüfung), dann schwere
+  // Vergehen vor leichten; innerhalb einer Stufe neueste zuerst.
+  const rank = (o: OffenseRow) => (o.severity ? SEVERITY_RANK[o.severity] : -1);
+  offenses.sort((a, b) => rank(a) - rank(b) || b.sortAt - a.sortAt);
 
   const strafeRecords: StrafeRecordData[] = sb.strafeRecords.map((r) => ({
     refId: r.refId,
@@ -161,6 +183,7 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
     strafbuchErledigtBadge: t("strafbuchErledigtBadge"),
     strafbuchAlsErledigt: t("strafbuchAlsErledigt"),
     strafbuchWiederOffen: t("strafbuchWiederOffen"),
+    strafbuchKeyholderStrafe: t("strafbuchKeyholderStrafe"),
     strafbuchGemeldetBadge: t("strafbuchGemeldetBadge"),
     strafbuchNachweis: t("strafbuchNachweis"),
     strafbuchBestaetigen: t("strafbuchBestaetigen"),
