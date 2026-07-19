@@ -15,6 +15,7 @@ import { proratedVorgabeTargets } from "@/lib/goalFulfillment";
 import { buildStrafbuch, type StrafbuchControlOffense } from "@/lib/strafbuch";
 import { getBelohnungState, computeBelohnbar } from "@/lib/belohnung";
 import { getActiveHealthHold } from "@/lib/healthHoldService";
+import { buildTagesformView, type TagesformView } from "@/lib/tagesformService";
 import { collectDetectedOffenses, computeSeverities, OFFENSE_SEVERITY, type OffenseSeverity } from "@/lib/strafurteilService";
 import { round1, msToHours, pct, isoWithOffset } from "@/lib/mcp/format";
 
@@ -125,6 +126,10 @@ export interface TrackerOverview {
   /** Gesundheits-Stopp: vom Sub selbst gesetztes Fürsorge-Signal. Ist er aktiv, dürfen KEINE neuen
    *  Anforderungen/Strafen gestellt werden (wird serverseitig zusätzlich hart blockiert). */
   healthHold: { active: boolean; reason: string; since: string } | null;
+  /** Selbsteinschätzung des Subs der letzten Tage (Erregung/Körper/Headspace, je 1–5) samt der
+   *  daraus folgenden Verhaltensregeln. eintraege=[] ⇒ nichts erfasst; nur dann darf danach
+   *  gefragt werden. */
+  tagesform: TagesformView;
 }
 
 /** Geräte-Check eines Eintrags ins MCP-Format (status/detected/expected) oder null. */
@@ -241,11 +246,12 @@ export async function buildOverview(username: string, opts: McpFormatOptions = {
   // ── Wearing hours + KG training goal ──
   const { tagH, wocheH, monatH } = calculateWearingHoursByRange(entries, now, reinigung);
 
-  // ── Belohnungs-Ökonomie + Gesundheits-Stopp ──
-  const [belohnungState, belohnbar, healthHold] = await Promise.all([
+  // ── Belohnungs-Ökonomie + Gesundheits-Stopp + Tagesform ──
+  const [belohnungState, belohnbar, healthHold, tagesform] = await Promise.all([
     getBelohnungState(userId, now),
     computeBelohnbar(userId, now),
     getActiveHealthHold(userId),
+    buildTagesformView(userId, timezone, undefined, now),
   ]);
 
   return {
@@ -375,6 +381,7 @@ export async function buildOverview(username: string, opts: McpFormatOptions = {
       })),
     },
     healthHold: healthHold ? { active: true, reason: healthHold.reason, since: fmt(healthHold.since) } : null,
+    tagesform,
   };
 }
 

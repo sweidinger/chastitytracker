@@ -24,7 +24,10 @@ export default async function KeyholderPage() {
           { role: "system", content: { contains: "[Sperrzeit]" } },
         ],
       },
-      orderBy: { createdAt: "asc" },
+      // Die NEUESTEN 60 laden (desc + take), dann für die Anzeige wieder aufsteigend drehen.
+      // Mit "asc" + take lieferte die Query die 60 ÄLTESTEN — der Chat fror ab Nachricht 61
+      // am Gesprächsanfang ein und neue Nachrichten erschienen nach einem Reload nie.
+      orderBy: { createdAt: "desc" },
       take: 60,
       select: { id: true, role: true, content: true, mediaId: true, createdAt: true },
     }),
@@ -40,7 +43,7 @@ export default async function KeyholderPage() {
   return (
     <KeyholderChatClient
       enabled={cfg?.enabled ?? false}
-      initialMessages={messages.map((m) => ({
+      initialMessages={[...messages].reverse().map((m) => ({
         id: m.id,
         role: m.role as "user" | "assistant" | "system",
         content: m.content,

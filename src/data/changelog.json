@@ -1,5 +1,73 @@
 [
   {
+    "version": "4.99.5",
+    "date": "2026-07-14",
+    "changes": [
+      {
+        "type": "fix",
+        "text": {
+          "de": "Fristen in Push und E-Mail wurden in UTC statt in deiner Zeitzone angezeigt: Der Server-Container läuft ohne Zeitzonen-Einstellung, und an fünf Stellen (Session-Anforderung durch Keyholderin und Admin, Kontroll-Frist im Chat) wurde die Zeit ohne Zeitzonen-Angabe formatiert. Eine Session-Frist um 20:00 stand in der Push-Nachricht als „bis 18:00“. Alle betroffenen Stellen rendern jetzt in der Zeitzone des Subs.",
+          "en": "Deadlines in push and e-mail were shown in UTC instead of your timezone: the server container runs without a timezone setting, and in five places (session directive by keyholder and admin, inspection deadline in chat) the time was formatted without a timezone. A session deadline at 20:00 appeared in the push message as \"until 18:00\". All affected places now render in the sub's timezone."
+        }
+      },
+      {
+        "type": "fix",
+        "text": {
+          "de": "Foto-Kontrolle konnte den Eintrag verschlucken: Reichte der Sub eine Prüfung MIT Code ein, während gleichzeitig eine zweite Kontrolle ohne Code-Pflicht offen war (typisch: Käfig-Kontrolle mit Code + Plug-Kontrolle ohne Code), versuchte der Server beide mit demselben Eintrag zu verknüpfen. Da diese Verknüpfung eindeutig sein muss, brach die Transaktion mit einem Fehler ab — der Prüfungs-Eintrag wurde gar nicht gespeichert. Eine Prüfung erfüllt jetzt genau eine Anforderung.",
+          "en": "Photo inspection could swallow the entry: if the sub submitted an inspection WITH a code while a second inspection without code requirement was open at the same time (typically: cage inspection with code + plug inspection without code), the server tried to link both to the same entry. Since that link must be unique, the transaction aborted with an error — the inspection entry was not saved at all. One inspection now fulfils exactly one request."
+        }
+      },
+      {
+        "type": "fix",
+        "text": {
+          "de": "Autonomer Lauf der KI-Keyholderin konnte doppelt feuern: Die Fälligkeitsprüfung und das Setzen des nächsten Termins lagen um den KI-Aufruf herum, der Sekunden bis Minuten dauert — der Cron ruft aber jede Minute auf. Zwei überlappende Aufrufe sahen denselben fälligen Termin und liefen beide, mit doppelter Strafe, Anforderung und Push als Folge. Der Lauf wird jetzt vor dem KI-Aufruf atomar reserviert.",
+          "en": "The AI keyholder's autonomous run could fire twice: the due check and the scheduling of the next run wrapped around the AI call, which takes seconds to minutes — but cron calls every minute. Two overlapping calls saw the same due timestamp and both ran, resulting in duplicate penalties, directives and pushes. The run is now claimed atomically before the AI call."
+        }
+      },
+      {
+        "type": "fix",
+        "text": {
+          "de": "Chat mit der KI-Keyholderin zeigte die 60 ÄLTESTEN statt der 60 neuesten Nachrichten. Ab Nachricht 61 fror der Chat beim Neuladen am Gesprächsanfang ein und neue Nachrichten erschienen nie. Betraf auch die Chat-API.",
+          "en": "The AI keyholder chat showed the 60 OLDEST instead of the 60 most recent messages. From message 61 on, the chat froze at the start of the conversation on reload and new messages never appeared. Also affected the chat API."
+        }
+      },
+      {
+        "type": "fix",
+        "text": {
+          "de": "Die KI-Keyholderin verlor im Chat den Gesprächsverlauf: Ihr Gedächtnis-Fenster umfasst die letzten 20 Nachrichten, geladen wurden aber ALLE Zeilen — auch die internen Protokollzeilen jedes autonomen Laufs, die anschliessend verworfen wurden. Nach ein paar Läufen bestand das Fenster fast nur noch aus verworfenen Zeilen: Sie sah kaum noch echte Gesprächsbeiträge und kannte ihre eigenen autonomen Aktionen nicht. Es wird jetzt direkt in der Abfrage gefiltert, und ihre autonomen Aktionen sieht sie als Bestätigung.",
+          "en": "The AI keyholder lost the conversation in chat: her memory window covers the last 20 messages, but ALL rows were loaded — including the internal log lines of each autonomous run, which were then discarded. After a few runs the window consisted almost entirely of discarded lines: she barely saw any real conversation turns and did not know her own autonomous actions. Filtering now happens in the query, and she sees her autonomous actions as confirmations."
+        }
+      },
+      {
+        "type": "fix",
+        "text": {
+          "de": "Autonomer Lauf entschied ohne Geräte- und Kategorie-Wissen: Ihm fehlten die Session-Kategorien (deren exakten Namen sein eigener Auftrag verlangt), die Namen der KG-Käfige (sie wurden aus der Geräteliste herausgefiltert) und der Kontroll-Cooldown. Folge: Anforderungen ohne Gerätebindung, während die Nachricht einen erfundenen Käfignamen nannte, oder Läufe, die ins Leere liefen. Chat, autonomer Lauf und Reaktionen teilen sich jetzt denselben Kontext-Baustein.",
+          "en": "The autonomous run decided without device and category knowledge: it lacked the session categories (whose exact names its own instructions demand), the names of the chastity cages (they were filtered out of the device list) and the inspection cooldown. As a result, directives were created without a device binding while the message named an invented cage, or runs simply came to nothing. Chat, autonomous run and reactions now share the same context builder."
+        }
+      }
+    ]
+  },
+  {
+    "version": "4.99.4",
+    "date": "2026-07-14",
+    "changes": [
+      {
+        "type": "fix",
+        "text": {
+          "de": "KI-Keyholderin sieht die Tagesform jetzt überall: Die Selbsteinschätzung (Erregung, Körper, Headspace) war nur im normalen Chat Teil ihres Kontexts. Beim autonomen Lauf, bei der Sofort-Reaktion auf einen Eintrag (z. B. eine eingereichte Kontrolle) und bei der Reaktion auf eine erledigte Aufgabe fehlte sie — deshalb forderte sie die Tagesform an, obwohl sie längst erfasst war. Sie ist jetzt Teil des Status-Overviews (und damit auch des MCP-Tools get_overview) und wird in allen vier Prompt-Pfaden mitgeschickt, samt der daraus abgeleiteten Verhaltensregeln.",
+          "en": "AI keyholder now sees the daily check-in everywhere: the self-assessment (arousal, body, headspace) was only part of her context in the regular chat. It was missing from the autonomous run, from the instant reaction to an entry (e.g. a submitted inspection) and from the reaction to a completed task — so she kept asking for the daily check-in even though it had long been recorded. It is now part of the status overview (and therefore of the MCP tool get_overview) and is passed along in all four prompt paths, together with the behavioural rules derived from it."
+        }
+      },
+      {
+        "type": "fix",
+        "text": {
+          "de": "Tagesform-Datum um einen Tag verschoben: Das Datum wird auf die lokale Mitternacht normiert gespeichert, wurde der KI aber in UTC gezeigt — bei Schweizer Zeitzone erschien die heutige Tagesform dadurch als die von gestern. Wird jetzt in der Zeitzone des Users gerendert (Sommer- wie Winterzeit).",
+          "en": "Daily check-in date was off by one day: the date is stored normalised to local midnight but was shown to the AI in UTC — with a Swiss timezone, today's check-in appeared to be yesterday's. It is now rendered in the user's timezone (both summer and winter time)."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.99.3",
     "date": "2026-07-14",
     "changes": [

@@ -763,6 +763,8 @@
     "strafbuchVerworfenBadge": "Verworfen",
     "strafbuchBegruendung": "Begründung",
     "strafbuchUrteilKI": "(KI)",
+    "strafbuchKeyholderStrafe": "Strafe der Keyholderin",
+    "strafbuchKeyholderStrafeHint": "Direkt verhängt (kein automatisch erkanntes Vergehen)",
     "strafbuchStrafeLabel": "Strafe",
     "strafbuchStrafePlaceholder": "z.B. 20 Schläge",
     "strafbuchStrafeVerhaengen": "Strafe verhängen",

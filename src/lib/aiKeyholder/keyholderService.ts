@@ -9,11 +9,14 @@ import { requestKontrolle } from "@/lib/kontrolleService";
 import { createVerschlussAnforderung } from "@/lib/verschlussAnforderungService";
 import { createOrgasmusAnforderung } from "@/lib/orgasmusAnforderungService";
 import { createVorgabe } from "@/lib/vorgabeService";
-import { getIsLocked } from "@/lib/queries";
+import { getIsLocked, getUserTimezone } from "@/lib/queries";
+import { formatDateTime, formatTime } from "@/lib/utils";
 import { grantBelohnung, grantGutschrift, computeBelohnbar, denyReward, delayReward, REWARD_GUIDANCE_TEXT } from "@/lib/belohnung";
 import { findRegionConflict } from "@/lib/bodyRegion";
 import { isHealthHoldActive } from "@/lib/healthHoldService";
 import { bestaetigeErledigung, lehneErledigungAb } from "@/lib/strafErledigung";
+import { buildTagesformContext, type TagesformView } from "@/lib/tagesformService";
+import { buildSharedPromptContext } from "./promptContext";
 
 /** Aktionen, die bei aktivem Gesundheits-Stopp NICHT ausgeführt werden dürfen: alles Fordernde und
  *  alles Strafende. Erlaubt bleiben Zuspruch (send_message) und Positives (Belohnung gutschreiben/gewähren). */
@@ -115,8 +118,10 @@ async function buildMessageHistory(
 ): Promise<LlmMessage[]> {
   // Current state snapshot
   let overviewText = "";
+  let tagesformView: TagesformView | undefined;
   try {
     const overview = await buildOverview(username);
+    tagesformView = overview.tagesform;
     // Prominente Kurz-Zusammenfassung VOR dem JSON — die getragenen Geräte + Verschluss-Zustand
     // werden sonst im großen JSON leicht überlesen (führte zu "Wie lange trägst du den Plug?"-Rückfragen
     // trotz laufender Session).
@@ -139,99 +144,9 @@ async function buildMessageHistory(
     // non-fatal if overview fails
   }
 
-  // Device list — KG cages + non-KG devices
-  let deviceListText = "";
-  try {
-    const devices = await prisma.device.findMany({
-      where: { userId, archivedAt: null },
-      include: { category: { select: { name: true, slug: true, isBuiltIn: true } } },
-    });
-    const kgCages = devices
-      .filter((d) => d.category?.slug === "kg")
-      .map((d) => d.name);
-    const nonKgDevices = devices
-      .filter((d) => d.category?.slug !== "kg")
-      .map((d) => `${d.name} (${d.category?.name ?? "?"})`);
-    const parts: string[] = [];
-    if (kgCages.length > 0) parts.push(`KG-Käfige: ${kgCages.join(", ")}`);
-    if (nonKgDevices.length > 0) parts.push(`Andere Geräte: ${nonKgDevices.join(", ")}`);
-    if (parts.length > 0)
-      deviceListText = `\n\n--- Verfügbare Geräte des Users ---\n${parts.join("\n")}`;
-  } catch { /* non-fatal */ }
-
-  // Session categories (for create_session_anforderung action)
-  let sessionCategoriesText = "";
-  try {
-    const sessionCats = await prisma.deviceCategory.findMany({
-      where: { userId, isSessionCategory: true },
-      select: {
-        name: true,
-        maxSessionMinutes: true,
-        orgasmusZiel: true,
-        devices: { where: { archivedAt: null }, select: { name: true } },
-      },
-    });
-    if (sessionCats.length > 0) {
-      sessionCategoriesText = `\n\n--- Verfügbare Session-Kategorien (für create_session_anforderung) ---\n` +
-        sessionCats.map((c) => {
-          const deviceNames = c.devices.length > 0 ? ` [Devices: ${c.devices.map((d) => d.name).join(", ")}]` : " [keine Devices]";
-          const ziel = c.orgasmusZiel !== "KEINE" ? ` | Ziel: ${c.orgasmusZiel === "ERFORDERLICH" ? "Orgasmus erforderlich" : "Orgasmus verboten"}` : "";
-          return `${c.name} (max. ${c.maxSessionMinutes} Min.${ziel})${deviceNames}`;
-        }).join("\n");
-    }
-  } catch { /* non-fatal */ }
-
-  // Kontrolle cooldown info — per Device (CAGE / PLUG separat)
-  let kontrolleCooldownText = "";
-  try {
-    const cooldownLines: string[] = [];
-    for (const dev of ["CAGE", "PLUG"] as const) {
-      const lastKon = await prisma.kontrollAnforderung.findFirst({
-        where: { userId, device: dev },
-        orderBy: { createdAt: "desc" },
-        select: { createdAt: true },
-      });
-      if (lastKon) {
-        const minSince = Math.floor((Date.now() - lastKon.createdAt.getTime()) / 60000);
-        if (minSince < 60) {
-          cooldownLines.push(`${dev}: letzte vor ${minSince} Min. — nächste frühestens in ${60 - minSince} Min.`);
-        }
-      }
-    }
-    if (cooldownLines.length > 0) {
-      kontrolleCooldownText = `\n\n⚠ Kontrolle-Cooldown aktiv:\n${cooldownLines.join("\n")}\ncreate_kontrolle für betroffenes Device NICHT verwenden.`;
-    }
-  } catch { /* non-fatal */ }
-
-  // Tagesform — letzte 3 Tage für Verhaltenssteuerung
-  let tagesformText = "";
-  try {
-    const since = new Date(Date.now() - 3 * 86_400_000);
-    const tagesformen = await prisma.tagesform.findMany({
-      where: { userId, datum: { gte: since } },
-      orderBy: { datum: "desc" },
-      select: { datum: true, erregung: true, koerper: true, headspace: true, notiz: true },
-    });
-    if (tagesformen.length > 0) {
-      const rows = tagesformen.map((tf) => {
-        const d = tf.datum.toISOString().split("T")[0];
-        const notizPart = tf.notiz ? ` | Notiz: "${tf.notiz}"` : "";
-        return `  ${d}: 🔥 Erregung ${tf.erregung}/5 · 💪 Körper ${tf.koerper}/5 · 🧠 Headspace ${tf.headspace}/5${notizPart}`;
-      });
-      const latest = tagesformen[0];
-      const rules: string[] = [];
-      if (latest.koerper <= 2)
-        rules.push("⚠ Körperliches Wohlbefinden niedrig (≤2) — KEINE create_sperrzeit und KEIN Einschluss-Druck. Fürsorge hat Vorrang.");
-      if (latest.erregung >= 4)
-        rules.push("✓ Erregung/Frustration hoch (≥4) — Gute Gelegenheit für Aufgaben, Verlängerungen oder Plug-Anforderungen.");
-      if (latest.headspace <= 1)
-        rules.push("⚠ Mentale Verfassung sehr niedrig (1) — Sanfter Ton, keine Strafen, keine neuen Anforderungen. Zeige Verständnis.");
-      tagesformText =
-        "\n\n--- Tagesform des Users (letzte Tage) ---\n" +
-        rows.join("\n") +
-        (rules.length > 0 ? "\n\nVerhaltensregeln basierend auf aktueller Tagesform:\n" + rules.join("\n") : "");
-    }
-  } catch { /* non-fatal */ }
+  // Geräte, Session-Kategorien, Kontrolle-Cooldown und Tagesform — identisch in allen Prompt-Pfaden.
+  // Tagesform aus dem bereits geladenen Overview wiederverwenden (spart die zweite Query).
+  const sharedContextText = await buildSharedPromptContext(userId, tagesformView);
 
   // Strafbuch — kompakte Zusammenfassung (analog zum autonomen Run)
   let strafbuchText = "";
@@ -288,10 +203,7 @@ async function buildMessageHistory(
       buildSystemPrompt(cfg) +
       overviewText +
       photoPromptSection(photos) +
-      deviceListText +
-      sessionCategoriesText +
-      kontrolleCooldownText +
-      tagesformText +
+      sharedContextText +
       strafbuchText +
       "\n\n--- TECHNISCHE INTEGRATION: ECHTE BACKEND-AKTIONEN ---\n" +
       "Diese Konversation läuft über ein spezialisiertes Server-System (kg-tracker). " +
@@ -356,11 +268,26 @@ async function buildMessageHistory(
       "Bei normalen Gesprächen ohne Aktion: kein Tag.",
   };
 
-  // Recent chat history (user + assistant + action confirmations)
-  // Action confirmations (role="system", prefix "[Aktion]") are injected as
-  // user-side context messages so the LLM can see its own actions were real.
+  // Recent chat history (user + assistant + action confirmations).
+  // Action confirmations (role="system", prefix "[Aktion]" bzw. "[Autonome Prüfung]") werden als
+  // user-seitige System-Notiz injiziert, damit das Modell sieht, dass seine Aktionen echt waren.
+  //
+  // WICHTIG: Es wird bereits im QUERY gefiltert. Vorher lud die Query `take: limit` über ALLE
+  // Rollen und verwarf die nicht passenden Zeilen erst danach — jeder autonome Lauf schreibt aber
+  // 1–3 "[Autonome Prüfung]"-Zeilen, die das Fenster belegten und dann weggeworfen wurden. Nach
+  // ein paar Läufen bestand das 20er-Fenster fast nur noch aus verworfenen Zeilen: die KI sah
+  // kaum noch echte Turns und kannte ihre eigenen autonomen Aktionen nicht.
+  // Leere contents fliegen ebenfalls raus — die Anthropic-API lehnt leere Content-Blöcke ab.
   const history = await prisma.aiKeyholderMessage.findMany({
-    where: { userId, role: { in: ["user", "assistant", "system"] } },
+    where: {
+      userId,
+      content: { not: "" },
+      OR: [
+        { role: { in: ["user", "assistant"] } },
+        { role: "system", content: { startsWith: "[Aktion]" } },
+        { role: "system", content: { startsWith: "[Autonome Prüfung]" } },
+      ],
+    },
     orderBy: { createdAt: "desc" },
     take: limit,
   });
@@ -368,12 +295,14 @@ async function buildMessageHistory(
   const historyMessages: LlmMessage[] = history
     .reverse()
     .flatMap((m): LlmMessage[] => {
-      if (m.role === "system" && m.content.startsWith("[Aktion]")) {
+      const content = m.content.trim();
+      if (!content) return [];
+      if (m.role === "system") {
         // Inject action result as a user-turn system note so the LLM sees confirmation
-        return [{ role: "user", content: `[System-Bestätigung] ${m.content}` }];
+        return [{ role: "user", content: `[System-Bestätigung] ${content}` }];
       }
       if (m.role === "user" || m.role === "assistant") {
-        return [{ role: m.role, content: m.content }];
+        return [{ role: m.role, content }];
       }
       return [];
     });
@@ -726,7 +655,9 @@ export async function executeChatAction(
     await prisma.sessionAnforderung.create({
       data: { userId, deviceCategoryId: category.id, nachricht, endetAt, requireVideo: Boolean(action.requireVideo), orgasmusZiel: orgZiel, orgasmusRuiniert: ruiniert },
     });
-    const pushBody = nachricht ?? `Session mit ${category.name} gefordert${endetAt ? ` (bis ${endetAt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })})` : ""}`;
+    // Zeit IMMER in der Zeitzone des Subs — der Container läuft ohne TZ-Env (⇒ UTC).
+    const sessTz = await getUserTimezone(userId);
+    const pushBody = nachricht ?? `Session mit ${category.name} gefordert${endetAt ? ` (bis ${formatTime(endetAt, "de-DE", sessTz)})` : ""}`;
     await sendPushToUser(userId, "Session-Anforderung", pushBody, "/dashboard/new/session-begin");
     await logEntry(`Session-Anforderung gestellt: ${category.name}${deadlineH ? ` (Frist: ${deadlineH}h)` : ""}`);
     return { ok: true, actionType: "create_session_anforderung", label: `Session: ${category.name}` };
@@ -783,12 +714,23 @@ export async function runAutonomousAction(
   if (!cfg?.enabled) return { acted: false, summary: "not enabled" };
 
   let overviewText = "";
+  let autoTagesform: TagesformView | undefined;
+  // Zeitzone des Subs für alle Fristen in Push/Chat (Container läuft ohne TZ-Env ⇒ UTC).
+  let autoTz = "";
   try {
     const overview = await buildOverview(username);
+    autoTagesform = overview.tagesform;
+    autoTz = overview.timezone;
     overviewText = `${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
   } catch (e) {
     return { acted: false, summary: `overview error: ${e}` };
   }
+
+  // Derselbe Kontext wie im Chat: Geräte (inkl. KG-Käfige!), Session-Kategorien, Kontrolle-Cooldown
+  // und Tagesform. Der autonome Lauf entscheidet über Anforderungen und Strafen — er darf nicht
+  // weniger wissen als der Chat, sonst rät er Namen oder wählt Aktionen, die der Server hart ablehnt.
+  // Tagesform aus dem bereits geladenen Overview wiederverwenden (spart die zweite Query).
+  const sharedContextText = await buildSharedPromptContext(userId, autoTagesform);
 
   // Strafbuch — compact summary for the agent (avoid token bloat)
   let strafbuchText = "";
@@ -829,22 +771,6 @@ export async function runAutonomousAction(
       strafbuchText = `\n\n--- Strafbuch ---\n${lines.join("\n")}${SEVERITY_GUIDANCE_TEXT}`;
     }
   } catch { /* non-fatal */ }
-
-  // Non-KG devices (for wear-anforderung action)
-  let deviceList: string[] = [];
-  try {
-    const devices = await prisma.device.findMany({
-      where: { userId, archivedAt: null },
-      include: { category: { select: { name: true, isBuiltIn: true } } },
-    });
-    deviceList = devices
-      .filter((d) => !d.category?.isBuiltIn)
-      .map((d) => `${d.name} (${d.category?.name ?? "?"})`);
-  } catch { /* non-fatal */ }
-
-  const deviceListText = deviceList.length > 0
-    ? `\n\nVerfügbare Geräte zum Anweisen (non-KG, nicht-archiviert):\n${deviceList.join(", ")}`
-    : "";
 
   // Check for ready media to potentially assign
   const readyMedia = await prisma.generatedMedia.findMany({
@@ -948,7 +874,7 @@ export async function runAutonomousAction(
     },
     {
       role: "user",
-      content: `Aktueller Status:\n${overviewText}${strafbuchText}${deviceListText}${mediaList}${photoPromptSection(autoPhotos)}`,
+      content: `Aktueller Status:\n${overviewText}${sharedContextText}${strafbuchText}${mediaList}${photoPromptSection(autoPhotos)}`,
     },
   ];
   const agentMessages = attachPhotos(agentPrompt, autoPhotos);
@@ -1091,7 +1017,7 @@ export async function runAutonomousAction(
         });
 
         const eventText = result.ok
-          ? `[Kontrolle] ${decision.message ?? "Foto-Kontrolle angefordert."} (Frist: ${new Date(result.data.deadline).toLocaleString("de-CH")})`
+          ? `[Kontrolle] ${decision.message ?? "Foto-Kontrolle angefordert."} (Frist: ${formatDateTime(result.data.deadline, "de-CH", autoTz)})`
           : `[Kontrolle] Kontrolle konnte nicht erstellt werden: ${result.error}`;
 
         await prisma.aiKeyholderMessage.create({
@@ -1401,7 +1327,7 @@ export async function runAutonomousAction(
           });
         }
 
-        const pushBody = decision.message ?? `Session mit ${category.name} gefordert${endetAt ? ` (bis ${endetAt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })})` : ""}`;
+        const pushBody = decision.message ?? `Session mit ${category.name} gefordert${endetAt ? ` (bis ${formatTime(endetAt, "de-DE", autoTz)})` : ""}`;
         await sendPushToUser(userId, "Session-Anforderung", pushBody.slice(0, 100), "/dashboard/new/session-begin");
       }
 
@@ -1492,13 +1418,16 @@ export async function completeTask(
     // non-fatal
   }
 
+  const taskTagesformText = await buildTagesformContext(userId);
+
   const reactionMessages: LlmMessage[] = [
     {
       role: "system",
       content:
         buildSystemPrompt(cfg) +
         "\n\nDer User hat soeben eine Aufgabe abgeschlossen. Reagiere kurz und in der Rolle der Keyholderin." +
-        overviewSnippet,
+        overviewSnippet +
+        taskTagesformText,
     },
     {
       role: "user",
@@ -1581,6 +1510,10 @@ export async function reactToSubEvent(
       overviewText = JSON.stringify(overview, null, 2);
     } catch { /* non-fatal */ }
 
+    // Tagesform: auch die Sofort-Reaktion muss die Selbsteinschätzung kennen — sonst fordert sie
+    // sie an ("teile mir deine Tagesform mit"), obwohl der User sie längst im Dashboard erfasst hat.
+    const eventTagesformText = await buildTagesformContext(userId);
+
     const eventLabel = EVENT_LABELS[entryType] ?? `hat einen Eintrag vom Typ ${entryType} erstellt`;
     const noteHint = entryNote ? ` Notiz: "${entryNote}"` : "";
 
@@ -1592,7 +1525,8 @@ export async function reactToSubEvent(
           "\n\nDu reagierst jetzt kurz auf ein Ereignis des Users. " +
           "Antworte in 1–2 Sätzen, in der Rolle der Keyholderin. Kein Markdown. " +
           "Sei direkt, bestimmt und passend zum Ereignis. " +
-          "Wenn das Ereignis ungewöhnlich oder gegen Regeln ist, reagiere entsprechend streng.",
+          "Wenn das Ereignis ungewöhnlich oder gegen Regeln ist, reagiere entsprechend streng." +
+          eventTagesformText,
       },
       {
         role: "user",

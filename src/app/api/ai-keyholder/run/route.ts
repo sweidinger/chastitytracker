@@ -4,6 +4,10 @@ import { runAutonomousAction } from "@/lib/aiKeyholder/keyholderService";
 
 const CRON_SECRET = process.env.AI_KEYHOLDER_CRON_SECRET;
 
+/** Wie lange ein geclaimter Lauf für parallele Aufrufe gesperrt bleibt. Kippt der Lauf (LLM-Timeout,
+ *  Absturz), wird nextRunAt nicht überschrieben — der Lauf ist dann nach dieser Frist wieder fällig. */
+const CLAIM_LEASE_MIN = 10;
+
 /** Pick a random integer in [min, max] (inclusive). */
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -97,6 +101,31 @@ export async function POST(req: Request) {
         skipped: true,
       });
       continue;
+    }
+
+    // Lauf ATOMAR claimen, BEVOR das LLM gerufen wird. runAutonomousAction dauert Sekunden bis
+    // Minuten (LLM + Bilder), der Cron feuert im Minutentakt — ohne Claim sehen zwei überlappende
+    // Aufrufe dasselbe abgelaufene nextRunAt und führen beide aus (doppelte Strafe/Anforderung/Push).
+    // updateMany mit nextRunAt-Bedingung ist ein einzelnes UPDATE ⇒ genau einer gewinnt (count===1).
+    if (!force) {
+      const claim = await prisma.aiKeyholderConfig.updateMany({
+        where: {
+          userId: cfg.userId,
+          OR: [{ nextRunAt: null }, { nextRunAt: { lte: now } }],
+        },
+        // Provisorischer Platzhalter für die Dauer des Laufs; unten wird er durch das echte
+        // Zufalls-Intervall ersetzt. Hält einen parallelen Aufruf so lange draußen.
+        data: { nextRunAt: new Date(now.getTime() + CLAIM_LEASE_MIN * 60_000) },
+      });
+      if (claim.count === 0) {
+        results.push({
+          userId: cfg.userId,
+          acted: false,
+          summary: "already claimed by a concurrent run",
+          skipped: true,
+        });
+        continue;
+      }
     }
 
     const result = await runAutonomousAction(cfg.userId, cfg.username);

@@ -47,7 +47,8 @@ export async function getStrafenForSub(userId: string): Promise<StrafeFuerSub[]>
       id: r.id,
       refId: r.refId,
       status: strafStatus(r),
-      strafe: r.reason,
+      // notiz als Fallback: Alt-Records (KI-Strafen aus dem Chat) haben reason == null.
+      strafe: r.reason ?? r.notiz,
       verhaengtAm: r.bestraftDatum,
       gemeldetAt: r.gemeldetAt,
       erledigtAt: r.erledigtAt,
@@ -92,12 +93,13 @@ export async function meldeErledigung(
     },
   });
 
+  const text = rec.reason ?? rec.notiz;
   try {
     for (const c of await getControllersOfUser(userId)) {
       await notifyUser(c.id, {
         subjectKey: "penaltyReportedSubject",
-        messageKey: rec.reason ? "penaltyReportedMessage" : "penaltyReportedMessagePlain",
-        ...(rec.reason ? { params: { reason: rec.reason } } : {}),
+        messageKey: text ? "penaltyReportedMessage" : "penaltyReportedMessagePlain",
+        ...(text ? { params: { reason: text } } : {}),
       });
     }
   } catch { /* Benachrichtigung darf die Meldung nie verhindern */ }
@@ -116,10 +118,11 @@ export async function bestaetigeErledigung(userId: string, refId: string): Promi
     where: { refId },
     data: { erledigtAt: new Date(), ablehnungGrund: null },
   });
+  const text = rec.reason ?? rec.notiz;
   await notifyUser(userId, {
     subjectKey: "penaltyConfirmedSubject",
-    messageKey: rec.reason ? "penaltyConfirmedMessage" : "penaltyConfirmedMessagePlain",
-    ...(rec.reason ? { params: { reason: rec.reason } } : {}),
+    messageKey: text ? "penaltyConfirmedMessage" : "penaltyConfirmedMessagePlain",
+    ...(text ? { params: { reason: text } } : {}),
   });
   return { ok: true, data: { refId } };
 }

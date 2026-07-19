@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAdminApi } from "@/lib/authGuards";
 import { sendMail } from "@/lib/mail";
 import { sendPushToUser } from "@/lib/push";
+import { formatDateTime, formatTime, APP_TZ } from "@/lib/utils";
 
 export async function GET(req: NextRequest) {
   const guard = await requireAdminApi();
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
 
   // Verify the target user exists and the category belongs to them and is a session category
   const [user, category] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { id: true, username: true, email: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { id: true, username: true, email: true, timezone: true } }),
     prisma.deviceCategory.findUnique({
       where: { id: deviceCategoryId },
       select: { id: true, name: true, userId: true, isSessionCategory: true, maxSessionMinutes: true, requiresVideo: true, orgasmusZiel: true },
@@ -114,13 +115,15 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Notifications (fire-and-forget)
-  const pushBody = nachricht?.trim() || `Session mit ${category.name} gefordert${endetAt ? ` (bis ${endetAt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })})` : ""}`;
+  // Notifications (fire-and-forget). Zeiten IMMER in der Zeitzone des Subs rendern — der Node-
+  // Prozess läuft im Container ohne TZ-Env, toLocaleString() ohne timeZone wäre also UTC.
+  const tz = user.timezone ?? APP_TZ;
+  const pushBody = nachricht?.trim() || `Session mit ${category.name} gefordert${endetAt ? ` (bis ${formatTime(endetAt, "de-DE", tz)})` : ""}`;
   sendPushToUser(userId, "Session-Anforderung", pushBody, "/dashboard/new/session-begin").catch(() => {});
 
   if (user.email) {
     const deadline = endetAt
-      ? `<br>Deadline: <strong>${endetAt.toLocaleString("de-DE")}</strong>`
+      ? `<br>Deadline: <strong>${formatDateTime(endetAt, "de-DE", tz)}</strong>`
       : "";
     const text = nachricht?.trim() ? `<p>${nachricht.trim()}</p>` : "";
     sendMail(
