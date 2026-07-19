@@ -1,5 +1,18 @@
 [
   {
+    "version": "4.99.6",
+    "date": "2026-07-19",
+    "changes": [
+      {
+        "type": "chore",
+        "text": {
+          "de": "Startup-Log bereinigt: exifr (EXIF-/GPS-Auslese) versuchte im gebündelten Server fs/zlib per dynamischem Import zu laden und meldete beim Start „Couldn't load fs/zlib“. Funktional harmlos (die App liest EXIF nur aus Buffern), aber als externes Server-Paket markiert greift der Import jetzt real und das Log bleibt sauber.",
+          "en": "Cleaned up the startup log: exifr (EXIF/GPS reading) tried to load fs/zlib via dynamic import in the bundled server and logged \"Couldn't load fs/zlib\" on start. Functionally harmless (the app only reads EXIF from buffers), but marking it as an external server package makes the import resolve for real and keeps the log clean."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.99.5",
     "date": "2026-07-14",
     "changes": [
