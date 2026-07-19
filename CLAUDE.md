@@ -49,6 +49,21 @@ Weitere Dispatch-Inputs: `deploy` (Default `true` — nach dem Build auch deploy
 
 Nach dem Dispatch mit `gh run watch <run-id> --exit-status` oder `gh run view <run-id>` prüfen, ob `typecheck`, `build-and-push` und `deploy` grün sind.
 
+### Beta-Instanz auf dem NAS (lokaler Build, getrennt vom GHCR-Flow)
+
+Neben dem GHCR-Workflow oben läuft eine **`kg-tracker-beta`-Instanz auf dem NAS** (`Stefan@10.0.1.9`, SSH per Key), die ihr Image **lokal** baut — **nicht** über GitHub Actions. Wer nur die Beta aktualisieren will, nutzt diesen Weg statt `docker.yml`.
+
+- Build-Verzeichnis: `/volume1/docker/chastitytracker-beta` — ein **Git-Checkout von `main`**.
+- Erreichbar unter `http://10.0.1.9:3003`. Das Compose startet zusätzlich `aikh-cron` (autonomer KI-Keyholder-Lauf).
+- Deploy:
+  ```bash
+  cd /volume1/docker/chastitytracker-beta
+  git pull
+  docker compose -f docker-compose.beta.yml up -d --build
+  ```
+- **Git-ignoriert und bei `git pull` geschützt:** `.env` (aktive Config), `data/` (enthält `prod.db`!), `docker-compose.beta.yml` (beta-spezifisch). Niemals überschreiben.
+- Verifikation: `docker exec kg-tracker-beta wget -qO- http://127.0.0.1:3000/api/version` und Startup-Log auf saubere Migrationen prüfen.
+
 ## Architecture
 
 **Stack:** Next.js 16 (App Router) · React 19 · NextAuth.js v5 (Credentials) · Prisma 5 + SQLite · Tailwind CSS v4 · next-intl v4
