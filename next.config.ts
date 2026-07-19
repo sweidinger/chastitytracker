@@ -12,7 +12,10 @@ const nextConfig: NextConfig = {
   },
   devIndicators: false,
   poweredByHeader: false,
-  serverExternalPackages: ["@simplewebauthn/server"],
+  // exifr extern lassen: gebündelt versucht es fs/zlib per dynamischem import() zu laden, was im
+  // Standalone-Server fehlschlägt ("Couldn't load fs/zlib" beim Start). Als externes Node-Modul
+  // greift der Import real. Funktional harmlos (Buffer-Nutzung), aber so bleibt das Log sauber.
+  serverExternalPackages: ["@simplewebauthn/server", "exifr"],
   env: {
     BUILD_DATE: process.env.BUILD_DATE || "",
   },
