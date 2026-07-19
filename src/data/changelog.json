@@ -1,5 +1,18 @@
 [
   {
+    "version": "4.99.7",
+    "date": "2026-07-19",
+    "changes": [
+      {
+        "type": "fix",
+        "text": {
+          "de": "KI-Keyholderin erfand Uhrzeiten: In ihren Nachrichten nannte sie selbst gerechnete Zeiten wie „20 Minuten bis 21:00 Uhr“, obwohl es z.B. erst 10:58 war — LLMs rechnen Uhrzeiten notorisch falsch. Die aktuelle Zeit steckte nur tief im Status-JSON. Sie steht jetzt in allen vier Prompt-Pfaden (Chat, autonomer Lauf, Reaktionen) prominent als „AKTUELLE ZEIT“, und die KI ist angewiesen, keine Uhrzeiten mehr selbst zu berechnen — die verbindliche Frist hängt weiterhin der Server korrekt an.",
+          "en": "The AI keyholder invented times: in her messages she stated self-computed times like \"20 minutes until 21:00\" even though it was e.g. only 10:58 — LLMs are notoriously bad at time arithmetic. The current time was only buried deep in the status JSON. It now appears prominently as \"CURRENT TIME\" in all four prompt paths (chat, autonomous run, reactions), and the AI is instructed to never compute times herself — the authoritative deadline is still appended correctly by the server."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.99.6",
     "date": "2026-07-19",
     "changes": [

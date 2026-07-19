@@ -91,6 +91,22 @@ const OVERVIEW_LIMIT_HINWEIS =
   "allowed=true zusammen mit maxPausesPerDay=null heißt also: beliebig oft erlaubt. " +
   "Die Plug-Toilette ist immer erlaubt und hat kein Tageslimit.";
 
+/** Zeit-Umgang: LLMs rechnen Uhrzeiten notorisch falsch. Die aktuelle Zeit steht im Overview
+ *  (`generatedAt`) bzw. als „AKTUELLE ZEIT" oben; verbindliche Fristen berechnet und formatiert der
+ *  Server und hängt sie an. Deshalb darf die KI keine eigenen Zeiten ausrechnen. */
+const TIME_GUIDANCE =
+  "\n\nWICHTIG zu Uhrzeiten: Die aktuelle Uhrzeit steht als „AKTUELLE ZEIT\" bzw. im Status-Overview " +
+  "als \"generatedAt\" (bereits in der Zeitzone des Subs). Beziehe dich AUSSCHLIESSLICH darauf. " +
+  "Berechne NIEMALS selbst konkrete Uhrzeiten oder Restdauern (z.B. \"20 Minuten\", \"bis 21:00 Uhr\") — " +
+  "solche selbst gerechneten Zeiten sind fast immer falsch. Die verbindliche Frist wird bei jeder " +
+  "Anforderung automatisch vom Server angehängt; nenne selbst keine konkrete Frist-Uhrzeit.";
+
+/** Prominente „AKTUELLE ZEIT"-Zeile für alle Prompt-Pfade. `generatedAt` ist bereits in der
+ *  Zeitzone des Subs formatiert (aus dem Overview). Verhindert, dass die KI Uhrzeiten selbst rechnet. */
+function currentTimeLine(generatedAt: string): string {
+  return `AKTUELLE ZEIT: ${generatedAt} (Zeitzone des Subs — rechne Uhrzeiten NICHT selbst).`;
+}
+
 /** Intensitäts-Leitlinie (1–5): steuert Häufigkeit proaktiver Aktionen + Härte/Ton — NIE die Sicherheits-
  *  regeln oder anatomischen Grenzen. Fließt über buildSystemPrompt in alle AI-Kontexte. */
 function intensityGuidance(level: number): string {
@@ -106,7 +122,7 @@ function intensityGuidance(level: number): string {
 }
 
 export function buildSystemPrompt(cfg: AiKeyholderConfig): string {
-  return (cfg.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT) + OVERVIEW_LIMIT_HINWEIS + intensityGuidance(cfg.intensity ?? 3);
+  return (cfg.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT) + OVERVIEW_LIMIT_HINWEIS + TIME_GUIDANCE + intensityGuidance(cfg.intensity ?? 3);
 }
 
 /** Build the full message history for a user to send to the LLM. */
@@ -139,7 +155,8 @@ async function buildMessageHistory(
     const holdLine = overview.healthHold?.active
       ? `⚠ GESUNDHEITS-STOPP AKTIV (seit ${overview.healthHold.since}): „${overview.healthHold.reason}". KEINE neuen Anforderungen, KEINE Strafen. Sei fürsorglich und frage nach dem Befinden.`
       : "GESUNDHEITS-STOPP: keiner aktiv.";
-    overviewText = `\n\n--- Aktueller Status (Kurz) ---\n${holdLine}\n${wearLine}\n${lockLine}\n${sessLine}\n\n--- Aktueller Status des Users (Details) ---\n${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
+    const timeLine = currentTimeLine(overview.generatedAt);
+    overviewText = `\n\n--- Aktueller Status (Kurz) ---\n${timeLine}\n${holdLine}\n${wearLine}\n${lockLine}\n${sessLine}\n\n--- Aktueller Status des Users (Details) ---\n${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
   } catch {
     // non-fatal if overview fails
   }
@@ -721,7 +738,7 @@ export async function runAutonomousAction(
     const overview = await buildOverview(username);
     autoTagesform = overview.tagesform;
     autoTz = overview.timezone;
-    overviewText = `${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
+    overviewText = `${currentTimeLine(overview.generatedAt)}\n\n${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
   } catch (e) {
     return { acted: false, summary: `overview error: ${e}` };
   }
@@ -1411,9 +1428,9 @@ export async function completeTask(
   try {
     const ov = await buildOverview(username);
     const activeWear = ov.activeWearSessions ?? [];
-    overviewSnippet = activeWear.length > 0
+    overviewSnippet = `\n${currentTimeLine(ov.generatedAt)}` + (activeWear.length > 0
       ? `\nAktuell aktive Tragesessionen: ${activeWear.map((s: { category: string; deviceName: string }) => `${s.deviceName} (${s.category})`).join(", ")}.`
-      : "\nAktuell keine aktiven Tragesessionen (kein Gerät wird gerade getragen).";
+      : "\nAktuell keine aktiven Tragesessionen (kein Gerät wird gerade getragen).");
   } catch {
     // non-fatal
   }
@@ -1507,7 +1524,7 @@ export async function reactToSubEvent(
     let overviewText = "";
     try {
       const overview = await buildOverview(username);
-      overviewText = JSON.stringify(overview, null, 2);
+      overviewText = `${currentTimeLine(overview.generatedAt)}\n\n${JSON.stringify(overview, null, 2)}`;
     } catch { /* non-fatal */ }
 
     // Tagesform: auch die Sofort-Reaktion muss die Selbsteinschätzung kennen — sonst fordert sie
