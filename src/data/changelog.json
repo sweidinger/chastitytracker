@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.100.3",
+    "date": "2026-07-21",
+    "changes": [
+      {
+        "type": "chore",
+        "text": "Aufräumrunde nach dem Upstream-Merge: doppelte Zählung der Toiletten-Öffnungen entfernt, Reinigungs- und Toiletten-Ausnahme im Strafbuch einheitlich benannt, ungenutzten Helfer gelöscht. Kein Verhaltensunterschied."
+      }
+    ]
+  },
+  {
     "version": "4.100.2",
     "date": "2026-07-21",
     "changes": [
