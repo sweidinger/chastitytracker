@@ -183,7 +183,18 @@ function SystemEventBubble({ message, t }: { message: ChatMessage; t: ReturnType
 
 // ── Chat bubble ───────────────────────────────────────────────────────────────
 
+/** Loest den Fehler einer fehlgeschlagenen Aktion auf. Die Aktions-Schicht liefert zwei Sorten:
+ *  stabile Codes aus den Services (REWARD_NO_CREDIT …) und fertige Saetze mit eingesetzten Namen
+ *  („Gerät X nicht gefunden"). Codes werden uebersetzt, alles andere unveraendert gezeigt — ein
+ *  pauschales Fallback auf „Fehler" wuerde die konkreten Saetze wegwerfen.
+ *  Ohne diese Aufloesung stand im Chip der rohe Code (beobachtet: „Belohnung gewähren · REWARD_NO_CREDIT"). */
+function useActionError() {
+  const tErr = useTranslations("errors");
+  return (raw: string): string => (tErr.has(raw) ? tErr(raw) : raw);
+}
+
 function ActionPillBubble({ pill, t }: { pill: ActionPill; t: ReturnType<typeof useTranslations<"keyholderChat">> }) {
+  const resolveError = useActionError();
   const color = pill.ok
     ? "bg-[var(--color-ok-bg)] border-[var(--color-ok-border)] text-[var(--color-ok-text)]"
     : "bg-[var(--color-warn-bg)] border-[var(--color-warn-border)] text-[var(--color-warn-text)]";
@@ -194,7 +205,7 @@ function ActionPillBubble({ pill, t }: { pill: ActionPill; t: ReturnType<typeof 
       <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${color}`}>
         <Icon size={11} />
         {pill.label}
-        {!pill.ok && pill.error && <span className="opacity-70">· {pill.error}</span>}
+        {!pill.ok && pill.error && <span className="opacity-70">· {resolveError(pill.error)}</span>}
       </div>
       {route && (
         <Link href={route.href}
