@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.100.2",
+    "date": "2026-07-21",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Auch Fristen, Sperr-Enden, Verschluss-Beginn und der letzte Orgasmus tragen im KI-Prompt jetzt die fertige Zeitspanne — etwa „19.07.2026, 10:47 (vor 2 Tagen)“. Die Keyholderin muss keine Abstände mehr aus Datumsangaben herleiten."
+      }
+    ]
+  },
+  {
     "version": "4.100.1",
     "date": "2026-07-21",
     "changes": [
