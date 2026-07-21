@@ -1,11 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import { getUserTimezone } from "@/lib/queries";
 import { APP_TZ } from "@/lib/utils";
+import { relativeDayLabel } from "@/lib/relativeTime";
 
 /** Ein Tagesform-Eintrag, wie ihn die KI/der MCP sieht. Werte 1–5 (1 = kaum, 5 = extrem). */
 export interface TagesformRow {
   /** Kalendertag YYYY-MM-DD in der Zeitzone des Users. */
   datum: string;
+  /** „HEUTE" | „gestern" | „vor N Tagen" — damit die KI den Abstand nicht selbst herleiten muss. */
+  relativ: string;
   /** Erregung / Frustration durch die Keuschheit. */
   erregung: number;
   /** Körperliches Wohlbefinden / Tragekomfort. */
@@ -17,6 +20,8 @@ export interface TagesformRow {
 
 /** Tagesform-Block des Overviews: die letzten Tage + die daraus abgeleiteten Verhaltensregeln. */
 export interface TagesformView {
+  /** Ob fuer den heutigen Kalendertag (Zeitzone des Subs) bereits ein Eintrag existiert. */
+  heuteErfasst: boolean;
   /** Jüngster Eintrag zuerst. Leer = der User hat (noch) nichts erfasst. */
   eintraege: TagesformRow[];
   /** Ableitung aus dem JÜNGSTEN Eintrag. Verbindlich für die KI-Keyholderin. */
@@ -66,6 +71,7 @@ export async function buildTagesformView(
 
   const eintraege: TagesformRow[] = rows.map((tf) => ({
     datum: formatTagesformDatum(tf.datum, tz),
+    relativ: relativeDayLabel(tf.datum, now, tz),
     erregung: tf.erregung,
     koerper: tf.koerper,
     headspace: tf.headspace,
@@ -74,6 +80,7 @@ export async function buildTagesformView(
 
   return {
     eintraege,
+    heuteErfasst: eintraege.some((e) => e.relativ === "HEUTE"),
     regeln: eintraege.length > 0 ? tagesformRegeln(eintraege[0]) : [],
   };
 }
@@ -84,12 +91,14 @@ export function tagesformPromptText(view: TagesformView): string {
   if (view.eintraege.length === 0) return "";
   const rows = view.eintraege.map((tf) => {
     const notizPart = tf.notiz ? ` | Notiz: "${tf.notiz}"` : "";
-    return `  ${tf.datum}: 🔥 Erregung ${tf.erregung}/5 · 💪 Körper ${tf.koerper}/5 · 🧠 Headspace ${tf.headspace}/5${notizPart}`;
+    return `  ${tf.datum} (${tf.relativ}): 🔥 Erregung ${tf.erregung}/5 · 💪 Körper ${tf.koerper}/5 · 🧠 Headspace ${tf.headspace}/5${notizPart}`;
   });
   return (
     "\n\n--- Tagesform des Users (letzte Tage) ---\n" +
     rows.join("\n") +
-    "\nDiese Werte hat der User bereits erfasst — FRAGE NICHT danach, sondern nutze sie." +
+    (view.heuteErfasst
+      ? "\nDie Tagesform für HEUTE liegt vor (oben mit „HEUTE“ markiert) — FRAGE NICHT danach, sondern nutze sie."
+      : "\nFür HEUTE ist noch keine Tagesform erfasst — hier darfst (und sollst) du danach fragen. Die älteren Werte oben sind NICHT der heutige Stand.") +
     (view.regeln.length > 0
       ? "\n\nVerhaltensregeln basierend auf aktueller Tagesform:\n" + view.regeln.join("\n")
       : "")

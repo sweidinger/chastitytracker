@@ -17,6 +17,7 @@ import { isHealthHoldActive } from "@/lib/healthHoldService";
 import { bestaetigeErledigung, lehneErledigungAb } from "@/lib/strafErledigung";
 import { buildTagesformContext, type TagesformView } from "@/lib/tagesformService";
 import { buildSharedPromptContext } from "./promptContext";
+import { calendarLine } from "@/lib/relativeTime";
 
 /** Aktionen, die bei aktivem Gesundheits-Stopp NICHT ausgeführt werden dürfen: alles Fordernde und
  *  alles Strafende. Erlaubt bleiben Zuspruch (send_message) und Positives (Belohnung gutschreiben/gewähren). */
@@ -99,12 +100,23 @@ const TIME_GUIDANCE =
   "als \"generatedAt\" (bereits in der Zeitzone des Subs). Beziehe dich AUSSCHLIESSLICH darauf. " +
   "Berechne NIEMALS selbst konkrete Uhrzeiten oder Restdauern (z.B. \"20 Minuten\", \"bis 21:00 Uhr\") — " +
   "solche selbst gerechneten Zeiten sind fast immer falsch. Die verbindliche Frist wird bei jeder " +
-  "Anforderung automatisch vom Server angehängt; nenne selbst keine konkrete Frist-Uhrzeit.";
+  "Anforderung automatisch vom Server angehängt; nenne selbst keine konkrete Frist-Uhrzeit.\n" +
+  "Jede Zeitspanne, die du brauchst, steht bereits FERTIG in Klammern hinter der jeweiligen Angabe " +
+  "(z.B. „2026-07-21 (HEUTE)\", „vor 2 Tagen\", „in 16 Stunden\"). Diese Klammer-Werte sind " +
+  "verbindlich — übernimm sie, statt Abstände aus Datumsangaben selbst herzuleiten. Ein Datum, das " +
+  "mit „HEUTE\" markiert ist, ist der aktuelle Stand und NICHT veraltet.";
 
 /** Prominente „AKTUELLE ZEIT"-Zeile für alle Prompt-Pfade. `generatedAt` ist bereits in der
- *  Zeitzone des Subs formatiert (aus dem Overview). Verhindert, dass die KI Uhrzeiten selbst rechnet. */
-function currentTimeLine(generatedAt: string): string {
-  return `AKTUELLE ZEIT: ${generatedAt} (Zeitzone des Subs — rechne Uhrzeiten NICHT selbst).`;
+ *  Zeitzone des Subs formatiert (aus dem Overview). Verhindert, dass die KI Uhrzeiten selbst rechnet.
+ *
+ *  Die KALENDER-Zeile steht bewusst direkt daneben: Die Uhrzeit allein genügte nicht — das Modell
+ *  hielt einen Eintrag von HEUTE für „gestern" und erklärte die Abweichung mit einem erfundenen
+ *  Sync-Verzug. Wochentag, heutiges und gestriges Datum ausgeschrieben nehmen ihm diese Herleitung ab. */
+function currentTimeLine(generatedAt: string, tz?: string): string {
+  return (
+    `AKTUELLE ZEIT: ${generatedAt} (Zeitzone des Subs — rechne Uhrzeiten NICHT selbst).\n` +
+    calendarLine(new Date(), tz)
+  );
 }
 
 /** Intensitäts-Leitlinie (1–5): steuert Häufigkeit proaktiver Aktionen + Härte/Ton — NIE die Sicherheits-
@@ -155,7 +167,7 @@ async function buildMessageHistory(
     const holdLine = overview.healthHold?.active
       ? `⚠ GESUNDHEITS-STOPP AKTIV (seit ${overview.healthHold.since}): „${overview.healthHold.reason}". KEINE neuen Anforderungen, KEINE Strafen. Sei fürsorglich und frage nach dem Befinden.`
       : "GESUNDHEITS-STOPP: keiner aktiv.";
-    const timeLine = currentTimeLine(overview.generatedAt);
+    const timeLine = currentTimeLine(overview.generatedAt, overview.timezone);
     overviewText = `\n\n--- Aktueller Status (Kurz) ---\n${timeLine}\n${holdLine}\n${wearLine}\n${lockLine}\n${sessLine}\n\n--- Aktueller Status des Users (Details) ---\n${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
   } catch {
     // non-fatal if overview fails
@@ -738,7 +750,7 @@ export async function runAutonomousAction(
     const overview = await buildOverview(username);
     autoTagesform = overview.tagesform;
     autoTz = overview.timezone;
-    overviewText = `${currentTimeLine(overview.generatedAt)}\n\n${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
+    overviewText = `${currentTimeLine(overview.generatedAt, overview.timezone)}\n\n${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
   } catch (e) {
     return { acted: false, summary: `overview error: ${e}` };
   }
@@ -1428,7 +1440,7 @@ export async function completeTask(
   try {
     const ov = await buildOverview(username);
     const activeWear = ov.activeWearSessions ?? [];
-    overviewSnippet = `\n${currentTimeLine(ov.generatedAt)}` + (activeWear.length > 0
+    overviewSnippet = `\n${currentTimeLine(ov.generatedAt, ov.timezone)}` + (activeWear.length > 0
       ? `\nAktuell aktive Tragesessionen: ${activeWear.map((s: { category: string; deviceName: string }) => `${s.deviceName} (${s.category})`).join(", ")}.`
       : "\nAktuell keine aktiven Tragesessionen (kein Gerät wird gerade getragen).");
   } catch {
@@ -1524,7 +1536,7 @@ export async function reactToSubEvent(
     let overviewText = "";
     try {
       const overview = await buildOverview(username);
-      overviewText = `${currentTimeLine(overview.generatedAt)}\n\n${JSON.stringify(overview, null, 2)}`;
+      overviewText = `${currentTimeLine(overview.generatedAt, overview.timezone)}\n\n${JSON.stringify(overview, null, 2)}`;
     } catch { /* non-fatal */ }
 
     // Tagesform: auch die Sofort-Reaktion muss die Selbsteinschätzung kennen — sonst fordert sie
