@@ -5,9 +5,10 @@ import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { getIsLocked, getActiveSperrzeit, cleaningBlockReason } from "@/lib/queries";
-import { nowDatetimeLocal, midnightInTZ, APP_TZ } from "@/lib/utils";
+import { nowDatetimeLocal, APP_TZ } from "@/lib/utils";
 import { effectiveOeffnenGruende, resolveReasonList } from "@/lib/reasonsService";
 import { reinigungVerbrauchtHeute, nextReinigungsFenster } from "@/lib/reinigungService";
+import { toiletteVerbrauchtHeute } from "@/lib/toiletteService";
 import { boxHoldOutlook } from "@/lib/boxOpenOutlook";
 
 export default async function NewOeffnenPage() {
@@ -18,11 +19,9 @@ export default async function NewOeffnenPage() {
   if (!(await getIsLocked(userId))) redirect("/dashboard");
 
   const now = new Date();
-  // „pro Tag" = Kalendertag (des Users), nicht rollendes 24h-Fenster — sonst zaehlt eine Oeffnung von
-  // gestern Abend heute noch mit und loest eine falsche Limit-Warnung aus. Die Reinigung zaehlt
-  // `reinigungVerbrauchtHeute` (dieselbe Regel wie buildStrafbuch); die Toilette (Fork) hat kein
-  // solches Gegenstueck und wird hier direkt gezaehlt.
-  const dayStart = midnightInTZ(now, tz);
+  // „pro Tag" = Kalendertag (des Users), nicht rollendes 24h-Fenster — sonst zaehlt eine Oeffnung
+  // von gestern Abend heute noch mit und loest eine falsche Limit-Warnung aus. Beide Zaehler kommen
+  // aus ihrem Service, damit die Regel nicht an zwei Stellen steht.
   const [activeSperrzeit, user, reinigungHeute, toiletteHeute, box] = await Promise.all([
     getActiveSperrzeit(userId),
     prisma.user.findUnique({ where: { id: userId }, select: {
@@ -31,7 +30,7 @@ export default async function NewOeffnenPage() {
       oeffnenGruendeConfig: true,
     } }),
     reinigungVerbrauchtHeute(userId, now, tz),
-    prisma.entry.count({ where: { userId, type: "OEFFNEN", oeffnenGrund: "TOILETTE", startTime: { gte: dayStart } } }),
+    toiletteVerbrauchtHeute(userId, now, tz),
     // Die Selbstauskunft der Box: ihre eigene Frist.
     prisma.boxStatus.findFirst({ where: { userId }, orderBy: { name: "asc" }, select: { lockUntil: true } }),
   ]);

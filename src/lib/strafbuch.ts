@@ -221,6 +221,18 @@ function isAllowedReinigungOpening(
   return cleaningBlockReason(effectiveUser, [sperre], o.startTime) === null;
 }
 
+/** Toiletten-Gegenstueck zu {@link isAllowedReinigungOpening} (Fork). Bewusst getrennt und
+ *  schlichter: fuer die Toilette gibt es weder Zeitfenster noch Stichtag, nur die beiden
+ *  Freigaben — beim User und auf der Sperrzeit. Als eigene Funktion, damit die zwei Ausnahmen
+ *  im Filter unten gleich aussehen und nicht eine benannt und eine hingeschrieben ist. */
+function isAllowedToiletteOpening(
+  o: { oeffnenGrund: string | null },
+  sperre: { toiletteErlaubt: boolean } | undefined,
+  userToiletteErlaubt: boolean,
+): boolean {
+  return !!sperre && o.oeffnenGrund === "TOILETTE" && userToiletteErlaubt && sperre.toiletteErlaubt;
+}
+
 /** Computes the Strafbuch for a user: unauthorized openings during Sperrzeiten, late and
  *  rejected Kontrollen, REINIGUNG-limit violations, late locks, missed cleaning re-locks, plus
  *  the punished-marker records. Single source of truth shared by the admin Strafbuch page and the MCP tool. */
@@ -370,9 +382,7 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
     .filter(({ o, sperre }) => {
       if (o.source === "system" || !sperre) return false;
       if (isAllowedReinigungOpening(o, sperre, cleaningUser, enforcedFrom)) return false;
-      // Fork: Toiletten-Oeffnung — dieselbe Ausnahme-Mechanik wie die Reinigung, nur ueber die
-      // Toiletten-Freigabe von User UND Sperrzeit.
-      if (o.oeffnenGrund === "TOILETTE" && userToiletteErlaubt && sperre.toiletteErlaubt) return false;
+      if (isAllowedToiletteOpening(o, sperre, userToiletteErlaubt)) return false;
       if (isOrgasmusOpenAllowed(o.startTime)) return false;
       return true;
     })

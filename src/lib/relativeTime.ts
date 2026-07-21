@@ -62,11 +62,6 @@ export function relativeTimeLabel(d: Date, now: Date, tz: string = APP_TZ): stri
   return relativeDayLabel(d, now, tz);
 }
 
-/** Hängt das Relativ-Label in Klammern an eine bereits formatierte Zeitangabe. */
-export function withRelative(formatted: string, d: Date, now: Date, tz: string = APP_TZ): string {
-  return `${formatted} (${relativeTimeLabel(d, now, tz)})`;
-}
-
 /**
  * Kalender-Zeile für den Systemprompt. Nennt Wochentag, heutiges Datum und ausdrücklich das
  * Datum von gestern — die Verwechslung „gestriger Eintrag" vs. „heutiger Eintrag" war der
