@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.100.4",
+    "date": "2026-07-21",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Im Keyholder-Chat stand bei fehlgeschlagenen Aktionen der rohe Fehlercode statt einer Meldung (etwa „Belohnung gewähren · REWARD_NO_CREDIT“). Der Chip übersetzt Codes jetzt und zeigt fertige Sätze wie bisher unverändert."
+      }
+    ]
+  },
+  {
     "version": "4.100.3",
     "date": "2026-07-21",
     "changes": [
