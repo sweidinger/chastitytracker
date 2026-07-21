@@ -68,7 +68,7 @@ export async function executePenaltyAction(userId: string, action: PenaltyAction
   switch (action.type) {
     case "extend_lock": {
       const hours = Number(action.hours);
-      if (!Number.isFinite(hours) || hours <= 0) return { ok: false, status: 400, error: "Stunden (hours > 0) für Sperrzeit-Verlängerung erforderlich" };
+      if (!Number.isFinite(hours) || hours <= 0) return { ok: false, status: 400, error: "PENALTY_HOURS_REQUIRED" };
       // Aktive Sperrzeit verlängern, sonst eine neue anlegen.
       const active = await prisma.verschlussAnforderung.findFirst({
         where: { userId, art: "SPERRZEIT", withdrawnAt: null, OR: [{ endetAt: null }, { endetAt: { gt: now } }] },
@@ -113,7 +113,7 @@ export async function executePenaltyAction(userId: string, action: PenaltyAction
       const cat = action.categoryId
         ? await prisma.deviceCategory.findFirst({ where: { id: action.categoryId, userId, isSessionCategory: true }, select: { id: true, name: true, maxSessionMinutes: true, requiresVideo: true } })
         : await prisma.deviceCategory.findFirst({ where: { userId, isSessionCategory: true }, orderBy: { sortOrder: "asc" }, select: { id: true, name: true, maxSessionMinutes: true, requiresVideo: true } });
-      if (!cat) return { ok: false, status: 400, error: action.categoryId ? "Ungültige Session-Kategorie" : "Keine Session-fähige Kategorie vorhanden" };
+      if (!cat) return { ok: false, status: 400, error: action.categoryId ? "INVALID_SESSION_CATEGORY" : "NO_SESSION_CATEGORY" };
       // Gerät der Kategorie (optional) validieren.
       let deviceId: string | null = null;
       if (action.deviceId) {
@@ -147,7 +147,7 @@ export async function executePenaltyAction(userId: string, action: PenaltyAction
         where: { userId, categoryId: plugCat, archivedAt: null, sortOrder: { gt: currentOrder } },
         orderBy: { sortOrder: "asc" },
       });
-      if (!next) return { ok: false, status: 400, error: "Kein nächstgrößerer Plug vorhanden (Reihenfolge in den Geräten setzen)." };
+      if (!next) return { ok: false, status: 400, error: "PENALTY_NO_LARGER_PLUG" };
       const res = await createVerschlussAnforderung({
         userId, art: "ANFORDERUNG", deviceCategoryId: plugCat, deviceId: next.id, nachricht: "Strafe: nächstgrößeren Plug tragen",
         ...(action.dauerH && action.dauerH > 0 ? { dauerH: action.dauerH } : {}),
@@ -182,6 +182,6 @@ export async function executePenaltyAction(userId: string, action: PenaltyAction
       return { ok: true, data: { message: `Belohnungs-Gelegenheit um ${hours} h verschoben (neu bis ${res.data.endetAt.toISOString()}).` } };
     }
     default:
-      return { ok: false, status: 400, error: "Unbekannte Straf-Aktion" };
+      return { ok: false, status: 400, error: "PENALTY_UNKNOWN_ACTION" };
   }
 }

@@ -41,7 +41,7 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
 
   const [user, vorgaben, categories, keyholders, aiKeyholderConfig, aiPersonas, t, tc, dl, tOrgasm, tOpen] = await Promise.all([
     prisma.user.findUnique({ where: { id } }),
-    prisma.trainingVorgabe.findMany({ where: { userId: id }, orderBy: { gueltigAb: "desc" } }),
+    prisma.trainingVorgabe.findMany({ where: { userId: id, deletedAt: null }, orderBy: { gueltigAb: "desc" } }), // B-04: soft-gelöschte Ziele ausblenden
     // Vorgaben can only be set on KG-built-in or user-categories with allowVorgaben=true.
     prisma.deviceCategory.findMany({
       where: { userId: id, OR: [{ isBuiltIn: true }, { allowVorgaben: true }] },
@@ -178,6 +178,9 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
           initialRuheBis={user.autoKontrolleRuheBis}
           initialFristVon={user.autoKontrolleFristVon}
           initialFristBis={user.autoKontrolleFristBis}
+          initialFensterVon={user.autoKontrolleFensterVon}
+          initialFensterBis={user.autoKontrolleFensterBis}
+          initialNurBeiSperre={user.autoKontrolleNurBeiSperre}
         />
       </SettingsSection>
 

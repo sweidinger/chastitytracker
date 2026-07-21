@@ -3,7 +3,8 @@ import { buildStrafbuch, type StrafbuchData } from "@/lib/strafbuch";
 import { notifyUser, type NotifyContent } from "@/lib/notify";
 import { executePenaltyAction, type PenaltyAction } from "@/lib/penaltyActions";
 import { bestaetigeErledigung, lehneErledigungAb } from "@/lib/strafErledigung";
-import type { ServiceResult } from "@/lib/serviceResult";
+import { serviceFail, type ServiceResult } from "@/lib/serviceResult";
+import { markLastAction } from "@/lib/appMeta";
 
 /**
  * Urteils-Lebenszyklus über erkannte Vergehen:
@@ -20,26 +21,32 @@ export type OffenseCanonicalType =
   | "late_control"
   | "rejected_control"
   | "auto_removed_control"
+  | "cleaning_limit"
   | "wrong_device"
   | "missed_orgasm"
   | "missed_session"
-  | "missed_lock"
   | "erektion"
-  | "pause_overage";
+  | "pause_overage"
+  | "late_lock"
+  | "cleaning_not_relocked";
 
-const STORED_TYPE: Record<OffenseCanonicalType, string> = {
+/** Canonical offense type → stored StrafeRecord.offenseType. Exported so the manual-punish route
+ *  (src/app/api/admin/strafe/route.ts) can validate against the same list instead of a hand-copied one. */
+export const STORED_TYPE: Record<OffenseCanonicalType, string> = {
   unauthorized_opening: "OEFFNEN_ENTRY",
   late_control: "KONTROLLANFORDERUNG",
   rejected_control: "KONTROLLANFORDERUNG",
   // Eigener Typ statt "KONTROLLANFORDERUNG" — eine vermutete Entfernung (Kontrolle nicht
   // beantwortet, System hat automatisch geöffnet) ist etwas anderes als eine verspätete Einreichung.
   auto_removed_control: "AUTO_ENTFERNT",
+  cleaning_limit: "REINIGUNG_LIMIT",
   wrong_device: "FALSCHES_GERAET",
   missed_orgasm: "ORGASMUS_ANWEISUNG",
   missed_session: "SESSION_VERSAEUMT",
-  missed_lock: "VERSCHLUSS_ANFORDERUNG",
   erektion: "EREKTION",
   pause_overage: "PAUSE_OVERAGE",
+  late_lock: "VERSCHLUSS_ANFORDERUNG",
+  cleaning_not_relocked: "REINIGUNG_NICHT_VERSCHLOSSEN",
 };
 
 /** Schwere-Stufe eines Vergehens. Phase 1: Basis-Schwere (Wiederholungs-Eskalation folgt in Phase 2). */
@@ -51,7 +58,9 @@ export const OFFENSE_SEVERITY: Record<OffenseCanonicalType, OffenseSeverity> = {
   wrong_device: "schwer",
   rejected_control: "schwer",
   auto_removed_control: "schwer",  // vermutete Entfernung: Kontrolle ignoriert, System hat automatisch geöffnet
-  missed_lock: "mittel",
+  cleaning_limit: "mittel",
+  cleaning_not_relocked: "mittel",
+  late_lock: "mittel",
   missed_session: "mittel",
   missed_orgasm: "mittel",
   late_control: "mittel",
@@ -114,6 +123,18 @@ export interface DetectedOffense {
   at: Date | null;
 }
 
+/** cleaning_not_relocked shares its underlying OEFFNEN entry with cleaning_limit (both can fire on
+ *  the same REINIGUNG opening — over the daily quota AND not relocked in time). StrafeRecord.refId
+ *  is globally `@unique`, so the two offenses need disjoint ref namespaces — prefixed here rather
+ *  than using the bare entry id. Exported so the ledger's `judge()` call constructs the exact
+ *  same ref (round-trips through judge_offense) and the admin route can reverse it for its IDOR check. */
+export function cleaningNotRelockedRef(entryId: string): string {
+  return `relock:${entryId}`;
+}
+export function entryIdFromCleaningNotRelockedRef(refId: string): string | null {
+  return refId.startsWith("relock:") ? refId.slice("relock:".length) : null;
+}
+
 /** Flacht die buildStrafbuch-Listen zu einer einheitlichen Liste erkannter Vergehen mit stabiler ref.
  *  Dient der ref-Auflösung (judge_offense) und dem Zählen — keine Strafwertung. */
 export function collectDetectedOffenses(sb: StrafbuchData): DetectedOffense[] {
@@ -128,8 +149,10 @@ export function collectDetectedOffenses(sb: StrafbuchData): DetectedOffense[] {
     ...sb.erektionViolations.map((v) => mk("erektion", v.entryId, v.startTime)),
     ...sb.pauseOverageViolations.map((v) => mk("pause_overage", v.entryId, v.startTime)),
     ...sb.missedOrgasmInstructions.map((m) => mk("missed_orgasm", m.id, m.endetAt)),
+    ...sb.reinigungLimitViolations.map((v) => mk("cleaning_limit", v.entryId, v.startTime)),
     ...sb.missedSessions.map((m) => mk("missed_session", m.id, m.endetAt)),
-    ...sb.missedLockRequests.map((m) => mk("missed_lock", m.id, m.endetAt)),
+    ...sb.lateLocks.map((a) => mk("late_lock", a.id, a.fulfilledAt ?? a.endetAt)),
+    ...sb.cleaningNotRelocked.map((c) => mk("cleaning_not_relocked", cleaningNotRelockedRef(c.entryId), c.relockAt ?? c.deadline)),
   ];
 }
 
@@ -217,20 +240,32 @@ export function strafeVerhaengtNotice(reason: string | null): NotifyContent {
     : { subjectKey: "penaltySubject", messageKey: "penaltyMessageNoReason" };
 }
 
+/** `action: "punish"` verlangt einen nicht-leeren Straftext — geteilt von `judgeOffense` und der
+ *  MCP-dryRun-Vorschau (mcpWrite.ts), damit die Regel nicht zweimal dasteht. */
+export function checkPenaltyText(action: JudgeOffenseParams["action"], text: string | undefined): "PENALTY_TEXT_REQUIRED" | null {
+  return action === "punish" && !text?.trim() ? "PENALTY_TEXT_REQUIRED" : null;
+}
+
+/** Der resultierende StrafeRecord.status bei punish/dismiss — geteilt vom echten Commit (unten) und
+ *  vom MCP judge_offense dryRun-Preview (B-05), damit die Zuordnung nicht zweimal dasteht. */
+export function judgmentStatus(action: "punish" | "dismiss"): "PUNISHED" | "DISMISSED" {
+  return action === "punish" ? "PUNISHED" : "DISMISSED";
+}
+
 export async function judgeOffense(p: JudgeOffenseParams): Promise<ServiceResult<JudgeOffenseResult>> {
   const now = new Date();
 
   if (p.action === "reopen") {
     const del = await prisma.strafeRecord.deleteMany({ where: { userId: p.userId, refId: p.refId } });
-    if (del.count === 0) return { ok: false, status: 404, error: "Kein Urteil zu diesem Vergehen gefunden." };
+    if (del.count === 0) return serviceFail(404, "JUDGMENT_NOT_FOUND");
     return { ok: true, data: { status: "open", done: false } };
   }
 
   // Erledigung bestätigen (schließt den Loop). Liegt eine Meldung des Subs vor, wird er benachrichtigt.
   if (p.action === "complete") {
     const rec = await prisma.strafeRecord.findUnique({ where: { refId: p.refId } });
-    if (!rec || rec.userId !== p.userId) return { ok: false, status: 404, error: "Kein Urteil zu diesem Vergehen gefunden." };
-    if (rec.status !== "PUNISHED") return { ok: false, status: 400, error: "Nur eine verhängte Strafe kann erledigt werden." };
+    if (!rec || rec.userId !== p.userId) return serviceFail(404, "JUDGMENT_NOT_FOUND");
+    if (rec.status !== "PUNISHED") return serviceFail(400, "PENALTY_NOT_PUNISHED");
     if (!rec.erledigtAt) {
       const res = await bestaetigeErledigung(p.userId, p.refId);
       if (!res.ok) return res;
@@ -246,14 +281,17 @@ export async function judgeOffense(p: JudgeOffenseParams): Promise<ServiceResult
   }
 
   const text = p.text?.trim() || null;
-  if (p.action === "punish" && !text) return { ok: false, status: 400, error: "Eine Strafe (text) ist erforderlich." };
+  const penaltyTextError = checkPenaltyText(p.action, p.text);
+  if (penaltyTextError) return serviceFail(400, penaltyTextError);
 
   // Vergehen muss aktuell erkannt sein (verhindert Urteile über Nicht-Vergehen).
   const offenses = collectDetectedOffenses(await buildStrafbuch(p.userId, now));
   const offense = offenses.find((o) => o.refId === p.refId);
-  if (!offense) return { ok: false, status: 404, error: `Kein offenes Vergehen mit ref ${p.refId}.` };
+  // Die ref stand früher im Fehlertext; sie ist ein Aufrufer-Argument, das der MCP-Agent bereits
+  // kennt — ein Code ohne Interpolation genügt und bleibt übersetzbar.
+  if (!offense) return serviceFail(404, "OFFENSE_NOT_FOUND");
 
-  const status = p.action === "punish" ? "PUNISHED" : "DISMISSED";
+  const status = judgmentStatus(p.action);
   await prisma.strafeRecord.upsert({
     where: { refId: p.refId },
     create: { userId: p.userId, offenseType: offense.offenseType, refId: p.refId, bestraftDatum: now, status, reason: text, judgedBy: p.judgedBy, erledigtAt: null },
@@ -262,6 +300,7 @@ export async function judgeOffense(p: JudgeOffenseParams): Promise<ServiceResult
 
   // Nur bei verhängter Strafe benachrichtigen (ein Verwerfen ist für den Nutzer belanglos).
   if (status === "PUNISHED") await notifyUser(p.userId, strafeVerhaengtNotice(text));
+  markLastAction();
 
   // Straf-Aktion (Phase 3) ausführen — nur bei verhängter Strafe. Fehler brechen das Urteil NICHT ab.
   let actionMessage: string | null = null;

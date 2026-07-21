@@ -1,5 +1,5 @@
-import { buildSessions } from "@/lib/mcp/segments";
-import { resolveUserId, makeIso, loadTrackingData, parseIsoDate, type TrackingEntry } from "@/lib/mcp/common";
+import { buildSessions } from "@/lib/sessionModel";
+import { resolveUserId, makeIso, buildEnvelope, loadTrackingData, parseIsoDate, mcpDeviceCheckStatus, type Envelope, type TrackingEntry } from "@/lib/mcp/common";
 
 /** timeline (§12) — KG-SEGMENTE (nicht rohe Lock/Unlock-Pulse), Wear-Sessions, Kontrollen und
  *  Orgasmen auf EINER Zeitachse. Der KG-Backbone kommt aus buildSessions, damit Reinigungspausen
@@ -16,8 +16,10 @@ export interface TimelineEvent {
   detail: Record<string, unknown>;
 }
 
-export interface TimelineResult {
-  schemaVersion: 2;
+export interface TimelineResult extends Envelope {
+  /** v3: `detail.deviceConfidence` bei lock-Events kann jetzt auch "undeclared" sein (A-04/A-05,
+   *  MCP-Befundliste 2026-07-17) — vorher fiel "kein Gerät angegeben" fälschlich auf "declared". */
+  schemaVersion: 3;
   user: string;
   from: string | null;
   to: string | null;
@@ -56,7 +58,7 @@ export async function timeline(username: string, opts: TimelineOptions = {}): Pr
         raw.push({ at: seg.end, type: "unlock", deviceName: seg.deviceEffective.name, detail: { sessionId: s.id, endedBy: seg.endedBy } });
       }
       for (const c of seg.controls) {
-        raw.push({ at: c.time, type: "control", deviceName: seg.deviceEffective.name, detail: { code: c.code, verifikationStatus: c.verifikationStatus, deviceCheck: c.deviceCheckStatus, detected: c.detected, expected: c.expected } });
+        raw.push({ at: c.time, type: "control", deviceName: seg.deviceEffective.name, detail: { code: c.code, verifikationStatus: c.verifikationStatus, deviceCheck: mcpDeviceCheckStatus(c.deviceCheckStatus), detected: c.detected, expected: c.expected } });
       }
     }
   }
@@ -75,8 +77,9 @@ export async function timeline(username: string, opts: TimelineOptions = {}): Pr
   const sliced = filtered.length > limit ? filtered.slice(filtered.length - limit) : filtered;
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     user: username,
+    ...buildEnvelope(now, iso, timezone),
     from: iso(from ?? null),
     to: iso(to ?? null),
     returnedCount: sliced.length,

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireApi } from "@/lib/authGuards";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import exifr from "exifr";
 import sharp from "sharp";
-import { trackEvent } from "@/lib/telemetry";
+import { markLastAction } from "@/lib/appMeta";
 import { uploadsDirPath, generateUploadFilename } from "@/lib/imageUtils";
 import { fromDatetimeLocal, APP_TZ } from "@/lib/utils";
 
@@ -24,8 +24,8 @@ function isAllowedImageBuffer(buf: Buffer): boolean {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await requireApi();
+  if (session instanceof NextResponse) return session;
 
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
@@ -124,6 +124,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  trackEvent("upload.success");
+  markLastAction();
   return NextResponse.json({ url: `/api/uploads/${filename}`, exifTime });
 }

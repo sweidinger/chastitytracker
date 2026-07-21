@@ -1,12 +1,11 @@
 import Card from "@/app/components/Card";
 import { prisma } from "@/lib/prisma";
-import { getUserTimezone } from "@/lib/queries";
+import { buildWearSessions, wearHourPairsByCategory } from "@/lib/sessionModel";
+import { getUserTimezone, SESSION_ENTRY_SELECT } from "@/lib/queries";
 import {
-  buildWearPairs,
   wearingHoursFromPairs,
   formatHours,
   formatMs,
-  WEAR_PAIR,
   getMidnightToday,
   getWeekStart,
   getMonthStart,
@@ -42,11 +41,7 @@ export default async function WearStatsByCategory({ userId }: Props) {
     prisma.entry.findMany({
       where: { userId, type: { in: ["WEAR_BEGIN", "WEAR_END"] } },
       orderBy: { startTime: "asc" },
-      select: {
-        type: true,
-        startTime: true,
-        device: { select: { categoryId: true } },
-      },
+      select: SESSION_ENTRY_SELECT,
     }),
     getTranslations("stats"),
     getUserTimezone(userId),
@@ -58,9 +53,12 @@ export default async function WearStatsByCategory({ userId }: Props) {
   const tagStart = getMidnightToday(now, tz);
   const wocheStart = getWeekStart(now, tz);
   const monatStart = getMonthStart(now, tz);
+  // Je GERAET gepaart und ueberlappungsfrei verschmolzen — zwei gleichzeitig getragene Plugs
+  // ergeben 2 h, nicht 4 h (Upstreams Session-Modell).
+  const pairsByCategory = wearHourPairsByCategory(buildWearSessions(entries, now), now);
 
   const blocks = categories.map((c) => {
-    const pairs = buildWearPairs(entries, now, { types: WEAR_PAIR, categoryId: c.id });
+    const pairs = pairsByCategory.get(c.id) ?? [];
     const completed = completedDurationsMs(pairs, now);
     const longestMs = completed.length > 0 ? Math.max(...completed) : 0;
     const avgMs = completed.length > 0 ? completed.reduce((s, d) => s + d, 0) / completed.length : 0;

@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireApi } from "@/lib/authGuards";
+import { entryManageAccess } from "@/lib/keyholder";
 import { prisma } from "@/lib/prisma";
 import { isValidImageUrl, VALID_CURRENCIES, DEVICE_NAME_MAX_LENGTH, DEVICE_DESCRIPTION_MAX_LENGTH } from "@/lib/constants";
 import { deleteUploadedFiles } from "@/lib/imageUtils";
+import { errorResponse, serviceFailure } from "@/lib/serviceResult";
+import { resolveOwnedCategory } from "@/lib/deviceCategoryService";
 
 type Params = { params: Promise<{ id: string }> };
 
-/** Ownership check: returns the device if the session user owns it (or is admin). */
+/** Access check: returns the device if the session user may manage it — owner, global admin, or
+ *  keyholder of the owner (same rule as entries, see entryManageAccess). */
 async function getOwnedDevice(id: string, sessionUserId: string, sessionRole: string) {
   const device = await prisma.device.findUnique({ where: { id } });
   if (!device) return null;
-  if (device.userId !== sessionUserId && sessionRole !== "admin") return null;
+  if (!(await entryManageAccess(sessionUserId, sessionRole, device.userId)).allowed) return null;
   return device;
 }
 
@@ -19,30 +23,32 @@ async function getOwnedDevice(id: string, sessionUserId: string, sessionRole: st
  * Update device fields or restore an archived device (action: "restore").
  */
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await requireApi();
+  if (session instanceof NextResponse) return session;
 
   const { id } = await params;
   const device = await getOwnedDevice(id, session.user.id, session.user.role);
-  if (!device) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!device) return errorResponse(404, "NOT_FOUND");
 
   const body = await req.json();
 
   // Restore archived device
   if (body.action === "restore") {
     if (!device.archivedAt) {
-      return NextResponse.json({ error: "Device ist nicht archiviert" }, { status: 400 });
+      return errorResponse(400, "DEVICE_NOT_ARCHIVED");
     }
     const updated = await prisma.device.update({
       where: { id },
-      data: { archivedAt: null },
+      // version: OCC-Token der MCP-Edits — jeder Device-Write bumpt es, damit ein Keyholder-Agent
+      // mit expectedVersion auch UI-seitige Änderungen als Konflikt erkennt (siehe mcp/writeFramework).
+      data: { archivedAt: null, version: { increment: 1 } },
     });
     return NextResponse.json(updated);
   }
 
   // Cannot edit archived devices (restore first)
   if (device.archivedAt) {
-    return NextResponse.json({ error: "Archivierte Devices können nicht bearbeitet werden" }, { status: 400 });
+    return errorResponse(400, "DEVICE_ARCHIVED_NOT_EDITABLE");
   }
 
   const { name, description, imageUrl, purchasePrice, currency, categoryId } = body;
@@ -50,20 +56,20 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   // Validation (only validate provided fields)
   if (name !== undefined) {
     if (!name || typeof name !== "string" || !name.trim()) {
-      return NextResponse.json({ error: "Name ist erforderlich" }, { status: 400 });
+      return errorResponse(400, "DEVICE_NAME_REQUIRED");
     }
     if (name.trim().length > DEVICE_NAME_MAX_LENGTH) {
-      return NextResponse.json({ error: `Name zu lang (max. ${DEVICE_NAME_MAX_LENGTH} Zeichen)` }, { status: 400 });
+      return errorResponse(400, "DEVICE_NAME_TOO_LONG");
     }
   }
   if (description !== undefined && typeof description === "string" && description.length > DEVICE_DESCRIPTION_MAX_LENGTH) {
-    return NextResponse.json({ error: `Beschreibung zu lang (max. ${DEVICE_DESCRIPTION_MAX_LENGTH} Zeichen)` }, { status: 400 });
+    return errorResponse(400, "DEVICE_DESCRIPTION_TOO_LONG");
   }
   if (imageUrl !== undefined && !isValidImageUrl(imageUrl)) {
-    return NextResponse.json({ error: "Ungültige imageUrl" }, { status: 400 });
+    return errorResponse(400, "INVALID_IMAGE_URL");
   }
   if (purchasePrice !== undefined && purchasePrice != null && (typeof purchasePrice !== "number" || purchasePrice < 0)) {
-    return NextResponse.json({ error: "Ungültiger Preis" }, { status: 400 });
+    return errorResponse(400, "DEVICE_INVALID_PRICE");
   }
 
   // Determine effective currency: use provided, or keep existing
@@ -71,17 +77,16 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const effectivePrice = purchasePrice !== undefined ? purchasePrice : device.purchasePrice;
 
   if (effectiveCurrency && !(VALID_CURRENCIES as readonly string[]).includes(effectiveCurrency)) {
-    return NextResponse.json({ error: "Ungültige Währung" }, { status: 400 });
+    return errorResponse(400, "DEVICE_INVALID_CURRENCY");
   }
   if (effectivePrice != null && !effectiveCurrency) {
-    return NextResponse.json({ error: "Währung ist erforderlich wenn Preis angegeben" }, { status: 400 });
+    return errorResponse(400, "DEVICE_CURRENCY_REQUIRED");
   }
 
-  if (categoryId !== undefined && categoryId !== null) {
-    if (typeof categoryId !== "string") return NextResponse.json({ error: "Ungültige Kategorie" }, { status: 400 });
-    const cat = await prisma.deviceCategory.findUnique({ where: { id: categoryId }, select: { userId: true } });
-    if (!cat || cat.userId !== device.userId) return NextResponse.json({ error: "Ungültige Kategorie" }, { status: 400 });
-  }
+  // Ownership is checked against the DEVICE's owner, not the session user: an admin editing another
+  // user's device must file it under a category of THAT user.
+  const category = await resolveOwnedCategory(categoryId, device.userId);
+  if (!category.ok) return serviceFailure(category);
 
   const data: Record<string, unknown> = {};
   if (name !== undefined) data.name = name.trim();
@@ -91,6 +96,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (currency !== undefined) data.currency = currency || null;
   if (categoryId !== undefined) data.categoryId = categoryId || null;
   if (body.sortOrder !== undefined && Number.isFinite(Number(body.sortOrder))) data.sortOrder = Math.trunc(Number(body.sortOrder));
+
+  // version: OCC-Token der MCP-Edits — bumpen, sobald wirklich Felder geändert werden (No-op nicht).
+  if (Object.keys(data).length) data.version = { increment: 1 };
 
   const updated = await prisma.device.update({ where: { id }, data });
 
@@ -109,12 +117,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
  * Returns { deleted: true } or { archived: true }.
  */
 export async function DELETE(req: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await requireApi();
+  if (session instanceof NextResponse) return session;
 
   const { id } = await params;
   const device = await getOwnedDevice(id, session.user.id, session.user.role);
-  if (!device) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!device) return errorResponse(404, "NOT_FOUND");
 
   // Already archived → no-op
   if (device.archivedAt) {
@@ -136,7 +144,8 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   // Soft delete — preserve history
   await prisma.device.update({
     where: { id },
-    data: { archivedAt: new Date() },
+    // version-Bump: Archivieren ändert das MCP-DTO (archived) — siehe restore/PATCH oben.
+    data: { archivedAt: new Date(), version: { increment: 1 } },
   });
   return NextResponse.json({ archived: true });
 }

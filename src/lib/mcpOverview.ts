@@ -17,7 +17,8 @@ import { getBelohnungState, computeBelohnbar } from "@/lib/belohnung";
 import { getActiveHealthHold } from "@/lib/healthHoldService";
 import { buildTagesformView, type TagesformView } from "@/lib/tagesformService";
 import { collectDetectedOffenses, computeSeverities, OFFENSE_SEVERITY, type OffenseSeverity } from "@/lib/strafurteilService";
-import { round1, msToHours, pct, isoWithOffset } from "@/lib/mcp/format";
+import { pct, isoWithOffset } from "@/lib/mcp/format";
+import { round1, msToHours } from "@/lib/utils";
 
 /** Zeitformat der MCP-Ausgabe: V1-Tools nutzen das Instanz-lokale Human-Format (bewusster V1-
  *  Vertrag), V2-Composer (dashboard, ledger) ziehen via opts.iso ISO-8601 mit Offset.
@@ -156,7 +157,7 @@ async function loadUserContext(username: string) {
       id: true, timezone: true,
       reinigungErlaubt: true, reinigungMaxMinuten: true, reinigungMaxProTag: true, reinigungsFenster: true,
       mcpKeyholderInstructions: true,
-      autoKontrolleAktiv: true, autoKontrollePerDayMin: true, autoKontrollePerDayMax: true, autoKontrolleRuheVon: true, autoKontrolleRuheBis: true, autoKontrolleFristVon: true, autoKontrolleFristBis: true,
+      autoKontrolleAktiv: true, autoKontrollePerDayMin: true, autoKontrollePerDayMax: true, autoKontrolleRuheVon: true, autoKontrolleRuheBis: true, autoKontrolleFristVon: true, autoKontrolleFristBis: true, autoKontrolleFensterVon: true, autoKontrolleFensterBis: true, autoKontrolleNurBeiSperre: true,
       // Toilette (KG)
       toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true,
       // Plug-Reinigung + Plug-Toilette (Toilette immer erlaubt/unbegrenzt → nur Max.-Dauer)
@@ -244,7 +245,7 @@ export async function buildOverview(username: string, opts: McpFormatOptions = {
   const lastOrgasmus = entries.find((e) => e.type === "ORGASMUS") ?? null;
 
   // ── Wearing hours + KG training goal ──
-  const { tagH, wocheH, monatH } = calculateWearingHoursByRange(entries, now, reinigung);
+  const { tagH, wocheH, monatH } = calculateWearingHoursByRange(entries, now);
 
   // ── Belohnungs-Ökonomie + Gesundheits-Stopp + Tagesform ──
   const [belohnungState, belohnbar, healthHold, tagesform] = await Promise.all([
@@ -676,7 +677,7 @@ export interface StrafbuchOverview {
   } & OffenseJudgment)[];
   lateControls: StrafbuchControlRow[];
   rejectedControls: StrafbuchControlRow[];
-  missedLockRequests: ({ windowEndedAt: string; message: string | null; categoryName: string | null } & OffenseJudgment)[];
+  lateLocks: ({ windowEndedAt: string; message: string | null; categoryName: string | null } & OffenseJudgment)[];
   /** Lock entries where a different device than the Anforderung specified was worn. */
   wrongDeviceViolations: ({ time: string | null; note: string | null; deviceName: string | null } & OffenseJudgment)[];
   /** Mandatory orgasm directives (ANWEISUNG) whose window ended without a matching orgasm. */
@@ -777,11 +778,11 @@ export async function mcpStrafbuch(username: string, opts: McpFormatOptions = {}
     })),
     lateControls: sb.lateControls.map(toControlRow("late_control")),
     rejectedControls: sb.rejectedControls.map(toControlRow("rejected_control")),
-    missedLockRequests: sb.missedLockRequests.map((m) => ({
+    lateLocks: sb.lateLocks.map((m) => ({
       windowEndedAt: fmt(m.endetAt),
       message: m.nachricht,
       categoryName: m.categoryName,
-      ...judge("missed_lock", m.id),
+      ...judge("late_lock", m.id),
     })),
     wrongDeviceViolations: sb.wrongDeviceViolations.map((v) => ({
       time: v.startTime ? fmt(v.startTime) : null,

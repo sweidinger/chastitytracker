@@ -75,13 +75,13 @@ export async function meldeErledigung(
   opts?: { nachweisUrl?: string | null; notiz?: string | null },
 ): Promise<ServiceResult<{ refId: string }>> {
   const rec = await prisma.strafeRecord.findUnique({ where: { refId } });
-  if (!rec || rec.userId !== userId) return { ok: false, status: 404, error: "Strafe nicht gefunden." };
-  if (rec.status !== "PUNISHED") return { ok: false, status: 400, error: "Nur eine verhängte Strafe kann erledigt werden." };
-  if (rec.erledigtAt) return { ok: false, status: 400, error: "Diese Strafe ist bereits erledigt." };
-  if (rec.gemeldetAt) return { ok: false, status: 400, error: "Diese Erledigung wartet bereits auf Prüfung." };
+  if (!rec || rec.userId !== userId) return { ok: false, status: 404, error: "PENALTY_NOT_FOUND" };
+  if (rec.status !== "PUNISHED") return { ok: false, status: 400, error: "PENALTY_NOT_PUNISHED" };
+  if (rec.erledigtAt) return { ok: false, status: 400, error: "PENALTY_ALREADY_DONE" };
+  if (rec.gemeldetAt) return { ok: false, status: 400, error: "PENALTY_REPORT_PENDING" };
 
   const nachweisUrl = opts?.nachweisUrl?.trim() || null;
-  if (nachweisUrl && !isValidImageUrl(nachweisUrl)) return { ok: false, status: 400, error: "Ungültiger Bild-Pfad." };
+  if (nachweisUrl && !isValidImageUrl(nachweisUrl)) return { ok: false, status: 400, error: "INVALID_IMAGE_URL" };
 
   await prisma.strafeRecord.update({
     where: { refId },
@@ -110,9 +110,9 @@ export async function meldeErledigung(
 /** Keyholderin/AI bestätigt eine gemeldete Erledigung → Loop geschlossen. */
 export async function bestaetigeErledigung(userId: string, refId: string): Promise<ServiceResult<{ refId: string }>> {
   const rec = await prisma.strafeRecord.findUnique({ where: { refId } });
-  if (!rec || rec.userId !== userId) return { ok: false, status: 404, error: "Strafe nicht gefunden." };
-  if (rec.status !== "PUNISHED") return { ok: false, status: 400, error: "Nur eine verhängte Strafe kann erledigt werden." };
-  if (rec.erledigtAt) return { ok: false, status: 400, error: "Diese Strafe ist bereits erledigt." };
+  if (!rec || rec.userId !== userId) return { ok: false, status: 404, error: "PENALTY_NOT_FOUND" };
+  if (rec.status !== "PUNISHED") return { ok: false, status: 400, error: "PENALTY_NOT_PUNISHED" };
+  if (rec.erledigtAt) return { ok: false, status: 400, error: "PENALTY_ALREADY_DONE" };
 
   await prisma.strafeRecord.update({
     where: { refId },
@@ -134,11 +134,11 @@ export async function lehneErledigungAb(
   grund: string,
 ): Promise<ServiceResult<{ refId: string }>> {
   const text = grund?.trim();
-  if (!text) return { ok: false, status: 400, error: "Eine Begründung ist erforderlich." };
+  if (!text) return { ok: false, status: 400, error: "PENALTY_REASON_REQUIRED" };
   const rec = await prisma.strafeRecord.findUnique({ where: { refId } });
-  if (!rec || rec.userId !== userId) return { ok: false, status: 404, error: "Strafe nicht gefunden." };
-  if (!rec.gemeldetAt) return { ok: false, status: 400, error: "Für diese Strafe liegt keine Meldung vor." };
-  if (rec.erledigtAt) return { ok: false, status: 400, error: "Diese Strafe ist bereits erledigt." };
+  if (!rec || rec.userId !== userId) return { ok: false, status: 404, error: "PENALTY_NOT_FOUND" };
+  if (!rec.gemeldetAt) return { ok: false, status: 400, error: "PENALTY_NO_REPORT" };
+  if (rec.erledigtAt) return { ok: false, status: 400, error: "PENALTY_ALREADY_DONE" };
 
   await prisma.strafeRecord.update({
     where: { refId },

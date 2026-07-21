@@ -1,12 +1,13 @@
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { timingSafeEqual, createHash } from "crypto";
 import { z } from "zod";
-import { buildOverview, listSessions, listEntries, listDevices, mcpStrafbuch, listKeyholderNotes } from "@/lib/mcpOverview";
+import { listEntries } from "@/lib/mcp/entries";
 import { MCP_MODEL_DOC } from "@/lib/mcpModelDoc";
+import { structuredLog, redactDigits } from "@/lib/serverLog";
 import {
   checkMcpKeyholder, mcpRequestLock, mcpSetLockPeriod, mcpRequestInspection, mcpSetTrainingGoal, mcpWithdraw,
   mcpListTrainingGoals, mcpEditTrainingGoal, mcpDeleteTrainingGoal, mcpSetCleaning, mcpResolveInspection, mcpEditLockPeriod,
-  mcpAddKeyholderNote, mcpDeleteKeyholderNote, mcpRequestOrgasm, mcpJudgeOffense,
+  mcpRequestOrgasm, mcpJudgeOffense,
   mcpGrantReward, mcpCreditReward, mcpRequestSession,
 } from "@/lib/mcpWrite";
 import { ORGASMUS_ARTEN } from "@/lib/constants";
@@ -16,11 +17,12 @@ import { VALID_TYPES } from "@/lib/constants";
 import { getSession } from "@/lib/mcp/sessions";
 import { queryNotes, upsertNoteDef, linkNoteDef, NOTE_TYPES, NOTE_STATUS, NOTE_SOURCE, NOTE_CONFIDENCE, ENTITY_TYPES } from "@/lib/mcp/notes";
 import { listDevicesV2, setDeviceMetaDef, SECURITY_LEVELS } from "@/lib/mcp/devices";
-import { executeWrite, type WriteDef, type WriteSource } from "@/lib/mcp/writeFramework";
+import { executeWrite, recordAction, type WriteDef, type WriteSource } from "@/lib/mcp/writeFramework";
 import { buildWriteContext } from "@/lib/mcp/common";
+import { prisma } from "@/lib/prisma";
 import { keyholderDashboard, getBoxState } from "@/lib/mcp/dashboard";
 import { deviceStats, records, denialTrend, periodSummary } from "@/lib/mcp/stats";
-import { getOffenses } from "@/lib/mcp/ledger";
+import { getOffenses, OFFENSE_TYPES } from "@/lib/mcp/ledger";
 import { getContext, setHealthHoldDef, upsertAppointmentDef, upsertRecurringContextDef } from "@/lib/mcp/context";
 import { timeline } from "@/lib/mcp/timeline";
 import { getActionLog } from "@/lib/mcp/actionlog";
@@ -49,14 +51,87 @@ async function runTool<T>(label: string, fn: (username: string) => Promise<T>): 
  *  authorizing user's id under authInfo.extra.userId. */
 type ToolExtra = { authInfo?: { extra?: { userId?: string } } };
 
-/** Wrapper for WRITE tools: enforces keyholder (admin OAuth) authorization, then delegates to
- *  runTool. The static MCP_TOKEN has no user identity and is therefore always rejected here. */
-async function runWriteTool<T>(label: string, extra: ToolExtra, fn: (username: string) => Promise<T>): Promise<ToolResult> {
+/** Freitext-Felder der Write-Args — nur hier könnte ein Keyholder einen Code eintippen, also NUR
+ *  diese redigieren. IDs (cuids), Zeitstempel und Zahlenwerte bleiben intakt, damit die Audit-Zeile
+ *  nachvollziehbar bleibt (welcher Datensatz, welche Deadline). */
+const MCP_FREE_TEXT_KEYS = new Set(["message", "comment", "note", "kommentar", "reason"]);
+
+/** Redigiert Ziffernfolgen NUR in Freitext-Feldern (redactDigits gegen versehentliches Code-Leak),
+ *  nicht in IDs/Zeitstempeln — geteilt vom Container-Log (`serializeMcpArgs`) UND vom DB-Audit
+ *  (`recordAction`-Aufruf in `runWriteTool`): ein Kontroll-Code, der versehentlich in ein Freitext-
+ *  Feld wie `message`/`text` gerät, darf nirgends unredigiert landen, auch nicht dauerhaft in
+ *  `KeyholderActionLog.argsJson`. */
+function redactMcpArgs(args: unknown): unknown {
+  if (!args || typeof args !== "object") return args ?? {};
+  return Object.fromEntries(
+    Object.entries(args).map(([k, v]) =>
+      MCP_FREE_TEXT_KEYS.has(k) && typeof v === "string" ? [k, redactDigits(v)] : [k, v],
+    ),
+  );
+}
+
+/** Serialisiert die (redigierten) Write-Args fürs Container-Log. */
+function serializeMcpArgs(args: unknown): string {
+  return JSON.stringify(redactMcpArgs(args));
+}
+
+/** Loggt jeden MCP-Write-Event (Direktive) in die Container-Logs: Tool, Ziel-User, Ausgang und die
+ *  Aufruf-Args (Freitext ziffern-redigiert). Reads werden bewusst NICHT geloggt — nur die vom MCP
+ *  gesendeten Zustandsänderungen. */
+function logMcpWrite(tool: string, args: unknown, outcome: "ok" | "error" | "denied" | "dryrun") {
+  structuredLog("MCP", "write", {
+    tool,
+    user: process.env.MCP_USERNAME ?? "unknown",
+    outcome,
+    args: serializeMcpArgs(args),
+  });
+}
+
+/** Loggt einen abgelehnten Write und baut die einheitliche Deny-Antwort — von beiden Write-Wrappern
+ *  genutzt, damit Log-Zeile und Fehlertext an einer Stelle liegen. */
+function denyWrite(tool: string, args: unknown, reason: string): ToolResult {
+  logMcpWrite(tool, args, "denied");
+  return { content: [{ type: "text", text: `Write denied: ${reason}.` }], isError: true };
+}
+
+/** Wrapper for WRITE tools: enforces keyholder (admin OAuth) authorization, requires a non-empty
+ *  `reason` (B-03: same audit obligation as the V2 write framework), then delegates to runTool and —
+ *  on success — writes a KeyholderActionLog row so `get_action_log` can finally see these writes too.
+ *  The static MCP_TOKEN has no user identity and is therefore always rejected here.
+ *
+ *  Not atomic with the V1 write itself (unlike executeWrite's V2 path, which commits mutation + audit
+ *  in one transaction): `fn()` already committed via its own service call before the audit write runs
+ *  here. A crash between the two would leave a mutation without an audit row — an accepted gap for
+ *  this lighter-weight V1 pass; the full V1→V2 migration (K-01) closes it structurally. */
+async function runWriteTool<T>(label: string, extra: ToolExtra, args: Record<string, unknown>, fn: (username: string) => Promise<T>): Promise<ToolResult> {
   const check = await checkMcpKeyholder(extra?.authInfo?.extra?.userId);
-  if (!check.ok) {
-    return { content: [{ type: "text", text: `Write denied: ${check.reason}.` }], isError: true };
+  if (!check.ok) return denyWrite(label, args, check.reason);
+  const reason = typeof args.reason === "string" ? args.reason.trim() : "";
+  if (!reason) return denyWrite(label, args, `"${label}" requires a non-empty reason (audit is mandatory)`);
+
+  const isDryRun = args.dryRun === true;
+  const result = await runTool(label, fn);
+  logMcpWrite(label, args, result.isError ? "error" : isDryRun ? "dryrun" : "ok");
+
+  // dryRun committet nichts (siehe mcpWrite.ts) — folgerichtig auch kein Audit-Eintrag, exakt wie
+  // der V2-Pfad (executeWrite gibt bei dryRun zurück, bevor die Transaktion je beginnt).
+  if (!result.isError && !isDryRun) {
+    const username = process.env.MCP_USERNAME;
+    if (username) {
+      try {
+        const ctx = await buildWriteContext(username, extra?.authInfo?.extra?.userId);
+        // Kein $transaction: recordAction schreibt hier nur EINE Zeile, und dieser Pfad ist ohnehin
+        // nicht atomar mit dem V1-Write selbst (siehe Docblock) — eine Transaktion um einen einzelnen
+        // Insert wäre reiner Overhead ohne zusätzliche Garantie.
+        await recordAction(prisma, { ctx, tool: label, reason, source: "agent", args: redactMcpArgs(args) });
+      } catch (e) {
+        // Der Write selbst ist schon committet — ein Audit-Fehler darf ihn nicht rückwirkend als
+        // Fehler melden, nur laut werden.
+        structuredLog("MCP", "audit-write-failed", { tool: label, error: (e as Error).message });
+      }
+    }
   }
-  return runTool(label, fn);
+  return result;
 }
 
 /** Wrapper für MCP-V2-WRITE-Tools: prüft Keyholder-Autorisierung, baut den WriteContext und führt
@@ -68,11 +143,10 @@ async function runV2Write<A, T>(
   raw: Record<string, unknown>,
 ): Promise<ToolResult> {
   const check = await checkMcpKeyholder(extra?.authInfo?.extra?.userId);
-  if (!check.ok) {
-    return { content: [{ type: "text", text: `Write denied: ${check.reason}.` }], isError: true };
-  }
+  if (!check.ok) return denyWrite(def.tool, raw, check.reason);
   const username = process.env.MCP_USERNAME;
   if (!username) {
+    logMcpWrite(def.tool, raw, "error");
     return { content: [{ type: "text", text: "Server misconfigured: MCP_USERNAME is not set." }], isError: true };
   }
   // `decisionSource` ist die Audit-Quelle (wer hat entschieden) — bewusst NICHT `source`, damit es
@@ -85,33 +159,30 @@ async function runV2Write<A, T>(
       source: decisionSource as WriteSource | undefined,
       dryRun: dryRun as boolean | undefined,
     });
+    logMcpWrite(def.tool, raw, dryRun ? "dryrun" : "ok");
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   } catch (e) {
+    logMcpWrite(def.tool, raw, "error");
     return { content: [{ type: "text", text: `${def.tool} failed: ${(e as Error).message}` }], isError: true };
   }
 }
 
-/** Default-AN, abschaltbar mit "false": registriert die LEGACY-V1-Read-Tools (siehe Part 2b). */
-const ENABLE_LEGACY_MCP = process.env.ENABLE_LEGACY_MCP !== "false";
-
-/** Server-Instructions (MCP `initialize.instructions`) — steuern die V1/V2-Tool-Wahl global,
- *  damit der Agent nicht der Beschreibungs-Ähnlichkeit ausgeliefert ist. */
+/** Server-Instructions (MCP `initialize.instructions`) — leiten die Tool-Wahl global, damit der Agent
+ *  nicht der Beschreibungs-Ähnlichkeit ausgeliefert ist. */
 const MCP_SERVER_INSTRUCTIONS =
-  "ChastityTracker Keyholder-MCP (V1 + V2 parallel). Tool-Wahl:\n" +
-  "• LESEN → V2-first: beginne mit `keyholder_dashboard` (beantwortet ~90 %), dann gezielt die Deep-Views " +
+  "ChastityTracker Keyholder-MCP. Tool-Wahl:\n" +
+  "• LESEN: beginne mit `keyholder_dashboard` (beantwortet ~90 %), dann gezielt die Deep-Views " +
   "(`get_session` für Segmente/deviceBreakdown, `device_stats`, `records`, `period_summary`, `denial_trend`, " +
-  "`get_offenses`, `get_context`, `timeline`, `get_devices`, `query_notes`, `get_action_log`, `get_box_state`). " +
-  "Die V1-Read-Tools (`get_overview`, `list_sessions`, `list_devices`, `get_strafbuch`, `list_keyholder_notes`) " +
-  "sind VERALTET, durch die V2-Tools vollständig ersetzt und per `ENABLE_LEGACY_MCP=false` abschaltbar — nicht " +
-  "mehr verwenden. Insbesondere stehen die Auto-Kontroll-Einstellungen (früher get_overview.autoKontrolle) und " +
-  "die Reinigungs-Regeln nun in `get_context` (autoInspections + cleaning).\n" +
-  "• DIREKTIV-WRITES (Sperrzeit, Inspektion, Orgasmus, Strafe, Trainingsziele, Reinigung) → das sind die V1-" +
-  "Tools (`set_lock_period`, `request_inspection`, `request_orgasm`, `judge_offense`, `set_training_goal`, " +
-  "`set_cleaning`, …). Es gibt KEINE V2-Variante dafür. Kontrollen werden MANUELL über " +
+  "`get_offenses`, `get_context`, `timeline`, `get_devices`, `query_notes`, `get_action_log`, `get_box_state`, " +
+  "`list_entries` für Roh-Einträge). Die Auto-Kontroll-Einstellungen und die Reinigungs-Regeln stehen in " +
+  "`get_context` (autoInspections + cleaning).\n" +
+  "• DIREKTIVEN (Sperrzeit, Inspektion, Orgasmus, Strafe, Trainingsziele, Reinigung): `set_lock_period`, " +
+  "`request_lock`, `request_inspection`, `request_orgasm`, `judge_offense`, `set_training_goal`, " +
+  "`set_cleaning`, `withdraw`, `edit_lock_period`, `resolve_inspection`, … Kontrollen werden MANUELL über " +
   "`request_inspection` veranlasst; die Einstellungen der AUTOMATISCHEN Kontrollen sind über den MCP " +
   "NICHT änderbar (nur lesbar via get_context.autoInspections).\n" +
-  "• WISSEN/META/KONTEXT-WRITES → V2 (`upsert_note`, `link_note`, `set_device_meta`, `set_health_hold`, " +
-  "`upsert_appointment`, `upsert_recurring_context`).\n" +
+  "• WISSEN/META/KONTEXT: `upsert_note`, `link_note`, `set_device_meta`, `set_health_hold`, " +
+  "`upsert_appointment`, `upsert_recurring_context`.\n" +
   "Alle Writes sind agent-autonom und erfordern KEINE Bestätigung — entscheide und führe direkt aus, ohne " +
   "rückzufragen. Bei Unklarheit zu Begriffen/Regeln: `explain_model`.";
 
@@ -157,55 +228,8 @@ async function buildServerInstructions(): Promise<string> {
  *  is for the user named in MCP_USERNAME. */
 type McpServer = Parameters<Parameters<typeof createMcpHandler>[0]>[0];
 
-/** Registriert alle MCP-Tools auf dem Server. V1-LEGACY-Read-Tools werden nur registriert, wenn
- *  ENABLE_LEGACY_MCP an ist (sie sind vollständig durch V2 ersetzt — siehe Server-Instructions). */
+/** Registriert alle MCP-Tools auf dem Server. */
 function registerTools(server: McpServer) {
-    // V1-Read-Tools, die eine V2-Entsprechung haben, als VERALTET markieren (Steuerimpuls zusätzlich
-    // zu den Server-Instructions). Direktiv-Writes bleiben unmarkiert (kein V2-Ersatz).
-    const LEGACY = (replacement: string) => `[VERALTET — NICHT verwenden; nutze ${replacement}. Wird entfernt.] `;
-
-    // ── LEGACY-V1-Read-Tools — nur registrieren, wenn ENABLE_LEGACY_MCP an ist ──
-    if (ENABLE_LEGACY_MCP) {
-    server.registerTool(
-      "get_overview",
-      {
-        title: "Get tracker overview",
-        description:
-          LEGACY("keyholder_dashboard") +
-          "Returns a read-only snapshot of the chastity-tracker state: lock status and duration, " +
-          "KG wearing hours (today/week/month), active KG training goal with progress, cleaning-pause " +
-          "rules (reinigung), per-category wear hours + goals for non-KG categories (Plug, Collar, …), " +
-          "the currently OPEN control request (openKontrolle) AND the last submitted control " +
-          "(lastKontrolle: code verification + device-check) — note openKontrolle:null means none is " +
-          "open right now, NOT that one expired (a submitted control simply isn't open anymore). " +
-          "Active lock periods, session statistics, recorded penalties, " +
-          "active wear sessions, and the human keyholder's free-text rules (keyholderInstructions) " +
-          "that the write tools must respect. Use this to reason about the user's situation and propose measures. " +
-          "If any field or rule is unclear (e.g. reinigung.maxPausesPerDay, or how Strafbuch detection vs " +
-          "punishment works), call explain_model first for a plain-language reference.",
-        inputSchema: {},
-      },
-      () => runTool("get_overview", buildOverview),
-    );
-
-    server.registerTool(
-      "list_sessions",
-      {
-        title: "List completed sessions",
-        description:
-          LEGACY("get_session (Segmente + deviceBreakdown; dieses Tool zeigt nur das irreführende Einzel-Gerät-Label)") +
-          "Returns completed (closed) sessions — KG lock sessions and non-KG wear sessions — " +
-          "newest first, each with category, device, start/end time and duration. Use for " +
-          "history beyond the live snapshot of get_overview.",
-        inputSchema: {
-          category: z.string().optional().describe('Filter: "KG" or a category name (e.g. "Plug"). Omit for all categories.'),
-          limit: z.number().int().min(1).max(100).optional().describe("Max rows to return (default 20)."),
-        },
-      },
-      (args) => runTool("list_sessions", (username) => listSessions(username, args)),
-    );
-    } // end ENABLE_LEGACY_MCP (get_overview, list_sessions)
-
     server.registerTool(
       "list_entries",
       {
@@ -227,60 +251,6 @@ function registerTools(server: McpServer) {
       (args) => runTool("list_entries", (username) => listEntries(username, args)),
     );
 
-    // ── Weitere LEGACY-V1-Read-Tools (list_devices, get_strafbuch, list_keyholder_notes) ──
-    if (ENABLE_LEGACY_MCP) {
-    server.registerTool(
-      "list_devices",
-      {
-        title: "List devices (inventory)",
-        description:
-          LEGACY("get_devices (inkl. Entscheidungs-Metadaten + Cluster + inline Notes)") +
-          "Returns the user's device inventory — KG and non-KG (Plug, Collar, …) devices — each " +
-          "with its notes/description, category, purchase price, currency, whether it has a photo, " +
-          "archived status and creation date. Active devices first, then archived. Use for " +
-          "inventory, notes and cost questions.",
-        inputSchema: {},
-      },
-      () => runTool("list_devices", listDevices),
-    );
-
-    server.registerTool(
-      "get_strafbuch",
-      {
-        title: "Get penalty book (Strafbuch)",
-        description:
-          LEGACY("get_offenses (vereinheitlichtes Ledger + Cluster-Kontext + inline Notes)") +
-          "Returns the Strafbuch: system-detected offenses — unauthorized openings during a " +
-          "lock period, late and rejected control submissions, cleaning-limit violations, and " +
-          "wrong-device violations (a different device worn than the Anforderung specified) — " +
-          "each (where applicable) flagged whether it has already been marked as punished. " +
-          "Use to reason about outstanding misconduct and propose consequences.",
-        inputSchema: {},
-      },
-      () => runTool("get_strafbuch", mcpStrafbuch),
-    );
-
-    server.registerTool(
-      "list_keyholder_notes",
-      {
-        title: "List keyholder notes (wearing-behaviour observations)",
-        description:
-          LEGACY("query_notes (Notes v2: type/status/pinned/refs, strukturiert)") +
-          "Returns the private keyholder notes — free observations about the user's wearing " +
-          "behaviour, optionally tagged by KG (device) and category (e.g. pressure marks, escape " +
-          "attempts, complaints). Newest first. get_overview already surfaces the 8 most recent; " +
-          "use this for the full history or to filter by a specific KG/category. MCP-only — the " +
-          "user never sees these. Use add_keyholder_note to record, delete_keyholder_note to prune.",
-        inputSchema: {
-          kg: z.string().optional().describe("Filter to a specific KG/device tag (exact match). Omit for all."),
-          kategorie: z.string().optional().describe("Filter to a specific category/tag (exact match). Omit for all."),
-          limit: z.number().int().min(1).max(200).optional().describe("Max rows to return (default 50)."),
-        },
-      },
-      (args) => runTool("list_keyholder_notes", (username) => listKeyholderNotes(username, args)),
-    );
-    } // end ENABLE_LEGACY_MCP (list_devices, get_strafbuch, list_keyholder_notes)
-
     server.registerTool(
       "explain_model",
       {
@@ -301,15 +271,20 @@ function registerTools(server: McpServer) {
     server.registerTool(
       "get_session",
       {
-        title: "Get KG session(s) with segments + deviceBreakdown",
+        title: "Get session(s) with segments + deviceBreakdown (all categories)",
         description:
-          "MCP V2 — die KORREKTE Antwort auf 'welches Gerät war Session X': eine KG-Session zerfällt an " +
-          "REINIGUNG-Öffnungen in Segmente (pro Segment GENAU EIN Gerät). Liefert pro Session " +
-          "`deviceBreakdown` (Stunden je Gerät), `segments[]` (declared vs. bild-verifiziertes Gerät + " +
-          "`deviceConfidence`), inline verknüpfte Notes (§9.3) und `dataQualityFlags` (z.B. declared≠verified). " +
-          "Ohne sessionId werden die neuesten Sessions aufgelistet. Zeiten als ISO-8601 mit Offset.",
+          "Die KORREKTE Antwort auf 'welches Gerät war Session X'. Über ALLE Kategorien: eine KG-Session " +
+          "zerfällt an REINIGUNG-Öffnungen in Segmente (pro Segment GENAU EIN Gerät); Trage-Sessions der " +
+          "übrigen Kategorien (Plug, Halsband, Knebel) haben genau ein Segment und das deklarierte Gerät. " +
+          "Liefert pro Session `category`, `deviceBreakdown` (Stunden je Gerät), `segments[]` (declared vs. " +
+          "bild-verifiziertes Gerät + `deviceConfidence`: declared|undeclared|image-confirmed|" +
+          "image-conflict|cluster-ambiguous — undeclared = KEIN Gerät angegeben, kein Vergehen), inline " +
+          "verknüpfte Notes (explain_model) und `dataQualityFlags` (z.B. declared≠verified oder " +
+          "undeclared). Ohne sessionId werden die neuesten Sessions " +
+          "aufgelistet — mit `category` nur die einer Kategorie. Zeiten als ISO-8601 mit Offset.",
         inputSchema: {
           sessionId: z.string().optional().describe("Eine bestimmte Session (Lock-Entry-id). Omit = neueste auflisten."),
+          category: z.string().optional().describe('Nur Sessions dieser Kategorie (Name, z.B. "KG" oder "Plug"). Omit = alle.'),
           limit: z.number().int().min(1).max(50).optional().describe("Max. Sessions beim Auflisten (default 10)."),
         },
       },
@@ -343,13 +318,22 @@ function registerTools(server: McpServer) {
       {
         title: "Get devices with decision metadata + inline notes (v2)",
         description:
-          "MCP V2 — Geräte-Inventar inkl. der Entscheidungs-Metadaten (§2): securityLevel " +
-          "(SECURING|TRUST_ONLY), lookalikeClusterId (Mismatch INNERHALB eines Clusters ist nie ein " +
-          "Vergehen), abstreifbar, material, bauform, healthFlags, retentionNotes, Anzahl Referenzfotos — " +
-          "plus inline verknüpfte Notes. Setze Metadaten mit set_device_meta.",
-        inputSchema: {},
+          "MCP V2 — Geräte-Inventar inkl. der Entscheidungs-Metadaten (explain_model): securityLevel " +
+          "(SECURING|TRUST_ONLY; v.a. für sichernde Geräte wie KG oder Halsreif — null ist keine " +
+          "Datenlücke), lookalikeClusterId (Mismatch INNERHALB eines Clusters ist nie ein " +
+          "Vergehen), pullOffRisk (true = abstreifbar/unsicher, false = geprüft sicher, null = nie " +
+          "beurteilt), material, bauform, healthFlags, retentionNotes, trackingEnabled (false = " +
+          "Inventory-only-Kategorie, liefert per Design keine Sessions), referenceImages (BEWUSST nur die " +
+          "Anzahl — die Bilder wertet der Server für deviceConfidence aus und sie sind via MCP nicht " +
+          "abrufbar) — plus inline verknüpfte Notes. Archivierte Geräte sind per Default ausgeblendet. " +
+          "Setze Metadaten (inkl. archived) mit set_device_meta.",
+        inputSchema: {
+          deviceId: z.string().optional().describe("Nur dieses eine Gerät (per id) zurückgeben."),
+          includeNotes: z.boolean().optional().describe("Inline-Notes mitliefern (Default true). false spart den teuersten Teil des Calls."),
+          includeArchived: z.boolean().optional().describe("Auch archivierte (ausgemusterte) Geräte mitliefern (Default false)."),
+        },
       },
-      () => runTool("get_devices", listDevicesV2),
+      (args) => runTool("get_devices", (u) => listDevicesV2(u, args)),
     );
 
     server.registerTool(
@@ -368,7 +352,9 @@ function registerTools(server: McpServer) {
           "für den Sub noch unsichtbar, via `withdraw` stornierbar; Auto-Kontrollen bewusst NICHT enthalten), BoxState, HealthHold, " +
           "dataDiscrepancies (echte Bild-Diskrepanzen als Hinweis, KEINE Vergehen; cluster-interne " +
           "Verwechslungen ausgeblendet) und currentRun.todayIncludesPriorSession (today enthält Anteil " +
-          "einer früheren Session → ≠ Lauf-Dauer). Zeiten durchgängig ISO-8601 mit Offset. Nutze die " +
+          "einer früheren Session → ≠ Lauf-Dauer). currentRun.since = Lauf-Anfang (deckt sich mit " +
+          "durationHours); currentRun.currentSegmentSince = Beginn des AKTUELLEN Segments, weicht bei " +
+          "Reinigungspausen von since ab (A-01). Zeiten durchgängig ISO-8601 mit Offset. Nutze die " +
           "Deep-Views (get_session, device_stats, records, denial_trend, get_offenses) nur für Details.",
         inputSchema: {},
       },
@@ -378,11 +364,15 @@ function registerTools(server: McpServer) {
     server.registerTool(
       "device_stats",
       {
-        title: "Per-device wear statistics (from segments)",
+        title: "Per-device wear statistics (from sessions)",
         description:
-          "MCP V2 — pro Gerät aus SEGMENTEN (nicht Labels): segmentCount, total/avg/median/min/max-Stunden, " +
-          "längste durchgehende Strecke (maxHours) und zuletzt getragen. Vorberechnet — keine Rekonstruktion " +
-          "aus Rohdaten nötig.",
+          "Pro Gerät aus SESSIONS (nicht Labels): sessionCount, total/avg/median/min/max-Stunden, längste " +
+          "einzelne Session (maxHours) und zuletzt getragen. sessionCount zählt, wie oft ein Gerät GETRAGEN " +
+          "wurde — eine Reinigungspause trennt nicht (ein durchgehend getragenes KG bleibt EINE Session). " +
+          "Vorberechnet — keine Rekonstruktion aus Rohdaten nötig. `devices` enthält nur echte Geräte; " +
+          "KG-Zeiten ohne Geräte-Zuordnung stehen separat in `unassigned` (Projektgeschichte, kein Gerät). " +
+          "Nie getragene Geräte (auch Inventory-only-Kategorien, trackingEnabled=false) fehlen hier ganz — " +
+          "Abwesenheit ist keine Nichtnutzung; Inventar-Wahrheit ist get_devices.",
         inputSchema: {},
       },
       () => runTool("device_stats", deviceStats),
@@ -394,7 +384,12 @@ function registerTools(server: McpServer) {
         title: "Records & personal bests",
         description:
           "MCP V2 — längster Lauf (interruption-bereinigt) als Personal Best, aktueller Lauf + % vom PB, " +
-          "Tage seit Rekord, Stunden seit letztem Orgasmus und längste orgasmusfreie Strecke. Vorberechnet.",
+          "Tage seit Rekord, Stunden seit letztem Orgasmus und längste orgasmusfreie Strecke. " +
+          "longestRunHours ist eine SESSION-Bruttosumme über Segmente/Geräte hinweg (Reinigungspausen " +
+          "raus, Gerätewechsel NICHT getrennt) — für die ehrliche Dauertrage-Marke " +
+          "longestUnbrokenSegmentHours nutzen (längstes EINZELNES abgeschlossenes Segment, ein Gerät, " +
+          "keine Pause darin) + currentUnbrokenSegmentHours/currentUnbrokenVsBestPct fürs laufende " +
+          "Segment (A-14). Vorberechnet.",
         inputSchema: {},
       },
       () => runTool("records", records),
@@ -418,8 +413,12 @@ function registerTools(server: McpServer) {
         title: "Denial / orgasm interval trend",
         description:
           "MCP V2 — Entsagungs-Entwicklung mit DATEN statt Kopfrechnen: currentStreakH (seit letztem " +
-          "Orgasmus), longestDenialH, avgIntervalH + recentAvgIntervalH + trendRising (steigt die " +
-          "Entsagung?), und orgasmHistory[] (Zeitpunkt, Intervall zum vorigen, Geräte-Kontext).",
+          "Orgasmus), longestDenialH, avgIntervalH + recentAvgIntervalH (Mittelwerte, informativ) + " +
+          "trendRising (steigt die Entsagung? MEDIAN-Vergleich jüngstes 3er-Fenster vs. Rest, toleriert " +
+          "GENAU EINEN Ausreisser im Fenster, nicht zwei; null bei <8 Intervallen insgesamt statt " +
+          "einer vorgetäuschten Aussage — A-10, MCP-Befundliste 2026-07-17), recentWindowN (Grösse " +
+          "des Fensters) + trendConfidence (low<8/medium<15/high — grobe Datenlage-Einschätzung, " +
+          "kein Signifikanztest), und orgasmHistory[] (Zeitpunkt, Intervall zum vorigen, Geräte-Kontext).",
         inputSchema: {
           limit: z.number().int().min(1).max(500).optional().describe("Nur die letzten N Orgasmen in orgasmHistory."),
         },
@@ -432,14 +431,20 @@ function registerTools(server: McpServer) {
       {
         title: "Discipline ledger (unified offense list)",
         description:
-          "MCP V2 — vereinheitlichtes Disziplin-Ledger: alle erkannten Vergehen (unauthorized_opening, " +
-          "late_control, rejected_control, wrong_device, missed_orgasm, missed_session, missed_lock, erektion, pause_overage) als EINE Liste mit " +
+          "MCP V2 — vereinheitlichtes Disziplin-Ledger: alle erkannten Vergehen (" + OFFENSE_TYPES.join(", ") + ") als EINE Liste mit " +
           "status (open|judged), judgment, Folge (consequence) und Kontext + inline Notes. Bei wrong_device " +
           "kommt der Cluster-Kontext des getragenen Geräts mit (possiblyClusterInternal) — Cluster-interne " +
-          "Mismatches sind nie ein echtes Vergehen; urteile via judge_offense.",
-        inputSchema: {},
+          "Mismatches sind nie ein echtes Vergehen; urteile via judge_offense. Filter optional — die " +
+          "Zähler (detectedOffenseCount/openOffenseCount/pendingPenaltyCount) bleiben UNGEFILTERTE Gesamtstände.",
+        inputSchema: {
+          type: z.enum(OFFENSE_TYPES).optional().describe("Nur diesen Vergehenstyp."),
+          openOnly: z.boolean().optional().describe("Nur noch nicht beurteilte (status open)."),
+          from: z.string().optional().describe("ISO-8601 untere Grenze auf detectedAt."),
+          to: z.string().optional().describe("ISO-8601 obere Grenze auf detectedAt."),
+          limit: z.number().int().min(1).max(200).optional().describe("Neueste zuerst, dann auf limit gekürzt."),
+        },
       },
-      () => runTool("get_offenses", getOffenses),
+      (args) => runTool("get_offenses", (u) => getOffenses(u, args)),
     );
 
     server.registerTool(
@@ -447,16 +452,23 @@ function registerTools(server: McpServer) {
       {
         title: "Get life context (recurring + appointments + health hold)",
         description:
-          "MCP V2 — Kontext um das echte Leben (§8): aktiver HealthHold (Gesundheits-Zurückhaltung), " +
+          "MCP V2 — Kontext um das echte Leben (explain_model): aktiver HealthHold (Gesundheits-Zurückhaltung), " +
           "die Einstellungen der AUTOMATISCHEN Kontrollen (autoInspections: active/perDayMin/perDayMax/Schlaf-Fenster/" +
           "Fristen — read-only, nicht via MCP änderbar), die Reinigungs-Regeln (cleaning: allowed/" +
-          "maxMinutesPerBreak/maxPausesPerDay/usedToday/windows/windowOpenNow), der wiederkehrende " +
+          "maxMinutesPerBreak/maxPausesPerDay/usedToday/windows/windowOpenNow/windowsBinding/" +
+          "windowsBindingReason/openingAllowedNow — windows binden NUR während einer aktiven Sperrzeit, " +
+          "die Reinigen erlaubt; openingAllowedNow beantwortet direkt, ob JETZT eine Reinigungsöffnung " +
+          "erlaubt ist, statt windows/windowOpenNow selbst zu verrechnen), der wiederkehrende " +
           "Kontext (HO-Tage, Bürotage, Pilates …, weekday 0=So..6=Sa, deviceFree; ordinal/ordinalLabel " +
           "grenzt monatliche Slots ein — z.B. 'erster Mittwoch im Monat') und anstehende Termine " +
-          "(ab jetzt, geräte-frei-Flag). Für die Planung von Ankern/Kontrollen.",
-        inputSchema: {},
+          "(per Default ab jetzt, geräte-frei-Flag). Für die Planung von Ankern/Kontrollen. " +
+          "appointmentsFrom/-To öffnen vergangene Termine (lesbar UND via upsert_appointment(id) korrigierbar).",
+        inputSchema: {
+          appointmentsFrom: z.string().optional().describe("ISO-8601 untere Grenze für appointments (Default: jetzt)."),
+          appointmentsTo: z.string().optional().describe("ISO-8601 obere Grenze für appointments (optional)."),
+        },
       },
-      () => runTool("get_context", getContext),
+      (args) => runTool("get_context", (u) => getContext(u, args)),
     );
 
     server.registerTool(
@@ -481,7 +493,8 @@ function registerTools(server: McpServer) {
       {
         title: "Keyholder action log (audit + goal-change history)",
         description:
-          "MCP V2 — append-only Audit aller mutierenden V2-Aktionen mit reason + source: was hat welche " +
+          "Append-only Audit ALLER mutierenden Aktionen (V1 wie V2, seit B-03 — vorher nur V2) mit reason + " +
+          "decisionSource (agent|user-stated; umbenannt von source, kollidierte mit args.source) + actorLabel: was hat welche " +
           "Instanz wann mit welcher Begründung entschieden. Die nächste Instanz erbt Entscheidungen samt " +
           "Begründung. Für die AUTORITATIVE Ziel-Historie (auch UI-gesetzte Ziele) list_training_goals " +
           "nutzen; dieses Log liefert nur das Warum/Wann der MCP-Änderungen (filter tool=\"set_training_goal\"). " +
@@ -502,12 +515,32 @@ function registerTools(server: McpServer) {
       {
         title: "Heimdall box state (hardware enforcement)",
         description:
-          "MCP V2 — Zustand der elektronischen Schlüsselbox (§11): locked, lockUntil, battery, charging, " +
-          "online (lastSync < 10 min), lastSeen. hardwareEnforced ist die zuletzt GEMELDETE Absicht " +
-          "(bleibt bei offline unverändert stehen!) — für die reale Lage IMMER hardwareEnforcedEffective " +
-          "nutzen (nur true, wenn online UND hardwareEnforced; offline = faktisch Ehrensache, nicht " +
-          "verifizierbar). lockUntilStale = lockUntil liegt in der Vergangenheit UND die Box war seither " +
-          "nicht mehr online (Wert unbestätigt). null = keine Box registriert. Auch im keyholder_dashboard enthalten.",
+          "MCP V2 — Zustand der elektronischen Schlüsselbox (explain_model): locked (SOLL: soll die Box zu sein), " +
+          "reportedLocked (IST: war sie beim letzten Sync wirklich zu; kann vom SOLL abweichen — 'soll " +
+          "zu, steht offen und wartet auf Knopf/USB', denn zufahren tut die Box nur mit jemandem am " +
+          "Gerät; null = noch keine IST-Meldung, dann gilt das SOLL), lockUntil, battery, charging, " +
+          "lastSeen (letzter Sync). hardwareEnforced ist die EINE ehrliche Vollstreckungs-Antwort — " +
+          "hält die Box den Schlüssel gerade fest, UNABHÄNGIG davon, ob sie online ist (der zuletzt " +
+          "gemeldete Zustand gilt, bis die Box etwas anderes meldet). true nur, wenn das IST zu meldet " +
+          "UND keyInBox!==false UND !openArmed UND !staleLock. Ist hardwareEnforced false, nennt genau " +
+          "EIN Feld das WARUM: locked:false (soll offen), reportedLocked:false (steht offen), " +
+          "keyInBox:false (Ehrensache, Schlüssel beim Sub), openArmed:true (zu, aber ein Knopfdruck vom " +
+          "Offen entfernt) oder staleLock:true. openArmed = die Öffnung ist SCHARFGESTELLT: Frist " +
+          "verstrichen oder SOLL offen — seit FW 0.2.34 öffnet die Box dann nicht mehr von selbst, " +
+          "sondern beim nächsten Knopf/USB-Kontakt, ohne weitere Prüfung. staleLock = die Box hat sich " +
+          "seit dem letzten Sync per Offline-Failsafe (nach offlineOpenHours ohne Sync) selbst " +
+          "geöffnet — der einzige verbliebene deterministische Selbst-Öffner neben Akku-Not; passiert " +
+          "auch offline, „online\" spielt bewusst keine Rolle. " +
+          "keyInBox = Deklaration des Subs beim laufenden Verschluss: false heisst, der Schlüssel liegt " +
+          "NICHT in der Box (er trägt ihn bei sich, z.B. auf Reise) — dann hat die Box bewusst kein lock " +
+          "bekommen, und das ERKLÄRT ein hardwareEnforced:false, das sonst wie eine Box-Störung aussieht. " +
+          "null = nicht erklärt oder nicht verschlossen, also KEIN 'nein'. " +
+          "keySecured beantwortet direkt, was eine Alleinzeit-Vorgabe verlangt (Käfig zu UND " +
+          "Schlüssel drin): reportedLocked===true && keyInBox===true && !staleLock — beide MÜSSEN " +
+          "explizit true sein UND die Box darf sich nicht seit dem letzten Sync selbst geöffnet " +
+          "haben, kein Fallback auf locked wie bei hardwareEnforced. Nicht selbst aus " +
+          "reportedLocked+keyInBox zusammenrechnen (A-06, MCP-Befundliste 2026-07-17). " +
+          "boxState:null = keine Box registriert. Auch im keyholder_dashboard enthalten.",
         inputSchema: {},
       },
       () => runTool("get_box_state", getBoxState),
@@ -518,9 +551,29 @@ function registerTools(server: McpServer) {
     const KEYHOLDER_BASE =
       " Keyholder action (requires an admin OAuth token). Execute directly — NO confirmation step is " +
       "required or enforced; act on your own judgement per the human keyholder's rules in " +
-      "keyholder_dashboard.keyholderInstructions. Do not ask the user to confirm before calling this.";
+      "keyholder_dashboard.keyholderInstructions. Do not ask the user to confirm before calling this. " +
+      "`reason` is REQUIRED (audit log, see get_action_log). `dryRun:true` previews the effective " +
+      "arguments and the rules checkable without committing — NOT a full state check (that runs only " +
+      "on the real commit) and not logged to get_action_log.";
+    // B-03: Pflichtfeld für ALLE Write-Tools (V1 wie V2) — dieselbe Instanz für beide, damit die
+    // Beschreibung nicht zweimal gepflegt wird. V1-Tools werfen ohne reason in runWriteTool; V2 wirft
+    // in executeWrite (writeFramework.ts).
+    const reasonField = z.string().min(1).describe("REQUIRED: why you're doing this (audit log, get_action_log).");
+    // K-01 (leichte Variante): dryRun für alle 12 V1-Tools — zeigt die effektiven Argumente + die
+    // hier prüfbaren Regeln (mcpWrite.ts), OHNE zu committen. Bewusst EIGENES Feld statt des V2-
+    // `dryRunField` weiter unten: die V2-Vorschau prüft den vollen Service-Zustand (executeWrite
+    // ruft dieselbe preview()-Logik wie apply()); die V1-Vorschau tut das NICHT (siehe Docblock in
+    // mcpWrite.ts) — dieselbe Beschreibung für beide zu verwenden würde das V2-Versprechen aufweichen.
+    const dryRunFieldV1 = z.boolean().optional().describe("true = nur Vorschau, NICHT committen. Prüft Argument-Auflösung + die hier verfügbaren Regeln — NICHT alle service-internen Zustandsprüfungen (die laufen erst beim echten Commit).");
     // Notifizierende Keyholder-Tools (Lock/Periode/Orgasmus …) → Notify-Versprechen.
     const KEYHOLDER_NOTE = KEYHOLDER_BASE + " The user is notified by e-mail + push.";
+    // Tools, die auch auf TERMINIERTE (noch nicht ausgelöste) Direktiven wirken: dort schweigt der
+    // Tracker. Eine geplante Direktive ist für den Sub unsichtbar; sie zu melden verriete sie — genau
+    // das, was die Terminierung verhindern soll.
+    const SCHEDULED_SILENT =
+      " NOTE: if the directive is still SCHEDULED (not yet triggered), the user is NOT notified — " +
+      "they never learned it existed, and telling them now would disclose it. The response says which " +
+      "case applied.";
     // STILLE Keyholder-Tools → KEIN aktiver Notify (weder E-Mail noch Push). Nur die
     // notifizierenden Aktionen (Lock, Lock-Periode, Inspektion, Orgasmus) senden eine Nachricht.
     const KEYHOLDER_SILENT = KEYHOLDER_BASE + " The user is NOT notified (no e-mail/push).";
@@ -548,9 +601,11 @@ function registerTools(server: McpServer) {
           message: z.string().optional().describe("Message shown to the user."),
           delayMinutes: z.number().optional().describe("Delay before the request reaches the user, in minutes. Omit/0 = immediate."),
           scheduledAt: z.string().optional().describe("Absolute send time (ISO 8601). Overrides delayMinutes. The user cannot see the request until then."),
+          reason: reasonField,
+          dryRun: dryRunFieldV1,
         },
       },
-      (args, extra) => runWriteTool("request_lock", extra, (u) => mcpRequestLock(u, args)),
+      (args, extra) => runWriteTool("request_lock", extra, args, (u) => mcpRequestLock(u, args)),
     );
 
     server.registerTool(
@@ -569,9 +624,11 @@ function registerTools(server: McpServer) {
           message: z.string().optional().describe("Message shown to the user."),
           delayMinutes: z.coerce.number().optional().describe("Delay before the lock period starts/sends, in minutes. Omit/0 = immediate."),
           scheduledAt: z.string().optional().describe("Absolute start/send time (ISO 8601). Overrides delayMinutes."),
+          reason: reasonField,
+          dryRun: dryRunFieldV1,
         },
       },
-      (args, extra) => runWriteTool("set_lock_period", extra, (u) => mcpSetLockPeriod(u, args)),
+      (args, extra) => runWriteTool("set_lock_period", extra, args, (u) => mcpSetLockPeriod(u, args)),
     );
 
     server.registerTool(
@@ -586,9 +643,11 @@ function registerTools(server: McpServer) {
           deadlineHours: z.number().positive().optional().describe("Deadline in hours (default 4). Counts from when the inspection is triggered."),
           comment: z.string().optional().describe("Instruction shown to the user."),
           delayMinutes: z.coerce.number().optional().describe("Delay before the code reaches the user. Omit for a random 5–65 min delay; 0 = immediate; any other value is clamped to 5–65."),
+          reason: reasonField,
+          dryRun: dryRunFieldV1,
         },
       },
-      (args, extra) => runWriteTool("request_inspection", extra, (u) => mcpRequestInspection(u, args)),
+      (args, extra) => runWriteTool("request_inspection", extra, args, (u) => mcpRequestInspection(u, args)),
     );
 
     server.registerTool(
@@ -613,9 +672,11 @@ function registerTools(server: McpServer) {
           asPenalty: z.boolean().optional().describe("Only for art=ANWEISUNG: mark this directive as a penalty (e.g. mandatory ruined orgasm). If the sub ignores it, the stricter escalation applies (≥2× in 7 days → severe)."),
           requirePhoto: z.boolean().optional().describe("Require a photo when the sub logs the orgasm (server-enforced). Omit/false = a photo stays voluntary. You cannot see the photo; the keyholder can."),
           message: z.string().optional().describe("Message shown to the user."),
+          reason: reasonField,
+          dryRun: dryRunFieldV1,
         },
       },
-      (args, extra) => runWriteTool("request_orgasm", extra, (u) => mcpRequestOrgasm(u, args)),
+      (args, extra) => runWriteTool("request_orgasm", extra, args, (u) => mcpRequestOrgasm(u, args)),
     );
 
     server.registerTool(
@@ -636,9 +697,11 @@ function registerTools(server: McpServer) {
           validFrom: z.string().optional().describe("Goal start (ISO 8601, e.g. 2026-06-12). Omit to start now. May be a future date to schedule a goal in advance."),
           validUntil: z.string().optional().describe("Goal end (ISO 8601). Must be after validFrom. Omit for open-ended."),
           note: z.string().optional().describe("Note shown with the goal."),
+          reason: reasonField,
+          dryRun: dryRunFieldV1,
         },
       },
-      (args, extra) => runWriteTool("set_training_goal", extra, (u) => mcpSetTrainingGoal(u, args)),
+      (args, extra) => runWriteTool("set_training_goal", extra, args, (u) => mcpSetTrainingGoal(u, args)),
     );
 
     server.registerTool(
@@ -648,12 +711,14 @@ function registerTools(server: McpServer) {
         description:
           "Withdraws the user's currently open lock request, active lock period, open inspection, or orgasm directive. " +
           "Also cancels SCHEDULED (not yet triggered) directives of the same kind — a lock_request/lock_period/" +
-          "inspection whose wirksamAb is still in the future (see keyholder_dashboard.scheduledDirectives)." + KEYHOLDER_NOTE,
+          "inspection whose wirksamAb is still in the future (see keyholder_dashboard.scheduledDirectives)." + KEYHOLDER_NOTE + SCHEDULED_SILENT,
         inputSchema: {
           target: z.enum(["lock_request", "lock_period", "inspection", "orgasm_directive"]).describe("Which open directive to withdraw."),
+          reason: reasonField,
+          dryRun: dryRunFieldV1,
         },
       },
-      (args, extra) => runWriteTool("withdraw", extra, (u) => mcpWithdraw(u, args)),
+      (args, extra) => runWriteTool("withdraw", extra, args, (u) => mcpWithdraw(u, args)),
     );
 
     server.registerTool(
@@ -694,9 +759,11 @@ function registerTools(server: McpServer) {
             deadlineH: z.number().optional().describe("extra_control: control deadline in hours (default 4)."),
             requireCode: z.boolean().optional().describe("extra_control: require a fresh handwritten code in the photo (default true)."),
           }).optional().describe("Optional real measure executed on punish: extend_lock (Sperrzeit +hours; optional reinigungErlaubt/toiletteErlaubt), ruined_orgasm (mandatory ruined orgasm, marked as penalty; oeffnenErlaubt optional), mandatory_session (fully configurable: categoryId/minMinuten/delayMinutes/deviceId/requireVideo/windowHours), bigger_plug (next larger plug by size order; optional dauerH/fristH), extra_control (optional device/deadlineH/requireCode), deny_orgasm (reward-credit −1; rejected at 0), delay_orgasm (push active reward window by hours)."),
+          reason: reasonField,
+          dryRun: dryRunFieldV1,
         },
       },
-      (args, extra) => runWriteTool("judge_offense", extra, (u) => mcpJudgeOffense(u, args)),
+      (args, extra) => runWriteTool("judge_offense", extra, args, (u) => mcpJudgeOffense(u, args)),
     );
 
     server.registerTool(
@@ -711,9 +778,11 @@ function registerTools(server: McpServer) {
         inputSchema: {
           windowHours: z.number().positive().optional().describe("Window length in hours (default 24)."),
           openAllowed: z.boolean().optional().describe("Allow opening the device to perform the reward orgasm (default true)."),
+          reason: reasonField,
+          dryRun: dryRunFieldV1,
         },
       },
-      (args, extra) => runWriteTool("grant_reward", extra, (u) => mcpGrantReward(u, args)),
+      (args, extra) => runWriteTool("grant_reward", extra, args, (u) => mcpGrantReward(u, args)),
     );
 
     server.registerTool(
@@ -727,9 +796,11 @@ function registerTools(server: McpServer) {
         inputSchema: {
           category: z.string().optional().describe("Restrict to one category by name (case-insensitive; \"KG\" = chastity belt)."),
           all: z.boolean().optional().describe("Credit ALL reached goals at once. Default: only 1 per call (like the manual button)."),
+          reason: reasonField,
+          dryRun: dryRunFieldV1,
         },
       },
-      (args, extra) => runWriteTool("credit_reward", extra, (u) => mcpCreditReward(u, args)),
+      (args, extra) => runWriteTool("credit_reward", extra, args, (u) => mcpCreditReward(u, args)),
     );
 
     server.registerTool(
@@ -748,9 +819,11 @@ function registerTools(server: McpServer) {
           orgasmusZiel: z.enum(["KEINE", "ERFORDERLICH", "VERBOTEN"]).optional().describe("Orgasm goal: none / required / forbidden (default none)."),
           orgasmusRuiniert: z.boolean().optional().describe("Only with orgasmusZiel=ERFORDERLICH: the required orgasm must be ruined."),
           message: z.string().optional().describe("Instruction shown to the user."),
+          reason: reasonField,
+          dryRun: dryRunFieldV1,
         },
       },
-      (args, extra) => runWriteTool("request_session", extra, (u) => mcpRequestSession(u, args)),
+      (args, extra) => runWriteTool("request_session", extra, args, (u) => mcpRequestSession(u, args)),
     );
 
     server.registerTool(
@@ -758,10 +831,13 @@ function registerTools(server: McpServer) {
       {
         title: "List training goals",
         description:
-          "Lists all training goals (KG + categories) with their id, status (active/scheduled/expired), " +
-          "start/end dates, period targets and note. Use the id with edit_training_goal / delete_training_goal.",
+          "Lists training goals (KG + categories) with their id, status (active/scheduled/expired/deleted), " +
+          "start/end dates, period targets and note. Use the id with edit_training_goal / delete_training_goal. " +
+          "Soft-deleted goals (deletedAt set, status:'deleted') are hidden by default — this IS the authoritative " +
+          "goal history, including past ones, once includeDeleted:true is set.",
         inputSchema: {
           category: z.string().optional().describe('Filter by category name, e.g. "Plug". Omit for all.'),
+          includeDeleted: z.boolean().optional().describe("Include soft-deleted goals (status:'deleted', deletedAt set). Default false."),
         },
       },
       (args) => runTool("list_training_goals", (u) => mcpListTrainingGoals(u, args)),
@@ -784,21 +860,27 @@ function registerTools(server: McpServer) {
           validFrom: z.string().optional().describe("Goal start (ISO 8601). Omit to keep current."),
           validUntil: z.string().optional().describe("Goal end (ISO 8601). Must be after validFrom. Omit to keep current."),
           note: z.string().optional().describe("Note shown with the goal. Omit to keep current."),
+          reason: reasonField,
+          dryRun: dryRunFieldV1,
         },
       },
-      (args, extra) => runWriteTool("edit_training_goal", extra, (u) => mcpEditTrainingGoal(u, args)),
+      (args, extra) => runWriteTool("edit_training_goal", extra, args, (u) => mcpEditTrainingGoal(u, args)),
     );
 
     server.registerTool(
       "delete_training_goal",
       {
         title: "Delete a training goal",
-        description: "Deletes a training goal by id (get the id from list_training_goals)." + KEYHOLDER_SILENT,
+        description:
+          "Soft-deletes a training goal by id (get the id from list_training_goals). The goal is hidden from " +
+          "list_training_goals but kept for history — pass includeDeleted:true there to see it again." + KEYHOLDER_SILENT,
         inputSchema: {
           id: z.string().describe("Goal id from list_training_goals."),
+          reason: reasonField,
+          dryRun: dryRunFieldV1,
         },
       },
-      (args, extra) => runWriteTool("delete_training_goal", extra, (u) => mcpDeleteTrainingGoal(u, args)),
+      (args, extra) => runWriteTool("delete_training_goal", extra, args, (u) => mcpDeleteTrainingGoal(u, args)),
     );
 
     server.registerTool(
@@ -812,9 +894,11 @@ function registerTools(server: McpServer) {
           allowed: z.boolean().optional().describe("Allow cleaning pauses?"),
           maxMinutes: z.number().int().nonnegative().optional().describe("Max minutes per cleaning pause (clamped to 1–120)."),
           maxPerDay: z.number().int().nonnegative().optional().describe("Max pauses per day, 0 = unlimited (clamped to 0–20)."),
+          reason: reasonField,
+          dryRun: dryRunFieldV1,
         },
       },
-      (args, extra) => runWriteTool("set_cleaning", extra, (u) => mcpSetCleaning(u, args)),
+      (args, extra) => runWriteTool("set_cleaning", extra, args, (u) => mcpSetCleaning(u, args)),
     );
 
     // set_auto_inspections wird BEWUSST NICHT als MCP-Tool angeboten: der virtuelle Keyholder soll
@@ -831,9 +915,11 @@ function registerTools(server: McpServer) {
           "automatic check). Use request_inspection to ask for one, withdraw to cancel an open one." + KEYHOLDER_NOTE,
         inputSchema: {
           action: z.enum(["verify", "reject"]).describe("Accept (verify) or reject the submitted photo."),
+          reason: reasonField,
+          dryRun: dryRunFieldV1,
         },
       },
-      (args, extra) => runWriteTool("resolve_inspection", extra, (u) => mcpResolveInspection(u, args)),
+      (args, extra) => runWriteTool("resolve_inspection", extra, args, (u) => mcpResolveInspection(u, args)),
     );
 
     server.registerTool(
@@ -841,53 +927,24 @@ function registerTools(server: McpServer) {
       {
         title: "Change the active lock period's end",
         description:
-          "Extends or shortens the currently active lock period (Sperrzeit) by changing its end — without " +
-          "withdrawing and recreating it. Set indefinite=true for open-ended, or untilAt for a new end (must " +
-          "be in the future)." + KEYHOLDER_NOTE,
+          "Extends or shortens an open lock period (Sperrzeit) by changing its end — without " +
+          "withdrawing and recreating it. Works on a SCHEDULED lock period too; the new end is then delivered " +
+          "with the trigger notification. Set indefinite=true for open-ended, or untilAt for a new end (must " +
+          "be in the future). More than one lock period can be open at once (a scheduled one survives while " +
+          "the user re-locks); without id the already-TRIGGERED one is edited, and the answer names any others " +
+          "left untouched." + KEYHOLDER_NOTE + SCHEDULED_SILENT,
         inputSchema: {
           untilAt: z.string().optional().describe("New end (ISO 8601, future). Ignored if indefinite=true."),
           indefinite: z.boolean().optional().describe("Make the lock period open-ended."),
+          id: z.string().optional().describe(
+            "Edit THIS lock period (id from keyholder_dashboard.scheduledDirectives). Omit to edit the triggered one.",
+          ),
+          reason: reasonField,
+          dryRun: dryRunFieldV1,
         },
       },
-      (args, extra) => runWriteTool("edit_lock_period", extra, (u) => mcpEditLockPeriod(u, args)),
+      (args, extra) => runWriteTool("edit_lock_period", extra, args, (u) => mcpEditLockPeriod(u, args)),
     );
-
-    // ── LEGACY-V1-Note-Writes (add_keyholder_note, delete_keyholder_note) — durch upsert_note ersetzt ──
-    if (ENABLE_LEGACY_MCP) {
-    server.registerTool(
-      "add_keyholder_note",
-      {
-        title: "Add a keyholder note (wearing-behaviour observation)",
-        description:
-          LEGACY("upsert_note (Notes v2: type/pinned/refs, Supersession statt Delete)") +
-          "Records a private observation about the user's wearing behaviour for later evaluation — " +
-          "e.g. which KG draws complaints, reported pressure marks, escape attempts, hygiene issues. " +
-          "Optionally tag it with a KG (device) and a category. These notes are MCP-only (the user " +
-          "never sees them) and resurface in get_overview + list_keyholder_notes." + KEYHOLDER_SILENT,
-        inputSchema: {
-          text: z.string().min(1).describe("The observation (free text)."),
-          kg: z.string().optional().describe("Optional KG/device this concerns (e.g. the device name)."),
-          kategorie: z.string().optional().describe('Optional category/tag, e.g. "Druckstelle", "Ausbruchsversuch", "Gemecker".'),
-        },
-      },
-      (args, extra) => runWriteTool("add_keyholder_note", extra, (u) => mcpAddKeyholderNote(u, args)),
-    );
-
-    server.registerTool(
-      "delete_keyholder_note",
-      {
-        title: "Delete a keyholder note",
-        description:
-          LEGACY("upsert_note mit status=archived/superseded (auditierbar statt hartes Delete)") +
-          "Removes a keyholder note by id (e.g. an outdated or superseded observation). Get the id " +
-          "from get_overview.keyholderNotes or list_keyholder_notes." + KEYHOLDER_SILENT,
-        inputSchema: {
-          id: z.string().min(1).describe("The note id to delete."),
-        },
-      },
-      (args, extra) => runWriteTool("delete_keyholder_note", extra, (u) => mcpDeleteKeyholderNote(u, args)),
-    );
-    } // end ENABLE_LEGACY_MCP (add_keyholder_note, delete_keyholder_note)
 
     // ── MCP V2 WRITE tools — laufen durchs zentrale Write-Framework (Pflicht-reason + Audit + ──
     // ── Dry-Run + Transaktion + Diff). Alle agent-autonom (keine Berechtigungs-Stufen). ──
@@ -899,7 +956,9 @@ function registerTools(server: McpServer) {
     const CONTEXT_QUALITY_NOTE =
       " Lege sinnvollen, konkreten Kontext an statt trivialer oder lückenhafter Einträge — der Kontext " +
       "dient der Planung von Ankern/Kontrollen.";
-    const reasonField = z.string().min(1).describe("PFLICHT: Begründung der Aktion (Audit-Log).");
+    // reasonField ist oben (B-03, bei KEYHOLDER_BASE) einmal für V1 UND V2 gemeinsam definiert.
+    // dryRunField (V2, volle Vorschau) ist bewusst NICHT dasselbe Feld wie dryRunFieldV1 oben — siehe
+    // dessen Kommentar.
     const dryRunField = z.boolean().optional().describe("true = nur Vorschau/Konflikte, NICHT committen.");
     const decisionSourceField = z.enum(["agent", "user-stated"]).optional().describe("Audit-Quelle der Entscheidung: agent (eigener Schluss) | user-stated (vom Nutzer gesagt). Default agent.");
     const entityRefField = z.object({
@@ -908,6 +967,13 @@ function registerTools(server: McpServer) {
     });
     // Audit-Felder, die JEDES V2-Write-Tool trägt — einmal definiert, in jedes inputSchema gespreadet.
     const writeMetaFields = { reason: reasonField, dryRun: dryRunField, decisionSource: decisionSourceField };
+    // Optimistic-Concurrency-Token für Edit-fähige V2-Writes (Note, Device, Termin, Slot).
+    const expectedVersionField = z.number().int().min(1).optional().describe(
+      "Optimistic-Concurrency-Token: erwartete `version` des Objekts (steht in get_devices/query_notes/" +
+      "get_context und in jedem Write-Ergebnis). Weicht die aktuelle Version ab (anderer Schreiber " +
+      "dazwischen), wird der Write mit Konflikt-Fehler abgelehnt statt still zu überschreiben — dann " +
+      "neu lesen und mit der aktuellen Version wiederholen. Bei Edits empfohlen — beim Anlegen " +
+      "ungültig (eine neue Zeile hat noch keine Version).");
 
     server.registerTool(
       "upsert_note",
@@ -922,11 +988,12 @@ function registerTools(server: McpServer) {
         inputSchema: {
           ...writeMetaFields,
           id: z.string().optional().describe("Bestehende Note bearbeiten; weglassen = neue anlegen."),
+          expectedVersion: expectedVersionField,
           type: z.enum(NOTE_TYPES).optional().describe("Note-Typ (default OBSERVATION)."),
           text: z.string().optional().describe("Notiztext (Pflicht beim Anlegen)."),
-          kg: z.string().optional().describe("Optionaler KG/Gerät-Tag."),
+          kg: z.string().optional().describe("Optionaler KG/Gerät-Tag. Nennt er ein Inventar-Gerät (Name, case-insensitiv), wird automatisch ein device-Ref angelegt — die Note kommt dann inline mit get_devices."),
           kategorie: z.string().optional().describe("Optionaler Kategorie-Tag."),
-          pinned: z.boolean().optional().describe("Im Dashboard dauerhaft anpinnen (z.B. DIRECTIVE/BOUNDARY)."),
+          pinned: z.boolean().optional().describe("Im Dashboard dauerhaft anpinnen — wirkt NUR bei type DIRECTIVE/BOUNDARY (nur diese werden gepinnt ausgespielt); auf anderen Typen wird pinned:true abgelehnt."),
           source: z.enum(NOTE_SOURCE).optional().describe("user-stated (Nutzer-Fakt) | inferred (eigener Schluss). Default inferred."),
           confidence: z.enum(NOTE_CONFIDENCE).optional().describe("Konfidenz, v.a. bei inferred."),
           status: z.enum(NOTE_STATUS).optional().describe("Status setzen (z.B. archived = Soft-Delete)."),
@@ -964,21 +1031,26 @@ function registerTools(server: McpServer) {
       {
         title: "Set device decision metadata (v2)",
         description:
-          "Setzt die Entscheidungs-Metadaten eines Geräts (§2): securityLevel (" + SECURITY_LEVELS.join("|") + "), " +
+          "Setzt die Entscheidungs-Metadaten eines Geräts (explain_model): securityLevel (" + SECURITY_LEVELS.join("|") + "), " +
           "lookalikeClusterId (Geräte gleicher Optik in einen Cluster — Mismatch innerhalb ist dann nie ein " +
-          "Vergehen), abstreifbar, material, bauform, healthFlags, retentionNotes. Nur angegebene Felder ändern " +
-          "sich." + V2_WRITE_NOTE,
+          "Vergehen), pullOffRisk, material, bauform, healthFlags, retentionNotes, archived (true = aus dem " +
+          "aktiven Inventar nehmen). Nur angegebene Felder ändern " +
+          "sich. ACHTUNG lookalikeClusterId: KEIN lokales Metadatenfeld — es rechnet die Geräte-Attribution " +
+          "JEDER historischen Session mit Bild-Deklarations-Konflikt rückwirkend neu (inkl. device_stats + " +
+          "records-Zusammensetzung). Vor dem Setzen den dryRun-diff prüfen (N-14)." + V2_WRITE_NOTE,
         inputSchema: {
           ...writeMetaFields,
           deviceName: z.string().optional().describe("Gerät per Name (case-insensitiv). deviceName ODER deviceId."),
           deviceId: z.string().optional().describe("Gerät per id."),
-          securityLevel: z.enum(SECURITY_LEVELS).optional().describe("SECURING = sicherndes Gerät, TRUST_ONLY = Vertrauensgerät."),
+          expectedVersion: expectedVersionField,
+          securityLevel: z.enum(SECURITY_LEVELS).optional().describe("SECURING = sicherndes Gerät, TRUST_ONLY = Vertrauensgerät. V.a. für sichernde Geräte (KG, Halsreif); null ist keine Datenlücke."),
           lookalikeClusterId: z.string().nullable().optional().describe("Cluster-Tag gleich aussehender Geräte. null = entfernen."),
-          abstreifbar: z.boolean().optional().describe("Anti-Auszieh-Status."),
+          pullOffRisk: z.boolean().nullable().optional().describe("true = abstreifbar (unsicher), false = geprüft sicher, null = nie beurteilt."),
           material: z.string().nullable().optional().describe("Edelstahl | Kunststoff | Silikon."),
           bauform: z.string().nullable().optional().describe("flach | voll | standard | Plug ..."),
           healthFlags: z.array(z.string()).optional().describe("z.B. Druckstellen, scheuert, rutscht."),
           retentionNotes: z.string().nullable().optional().describe("z.B. 'njoy: rutscht beim Entspannen'."),
+          archived: z.boolean().optional().describe("true = archivieren (aus dem aktiven Inventar nehmen), false = reaktivieren."),
         },
       },
       (args, extra) => runV2Write(setDeviceMetaDef, extra, args),
@@ -989,7 +1061,7 @@ function registerTools(server: McpServer) {
       {
         title: "Set / clear health hold (v2)",
         description:
-          "Setzt oder löst die Gesundheits-Zurückhaltung (§8). active=true braucht healthReason " +
+          "Setzt oder löst die Gesundheits-Zurückhaltung (explain_model). active=true braucht healthReason " +
           "(z.B. 'Migräne/Aura', 'Nacht-Auszeit'); active=false löst den aktiven Hold. Erscheint im " +
           "keyholder_dashboard.healthHold. NUR nutzen bei gesundheitlichen Themen, die EFFEKTIV einen " +
           "Einfluss auf die Keuschhaltung haben (z.B. verhindern sie das Tragen, eine Kontrolle, eine " +
@@ -1016,6 +1088,7 @@ function registerTools(server: McpServer) {
         inputSchema: {
           ...writeMetaFields,
           id: z.string().optional().describe("Bestehenden Termin bearbeiten; weglassen = neuer."),
+          expectedVersion: expectedVersionField,
           when: z.string().optional().describe("Zeitpunkt (ISO 8601). Pflicht beim Anlegen."),
           typ: z.string().nullable().optional().describe("z.B. Therapie, Arzt."),
           deviceFree: z.boolean().optional().describe("Geräte-freier Termin?"),
@@ -1033,16 +1106,19 @@ function registerTools(server: McpServer) {
           "Legt einen wiederkehrenden Slot an oder bearbeitet ihn (id): HO-Tage, Bürotage, Pilates-Slots. " +
           "weekday 0=So..6=Sa. Ohne ordinal = JEDE Woche. Mit ordinal = nur der n-te <weekday> im Monat " +
           "(1..5) oder der letzte (-1) — z.B. 'erster Mittwoch im Monat' = weekday:3, ordinal:1. " +
-          "deviceFree markiert geräte-freie Slots. Echte, wiederkehrende Muster mit klarem `label` " +
-          "anlegen." + CONTEXT_QUALITY_NOTE + V2_WRITE_NOTE,
+          "deviceFree markiert geräte-freie Slots. exclusionDates nennt Daten, an denen der Slot " +
+          "AUSFÄLLT (Ferien/Feiertage) — damit 'Findet am X statt?' aus der API beantwortbar ist statt " +
+          "aus dem Freitext. Echte, wiederkehrende Muster mit klarem `label` anlegen." + CONTEXT_QUALITY_NOTE + V2_WRITE_NOTE,
         inputSchema: {
           ...writeMetaFields,
           id: z.string().optional().describe("Bestehenden Slot bearbeiten; weglassen = neuer."),
+          expectedVersion: expectedVersionField,
           label: z.string().optional().describe("Bezeichnung, z.B. 'Home Office' (Pflicht beim Anlegen)."),
           weekday: z.number().int().min(0).max(6).optional().describe("Wochentag 0=So..6=Sa (Pflicht beim Anlegen)."),
           ordinal: z.union([z.literal(-1), z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]).nullable().optional()
             .describe("Weglassen/null = jede Woche. 1..5 = n-ter <weekday> im Monat, -1 = letzter <weekday> im Monat."),
           deviceFree: z.boolean().optional().describe("Geräte-freier Slot?"),
+          exclusionDates: z.array(z.string()).optional().describe("Ausnahme-Daten YYYY-MM-DD, an denen der Slot NICHT stattfindet. Leeres Array = Ausnahmen löschen."),
           note: z.string().nullable().optional().describe("Notiz zum Slot."),
         },
       },

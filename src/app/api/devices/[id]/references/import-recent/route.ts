@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { requireApi } from "@/lib/authGuards";
+import { manageableDeviceOwner } from "@/lib/deviceAccess";
 import { importRecentVerschluss } from "@/lib/deviceReferenceService";
+import { serviceFailure, errorResponse } from "@/lib/serviceResult";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -11,18 +12,16 @@ type Params = { params: Promise<{ id: string }> };
  * Referenzen — Startbestand „Trainingsmaterial der letzten Wochen". Idempotent (per sourceEntryId).
  */
 export async function POST(req: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await requireApi();
+  if (session instanceof NextResponse) return session;
 
   const { id } = await params;
-  const device = await prisma.device.findUnique({ where: { id }, select: { userId: true } });
-  if (!device || (device.userId !== session.user.id && session.user.role !== "admin")) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
+  const ownerId = await manageableDeviceOwner(id, session.user.id, session.user.role);
+  if (!ownerId) return errorResponse(404, "NOT_FOUND");
 
   const body = await req.json().catch(() => ({}));
   const limit = typeof body.limit === "number" ? body.limit : 5;
-  const result = await importRecentVerschluss(id, device.userId, limit);
-  if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
+  const result = await importRecentVerschluss(id, ownerId, limit);
+  if (!result.ok) return serviceFailure(result);
   return NextResponse.json(result.data);
 }

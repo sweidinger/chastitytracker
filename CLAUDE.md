@@ -35,17 +35,27 @@ Deploys laufen über den GitHub-Actions-Workflow `.github/workflows/docker.yml` 
 **Regel — bei jedem `:latest`-Build auf `main` IMMER auch `:feature` mittaggen** (`tagFeature=true`), damit `:feature`-gepinnte Instanzen (trublue) nie hinter `main` zurückfallen. Ausnahme: ein Dispatch von einem noch ungemergten Feature-Branch soll NUR `:feature` taggen (kein `tagFeature` nötig — das ist bereits der Tag dieses Builds), damit `:latest` unberührt bleibt, bis gemergt ist.
 
 ```bash
-# main → Produktion (:latest) UND :feature gleichzeitig aktuell halten (Standardfall)
+# main → Produktion (:latest) UND :feature gleichzeitig aktuell halten (Standardfall).
+# Hier ist `instances` bewusst leer: ALLE Instanzen sollen den neuen Stand bekommen.
 gh workflow run docker.yml --ref main -f tagFeature=true
 
-# Feature-Branch (noch nicht gemergt) → nur :feature, :latest bleibt unberührt
-gh workflow run docker.yml --ref <feature-branch> -f tagFeature=true
+# Feature-Branch (noch nicht gemergt) → nur :feature, :latest bleibt unberührt.
+# `instances=trublue` ist PFLICHT — ohne das werden alle 27 Instanzen neu gestartet.
+gh workflow run docker.yml --ref <feature-branch> -f tagFeature=true -f instances=trublue
 
 # Instanz einmalig auf einen Tag umpinnen (z.B. trublue dauerhaft auf :feature)
 gh workflow run docker.yml --ref <branch> -f tagFeature=true -f channel=feature -f instances=trublue
 ```
 
-Weitere Dispatch-Inputs: `deploy` (Default `true` — nach dem Build auch deployen), `instances` (leer = alle Instanzen, empfohlen — explizite Namen erscheinen im öffentlichen Dispatch-Log, da das Repo public ist), `channel` (pinnt Ziel-Instanzen auf einen Tag um; leer = bestehende Pins beibehalten).
+Weitere Dispatch-Inputs: `deploy` (Default `true` — nach dem Build auch deployen), `instances`, `channel` (pinnt Ziel-Instanzen auf einen Tag um; leer = bestehende Pins beibehalten).
+
+**`instances` bei Feature-Tests IMMER explizit setzen (`-f instances=trublue`).** Leer bedeutet **alle 27 Instanzen** — das Deploy-Skript iteriert dann über jeden Ordner in `~/instances` und startet jede Instanz neu. Instanzen, die auf `:latest` gepinnt sind, ziehen zwar ihr unverändertes Image, kassieren aber trotzdem einen Neustart: eine vermeidbare Unterbrechung für fremde Nutzer, für einen Test, der nur die eigene Instanz betrifft.
+
+Der Instanzname `trublue` ist **nicht** schützenswert — es ist der Name des Repo-Inhabers und steht ohnehin in der Repo-URL (`trublue-2/chastitytracker`). Das Deploy-Skript anonymisiert seine Ausgabe ohnehin auf `Instanz <i>/<n>`, damit keine fremden Subdomains ins öffentliche Actions-Log gelangen. Fremde Instanznamen gehören nach wie vor nicht in einen Dispatch-Input.
+
+**Faustregel:** `instances` leer lassen nur bei einem echten Rollout auf `main`, wo alle Instanzen den neuen Stand bekommen sollen. Für jeden Feature-Test die Zielinstanz benennen.
+
+*(Vorfall 2026-07-10: ein `:feature`-Test wurde ohne `instances` dispatcht — 27 Instanzen neu gestartet, nötig gewesen wäre eine. Die frühere Fassung dieser Zeile empfahl ausdrücklich das Leerlassen.)*
 
 Nach dem Dispatch mit `gh run watch <run-id> --exit-status` oder `gh run view <run-id>` prüfen, ob `typecheck`, `build-and-push` und `deploy` grün sind.
 
@@ -102,7 +112,7 @@ Neben dem GHCR-Workflow oben läuft eine **`kg-tracker-beta`-Instanz auf dem NAS
 - `src/lib/webauthn.ts` – Passkey/WebAuthn Konfiguration (rpId, rpOrigin)
 - `src/lib/verifyCode.ts` – Vision: handschriftlichen Code im Foto erkennen + Siegel-Erkennung (via `src/lib/vision/`)
 - `src/lib/vision/` – Provider-Abstraktion für Bildverifikation; `VERIFY_PROVIDER=anthropic|local` umschaltbar (lokal = Ollama, OpenAI-kompatibel). Siehe `docs/local-vision.md`. Ohne konfigurierten Provider greift der lokale Tesseract-OCR-/Schärfe-Fallback (`src/lib/ocr.ts`, `src/lib/imageReadability.ts`)
-- `src/lib/telemetry.ts` – optionale Telemetrie (`TELEMETRY_URL` + `TELEMETRY_INSTANCE_ID`)
+- `src/lib/appMeta.ts` – `touchAppMeta()`/`markLastAction()`: Fire-and-forget-Zeitstempel in `AppMeta`, gelesen vom Portal-`sync-activity`-Cron (`lastUsedAt` in `proxy.ts`, `lastActionAt` bei echten Business-Aktionen)
 - `src/lib/serverLog.ts` – Server-seitiges Logging
 
 **API Routes:**
@@ -149,9 +159,16 @@ PORTAL_SHARED_SECRET=<secret>      # optional: Portal-Login JWT-Secret
 USE_ADMIN_RELATIONSHIPS=true       # optional: Admin↔User n:m Zuordnung aktivieren
 DB_ENCRYPTION_KEY=<64-hex-chars>   # optional: AES-256 Key für verschlüsselte DB-Felder (Anthropic API-Key)
                                    # Generieren: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-TELEMETRY_URL=<url>                # optional: Telemetrie-Endpunkt
-TELEMETRY_INSTANCE_ID=<id>         # optional: Instanz-Kennung
 BUILD_DATE=<iso-date>              # optional: wird beim Build gesetzt
+# Update-Check / anonyme Deployment-Zählung (siehe docs/update-check.md):
+DISABLE_UPDATE_CENSUS=true         # optional: Census aus, Update-Check lädt direkt von GitHub
+UPSTREAM_CHANGELOG_URL=<url>       # optional: eigene Changelog-Quelle (dann keine Census-Header)
+# OVERRIDE des Strafbuch-Stichtags der Reinigungsfenster-Regel (ISO-8601). NORMALERWEISE NICHT
+# SETZEN: den Stichtag schreibt die Migration `20260714210000_cleaning_window_enforced_from` beim
+# ersten Boot jeder Instanz selbst in `AppMeta.cleaningWindowEnforcedFrom` — also genau dann, wenn
+# DIESE Instanz die Regel bekommt. Das Strafbuch ist eine LIVE-Ableitung: Öffnungen VOR dem Stichtag
+# werden ohne Fenster-Prüfung beurteilt. Diese Variable nur zum bewussten Rückdatieren/Korrigieren.
+CLEANING_WINDOW_ENFORCED_FROM=<iso-date>   # optional
 # Selfhosted-KI Health-Check (nur relevant bei lokalem Vision-/Embedding-Backend):
 HEALTHCHECK_INTERVAL_MIN=5         # optional: Prüfintervall in Minuten (Default 5)
 HEALTHCHECK_ALERT_EMAIL=<email>    # optional: Mail-Alarm bei Ausfall (leer = nur Log). Bei mehreren
@@ -223,9 +240,15 @@ Diese Regeln verhindern, dass gleiche Features unterschiedlich implementiert wer
 - `src/app/hooks/usePhotoUpload.ts` — Upload + EXIF + Seal-Detect (für alle Foto-Forms)
 
 **Utilities:**
-- `src/lib/authGuards.ts` — `requireAdminApi()`, `assertAdmin()`
+- `src/lib/authGuards.ts` — `requireApi()` (Plain-Session-Guard, gibt die Session zurück), `requireAdminApi()`, `requireKeyholderOrAdminApi()`, `assertAdmin()`, `assertKeyholderOrAdmin()`
+- `src/lib/userSelfField.ts` — `userSelfFieldRoute()` für „User ändert EIN eigenes Feld"-PATCH-Routen (nur `SELF_EDITABLE_USER_FIELDS`)
+- `src/lib/apiClient.ts` — Client-seitig: `parseApiErrorCode()` (stabiler Fehler-Code aus einer Antwort, nie werfend → via `useApiError()` auflösen), `parseApiError()` (nur für Routen, deren `error` schon eine anzeigbare Meldung ist), `entryRequest()` (URL+Init für POST/PATCH `/api/entries`), `postAdminEntry()`/`submitAdminEntry()` — **nie** wieder `res.json().catch(() => ({}))` von Hand
+- `src/lib/codedError.ts` — `codedError(code)`/`codeOf(e)`: Fehler mit stabilem `_code`-Tag, um eine Transaktion abzubrechen und den Code AUSSERHALB (auch über Modulgrenzen) wieder einzufangen. Bewusst **importfrei** (per Test abgesichert), damit es aus client-erreichbaren Modulen benutzbar bleibt (`constants.ts` → `entryErrors.ts` → hier) — **nie** wieder `Object.assign(new Error(…), { _code })` oder `(e as {_code?: string})?._code` von Hand
+- `src/lib/serviceResult.ts` — `ServiceResult<T>` + `serviceResponse()` (Result → `NextResponse`). Dazu die HTTP-förmige Fehler-Schicht über `codedError`: `serviceErrors(table)` bindet Wurf- und Fang-Seite an EINE Tabelle (nur Tabellen-Keys sind werfbar → Tippfehler = Compile-Fehler statt stillem 500), `mapServiceError(e, table)` übersetzt einen erwarteten Code in ein `ServiceResult` (`null` = echter Defekt, weiterwerfen)
+- `src/lib/entryErrors.ts` — Stabile Fehler-Codes der Entry-Routen (`ENTRY_GUARD_CODES`, `ENTRY_VALIDATION_CODES`, `ENTRY_ROUTE_CODES`) + `entryGuardError()`/`entryGuardCode()` (auf `codedError.ts` aufgesetzt, mit getypter Code-Whitelist). Jeder Code braucht einen Key im `errors`-Namespace beider `messages/*.json` — `entryErrors.test.ts` erzwingt das
 - `src/lib/constants.ts` — `VALID_TYPES`, `OEFFNEN_GRUENDE`, `ORGASMUS_ARTEN`, `isValidImageUrl()`, `validatePassword()`, `parseOrgasmusArtBase()`, `PASSWORD_MIN_LENGTH`, `BCRYPT_MAX_BYTES`
-- `src/lib/utils.ts` — `buildWearPairs()`, `wearingHoursFromPairs()`, `isTimeCorrected()`, `formatDuration()`, `formatDateTime()`, `toDatetimeLocal()`
+- `src/lib/utils.ts` — `buildWearPairs()`, `wearingHoursFromPairs()`, `isTimeCorrected()`, `formatDuration()`, `formatDateTime()`, `toDatetimeLocal()`, `tzOffsetMsAt()` (TZ-Offset-Mess-Primitiv, gecachte Formatter), `decomposeMs()` (ms → Tage/Std/Min/Sek) — **nie** wieder `Intl…formatToParts` für Offsets oder `% 86_400_000` von Hand
+- `src/lib/delayedTrigger.ts` — `computeDelayedTrigger()`: die `{wirksamAb, benachrichtigtAt}`-Konvention für terminierte Anforderungen (Kontrolle + Verschluss)
 - `src/lib/queries.ts` — `getIsLocked()`, `getActiveVorgabe()`
 - `src/lib/kontrollePills.ts` — `ANFORDERUNG_PILLS`, `getKombinierterPill()`
 - `src/lib/compressImage.ts` — Client-seitige Bildkomprimierung vor Upload
@@ -235,6 +258,9 @@ Diese Regeln verhindern, dass gleiche Features unterschiedlich implementiert wer
 - `src/lib/login-attempts.ts` — Login-Versuchs-Tracking
 - `src/lib/vorgaben.ts` — Trainings-Vorgaben Berechnungslogik
 - `src/app/dashboard/EntryActions.tsx` — Drei-Punkte-Menü (Edit + optional Delete)
+
+### MCP schemaVersion-Disziplin
+- Jede MCP-Deep-View trägt eine `schemaVersion`. **Ändert sich Semantik eines Felds oder fällt ein Feld weg, MUSS die schemaVersion des betroffenen Tools erhöht werden** — sonst sind historische Werte rückwirkend uninterpretierbar (Vorfall 16.07.2026: `hardwareEnforced` zweimal umgedeutet bei unveränderter Version 2). Rein additive Felder brauchen keinen Bump.
 
 ### Changelog
 - Erlaubte `type`-Werte: `feat`, `fix`, `security`, `perf`, `chore`, `ui` — **nicht** `refactor`

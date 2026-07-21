@@ -11,23 +11,73 @@ export function formatHoursHMCompact(h: number): string {
   return formatHoursHM(h).slice(0, -1);
 }
 
+/** Einheiten-Kürzel für „Tage" nach Locale. Prefix-Vergleich, damit auch regionale Tags
+ *  (`"en-US"`, `"en-GB"`) als Englisch zählen — `"de-CH"` bleibt bei "T". */
+function dayUnit(locale: string): string {
+  return locale.startsWith("en") ? "d" : "T";
+}
+
 export function formatHours(h: number, locale = "de"): string {
   const days = Math.floor(h / 24);
   const hours = Math.round(h % 24);
-  const d = locale.startsWith("en") ? "d" : "T";
+  const d = dayUnit(locale);
   const parts: string[] = [];
   if (days > 0) parts.push(`${days}${d}`);
   if (hours > 0 || parts.length === 0) parts.push(`${hours}h`);
   return parts.join(" ");
 }
 
+/** Auf eine Nachkommastelle runden. */
+export const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/** Millisekunden → Stunden, auf eine Nachkommastelle gerundet. */
+export const msToHours = (ms: number) => round1(ms / 3_600_000);
+
+/** Median einer Zahlenliste (leere Liste → 0). */
+export function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const s = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+/** Die Kennzahlen einer Dauern-Liste in ms. EINE Ableitung für die Geräte-Nutzung (UI, `deviceUsage`)
+ *  und `device_stats` (MCP) — sonst nennen Chat und Statistik-Seite verschiedene Zahlen zur selben
+ *  Frage. Der MCP rechnet die ms erst am Rand in Stunden um (`msToHours`).
+ *  Leere Liste → alles 0 (der Aufrufer legt gar nicht erst einen Topf ohne Dauern an). */
+export function summarizeDurations(durations: number[]): {
+  count: number; totalMs: number; avgMs: number; medianMs: number; minMs: number; maxMs: number;
+} {
+  if (durations.length === 0) return { count: 0, totalMs: 0, avgMs: 0, medianMs: 0, minMs: 0, maxMs: 0 };
+  const totalMs = durations.reduce((a, b) => a + b, 0);
+  return {
+    count: durations.length,
+    totalMs,
+    avgMs: totalMs / durations.length,
+    medianMs: median(durations),
+    minMs: Math.min(...durations),
+    maxMs: Math.max(...durations),
+  };
+}
+
+/** Zerlegt eine Dauer in Tage/Stunden/Minuten/Sekunden (jeweils abgerundet, Rest-basiert).
+ *  Nur die ZERLEGUNG ist geteilt — die Zusammensetzung bleibt je Formatter eigen, weil sich
+ *  Einheiten ("m" vs "min"), Null-Behandlung ("–") und Minuten-Unterdrückung unterscheiden. */
+export function decomposeMs(ms: number): { days: number; hours: number; minutes: number; seconds: number } {
+  const totalSeconds = Math.floor(ms / 1000);
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  return {
+    days: Math.floor(totalMinutes / 1440),
+    hours: Math.floor((totalMinutes % 1440) / 60),
+    minutes: totalMinutes % 60,
+    seconds: totalSeconds % 60,
+  };
+}
+
 export function formatMs(ms: number, locale = "de"): string {
   if (ms <= 0) return "–";
-  const totalMinutes = Math.floor(ms / 60000);
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = Math.floor((totalMinutes % 1440) / 60);
-  const mins = totalMinutes % 60;
-  const d = locale.startsWith("en") ? "d" : "T";
+  const { days, hours, minutes: mins } = decomposeMs(ms);
+  const d = dayUnit(locale);
   const parts: string[] = [];
   if (days > 0) parts.push(`${days}${d}`);
   if (hours > 0) parts.push(`${hours}h`);
@@ -39,11 +89,8 @@ export function formatDuration(start: Date, end: Date, locale = "de"): string {
   const ms = end.getTime() - start.getTime();
   if (ms < 0) return "–";
 
-  const totalMinutes = Math.floor(ms / 60000);
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = Math.floor((totalMinutes % 1440) / 60);
-  const minutes = totalMinutes % 60;
-  const d = locale.startsWith("en") ? "d" : "T";
+  const { days, hours, minutes } = decomposeMs(ms);
+  const d = dayUnit(locale);
 
   const parts: string[] = [];
   if (days > 0) parts.push(`${days}${d}`);
@@ -118,10 +165,14 @@ export function formatMonthYear(date: Date | string, locale = "de-CH", tz = APP_
   });
 }
 
+/** Eigener Formatter statt `offsetFormatter`: dessen `hour12:false` liefert an lokaler Mitternacht
+ *  je nach ICU `hour: "24"` MIT dem Datum des Vortags — für reine Datums-Teile wäre das der falsche
+ *  Tag. Ohne Stunden-Feld tritt der Fall nicht auf. Cache-Begründung siehe `memoFormatter`. */
+const datePartsFormatters = new Map<string, Intl.DateTimeFormat>();
+
 /** Returns { year, 0-based month, day } of `d` in `tz` (default APP_TZ). */
 export function tzDateParts(d: Date, tz = APP_TZ): { year: number; month: number; day: number } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
+  const parts = memoFormatter(datePartsFormatters, tz, {
     year: "numeric", month: "numeric", day: "numeric",
   }).formatToParts(d);
   const get = (type: string) => +(parts.find(p => p.type === type)?.value ?? "0");
@@ -165,21 +216,66 @@ export function formatDayTimeDual(date: Date | string, locale: string, viewerTz:
   return formatDual(date, locale, viewerTz, subTz, subLabel, (d, l, tz) => `${formatDayMonth(d, l, tz)} ${formatTime(d, l, tz)}`);
 }
 
+/** `Intl.DateTimeFormat` ist teuer im Bau (Locale-/TZ-Daten-Lookup), aber zustandslos und damit
+ *  beliebig wiederverwendbar. Gecacht pro Zeitzone: `StatsMain` ruft `midnightInTZ` einmal pro
+ *  Kalendertag auf (~120 pro Render) — ohne Cache wären das ebenso viele Wegwerf-Formatter.
+ *  Der Schlüsselraum ist durch die IANA-Zonen der User beschränkt, ein LRU wäre Overkill. */
+function memoFormatter(cache: Map<string, Intl.DateTimeFormat>, tz: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  let fmt = cache.get(tz);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, ...options });
+    cache.set(tz, fmt);
+  }
+  return fmt;
+}
+
+const offsetFormatters = new Map<string, Intl.DateTimeFormat>();
+function offsetFormatter(tz: string): Intl.DateTimeFormat {
+  return memoFormatter(offsetFormatters, tz, {
+    hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+}
+
+
+/**
+ * Wie weit `tz` zum Instant `utcMs` VOR UTC liegt, in Millisekunden (CET = +1h → 3_600_000).
+ *
+ * Das ist nur das Mess-Primitiv. Welcher Instant als ANKER gemessen wird — und ob ein zweiter
+ * Pass nötig ist — entscheidet jeder Aufrufer selbst:
+ *   · `dateAtLocalMinutes` – Anker der Ziel-Instant selbst, 1 Pass (`midnightInTZ` = Minute 0)
+ *   · `fromDatetimeLocal`  – 2 Pässe (Nachmessen am Kandidaten), am genauesten
+ * Die verbleibende 1-Pass/2-Pass-Trennung NICHT aufheben. Der zweite Pass löst Wanduhrzeiten in der
+ * Stunde nach einer Vorwärts-Wende korrekt auf, faltet aber eine nicht existierende Mitternacht auf
+ * den VORTAG zurück — in Zonen mit Wende um 00:00 (America/Santiago, Asia/Beirut) bekäme
+ * `midnightInTZ` damit den falschen Kalendertag. Für Wanduhrzeiten aus User-Eingaben ist der zweite
+ * Pass richtig, für Tages-Grenzen der erste.
+ */
+export function tzOffsetMsAt(utcMs: number, tz: string): number {
+  const p = offsetFormatter(tz).formatToParts(new Date(utcMs));
+  const g = (type: string) => +(p.find(x => x.type === type)?.value ?? "0");
+  const h = g("hour") === 24 ? 0 : g("hour");
+  return Date.UTC(g("year"), g("month") - 1, g("day"), h, g("minute"), g("second")) - utcMs;
+}
+
+/** Returns the Date at `minutesSinceMidnight` local wall-clock time in `tz` (default APP_TZ), on the
+ *  same calendar date as `d`. DST-safe for times reasonably far from a transition: looks up the UTC
+ *  offset actually in effect AT that wall-clock instant, anchored at the target time itself — so e.g.
+ *  a window end of 04:00 on a spring-forward day still resolves correctly, unlike naively adding a
+ *  flat millisecond offset to the day's midnight. Not exact for a target that falls exactly inside
+ *  the 1-hour DST gap/fold itself (01:00–03:00 local on the ~2 transition days/year) — no real
+ *  cleaning window is configured there. */
+export function dateAtLocalMinutes(d: Date, minutesSinceMidnight: number, tz = APP_TZ): Date {
+  const { year, month, day } = tzDateParts(d, tz);
+  const guessUTC = Date.UTC(year, month, day, 0, minutesSinceMidnight);
+  // Anker ist der Ziel-Instant selbst (ein Pass) — siehe tzOffsetMsAt.
+  return new Date(guessUTC - tzOffsetMsAt(guessUTC, tz));
+}
+
 /** Returns the Date representing 00:00:00 in `tz` (default APP_TZ) on the same calendar date as `d`. */
 export function midnightInTZ(d: Date, tz = APP_TZ): Date {
-  const { year, month, day } = tzDateParts(d, tz);
-  // Compute TZ offset at noon of that calendar day (safe from DST edge cases)
-  const noonUTC = Date.UTC(year, month, day, 12);
-  const p = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    year: "numeric", month: "numeric", day: "numeric",
-    hour: "numeric", minute: "numeric", second: "numeric",
-    hour12: false,
-  }).formatToParts(new Date(noonUTC));
-  const g = (type: string) => +(p.find(x => x.type === type)?.value ?? "0");
-  const h = g("hour");
-  const tzNoonMs = Date.UTC(g("year"), g("month") - 1, g("day"), h === 24 ? 0 : h, g("minute"), g("second"));
-  return new Date(Date.UTC(year, month, day) + (noonUTC - tzNoonMs));
+  return dateAtLocalMinutes(d, 0, tz);
 }
 
 /** Today at 00:00:00 in `tz` (default APP_TZ) */
@@ -187,12 +283,18 @@ export function getMidnightToday(now: Date, tz = APP_TZ): Date {
   return midnightInTZ(now, tz);
 }
 
+const WEEKDAY_INDEX: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+/** Wochentag von `d` in `tz`, montagsbasiert: Mo=0 … So=6. */
+export function mondayIndex(d: Date, tz = APP_TZ): number {
+  const wd = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" })
+    .formatToParts(d).find(p => p.type === "weekday")!.value;
+  return ((WEEKDAY_INDEX[wd] ?? 0) + 6) % 7;
+}
+
 /** Start of the current ISO week (Monday 00:00:00 in `tz`, default APP_TZ) */
 export function getWeekStart(now: Date, tz = APP_TZ): Date {
-  const p = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).formatToParts(now);
-  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-  const dow = ((map[p.find(x => x.type === "weekday")!.value] ?? 0) + 6) % 7;
-  return new Date(midnightInTZ(now, tz).getTime() - dow * 86_400_000);
+  return new Date(midnightInTZ(now, tz).getTime() - mondayIndex(now, tz) * 86_400_000);
 }
 
 /** First day of the current month at 00:00:00 in `tz` (default APP_TZ) */
@@ -221,14 +323,8 @@ export function getYearEnd(now: Date, tz = APP_TZ): Date {
 
 /** Live-elapsed format: always includes minutes ("2T 3h 14min"). Takes pre-computed ms. */
 export function formatElapsedMs(ms: number, locale: string, showSeconds = false): string {
-  const safe = Math.max(0, ms);
-  const totalSeconds = Math.floor(safe / 1000);
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = Math.floor((totalMinutes % 1440) / 60);
-  const minutes = totalMinutes % 60;
-  const seconds = totalSeconds % 60;
-  const d = locale === "en" ? "d" : "T";
+  const { days, hours, minutes, seconds } = decomposeMs(Math.max(0, ms));
+  const d = dayUnit(locale);
   const parts: string[] = [];
   if (days > 0) parts.push(`${days}${d}`);
   if (hours > 0) parts.push(`${hours}h`);
@@ -251,26 +347,35 @@ export function isTimeCorrected(time: Date, submittedAt: Date | null | undefined
   return time.getTime() < submittedAt.getTime() - TIME_CORRECTION_THRESHOLD_MS;
 }
 
-export type AnforderungStatus = "open" | "overdue" | "fulfilled" | "late" | "withdrawn" | "scheduled";
+export type AnforderungStatus = "open" | "overdue" | "fulfilled" | "late" | "withdrawn" | "scheduled" | "missed";
 export type VerifikationStatus = "unverified" | "pending" | "ai" | "manual" | "rejected";
+
+/** True if a deadline passed without a timely completion — completed after the deadline, or not
+ *  yet completed and the deadline is already past. Shared primitive behind the Kontrolle "late"
+ *  status and the Strafbuch late-lock / cleaning-relock detectors (src/lib/strafbuch.ts). */
+export function isPastDeadlineUnfulfilled(deadline: Date, completedAt: Date | null, now: Date): boolean {
+  return completedAt ? completedAt > deadline : deadline < now;
+}
 
 /** Derives AnforderungStatus: was the kontrolle submitted, and was it on time?
  *  fulfilledAt is server-set at submission time and immutable – never use entryTime for deadline comparison.
  *  `scheduled`: keyholder-set, not yet triggered (wirksamAb in the future) — only ever surfaced in
- *  keyholder views (the Sub never sees scheduled directives). */
+ *  keyholder views (the Sub never sees scheduled directives).
+ *  `missed`: die Eskalation (Stufe 2) hat die Kontrolle als versäumt abgeschlossen und das Gerät
+ *  auto-entfernt. Sie setzt AUCH `withdrawnAt` (damit die Zeile aus der Fällig-Query fällt) — die
+ *  Prüfung muss deshalb VOR `withdrawn` stehen, sonst sähe ein Versäumnis aus wie ein Rückzug. */
 export function mapAnforderungStatus(
-  k: { withdrawnAt: Date | null; entryId: string | null; deadline: Date; fulfilledAt?: Date | null; wirksamAb?: Date | null },
+  k: { withdrawnAt: Date | null; entryId: string | null; deadline: Date; fulfilledAt?: Date | null; wirksamAb?: Date | null; autoMarkedRemovedAt: Date | null },
   _entryTime: Date | null,
   now: Date
 ): AnforderungStatus {
+  if (k.autoMarkedRemovedAt) return "missed";
   if (k.withdrawnAt) return "withdrawn";
   if (!k.entryId) {
     if (k.wirksamAb && k.wirksamAb > now) return "scheduled";
     return k.deadline < now ? "overdue" : "open";
   }
-  const submittedAt = k.fulfilledAt ?? null;
-  if (!submittedAt) return k.deadline < now ? "late" : "fulfilled"; // Fallback für alte Daten ohne fulfilledAt
-  return submittedAt > k.deadline ? "late" : "fulfilled";
+  return isPastDeadlineUnfulfilled(k.deadline, k.fulfilledAt ?? null, now) ? "late" : "fulfilled";
 }
 
 /** Normalizes a raw verifikationStatus string to VerifikationStatus */
@@ -291,9 +396,12 @@ export type PairTypes = { close: string; open: string };
 export const KG_PAIR: PairTypes = { close: "VERSCHLUSS", open: "OEFFNEN" };
 export const WEAR_PAIR: PairTypes = { close: "WEAR_BEGIN", open: "WEAR_END" };
 
+/** Keine `categoryId`-Option: nach Kategorie zu paaren ist strukturell falsch, weil zwei Geräte
+ *  derselben Kategorie gleichzeitig getragen werden können — der Ein-Slot-Zustandsautomat unten
+ *  bildet immer nur EIN offenes Gerät ab. Wer je Kategorie rechnen will, paart je GERÄT und
+ *  gruppiert danach: `wearSessionPairsByCategory` / `wearHourPairsByCategory` in `sessionModel.ts`. */
 export type BuildPairsOptions = {
   types?: PairTypes;
-  categoryId?: string | null;
   /** Only honored when `types === KG_PAIR`. Ignored for WEAR_PAIR. */
   reinigung?: ReinigungSettings;
 };
@@ -302,6 +410,12 @@ type PairResult<E, K> = {
   verschluss: E;
   oeffnen: E | null;
   active: boolean;
+  /** True nur für ein Pair, das die Anomalie "zwei Schliess-Einträge ohne dazwischenliegenden
+   *  Öffnen-Eintrag" abbildet (siehe buildPairs). `active` wird für solche Pairs auf `true` gesetzt,
+   *  damit das Invariant `oeffnen===null ⟺ active` hält — Konsumenten, die "die aktuell laufende
+   *  Session" suchen (statt nur das Invariant zu respektieren), müssen `orphaned` zusätzlich
+   *  ausschliessen, sonst kann ein längst überholter Eintrag als "gerade jetzt aktiv" erscheinen. */
+  orphaned?: boolean;
   kontrollen: K[];
   interruptions: { oeffnen: E; verschluss: E }[];
 };
@@ -310,38 +424,31 @@ type PairResult<E, K> = {
 function isLegacyReinigungArg(arg: unknown): arg is ReinigungSettings {
   return !!arg && typeof arg === "object"
     && "erlaubt" in arg
-    && !("types" in arg) && !("categoryId" in arg) && !("reinigung" in arg);
+    && !("types" in arg) && !("reinigung" in arg);
 }
 
 function normalizeBuildPairsOptions(
   arg?: ReinigungSettings | BuildPairsOptions,
-): { types: PairTypes; reinigung: ReinigungSettings | undefined; categoryId: string | null } {
-  if (!arg) return { types: KG_PAIR, reinigung: undefined, categoryId: null };
-  if (isLegacyReinigungArg(arg)) return { types: KG_PAIR, reinigung: arg, categoryId: null };
-  return {
-    types: arg.types ?? KG_PAIR,
-    reinigung: arg.reinigung,
-    categoryId: arg.categoryId ?? null,
-  };
+): { types: PairTypes; reinigung: ReinigungSettings | undefined } {
+  if (!arg) return { types: KG_PAIR, reinigung: undefined };
+  if (isLegacyReinigungArg(arg)) return { types: KG_PAIR, reinigung: arg };
+  return { types: arg.types ?? KG_PAIR, reinigung: arg.reinigung };
 }
 
-/** Filters entries to the given pair-types and optional categoryId, then sorts ascending by startTime. */
-function filterAndSortPairEntries<E extends { type: string; startTime: Date; device?: { categoryId?: string | null } | null }>(
+/** Filters entries to the given pair-types, then sorts ascending by startTime. */
+function filterAndSortPairEntries<E extends { type: string; startTime: Date }>(
   entries: E[],
   types: PairTypes,
-  categoryId: string | null,
 ): E[] {
   return [...entries]
-    .filter((e) =>
-      (e.type === types.close || e.type === types.open) &&
-      (!categoryId || e.device?.categoryId === categoryId),
-    )
+    .filter((e) => e.type === types.close || e.type === types.open)
     .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
 }
 
 /** Builds close/open pairs with associated Kontrollen, newest first.
- *  Defaults to KG (VERSCHLUSS/OEFFNEN). Pass `{ types: WEAR_PAIR, categoryId }` for
- *  user-defined categories. Reinigungs-interruption only applies to KG pairs.
+ *  Defaults to KG (VERSCHLUSS/OEFFNEN). Pass `{ types: WEAR_PAIR }` for user-defined categories —
+ *  dann aber je GERÄT (siehe `buildWearSessions`), nie über eine ganze Kategorie hinweg.
+ *  Reinigungs-interruption only applies to KG pairs.
  *
  *  Backward-compat: a bare `ReinigungSettings` as the 3rd arg is accepted (legacy callers). */
 export function buildPairs<
@@ -358,10 +465,10 @@ export function buildPairs<
   kontrollen: K[],
   reinigungOrOptions?: ReinigungSettings | BuildPairsOptions,
 ): PairResult<E, K>[] {
-  const { types, reinigung, categoryId } = normalizeBuildPairsOptions(reinigungOrOptions);
+  const { types, reinigung } = normalizeBuildPairsOptions(reinigungOrOptions);
   const reinigungActive = types === KG_PAIR && reinigung?.erlaubt === true;
 
-  const asc = filterAndSortPairEntries(entries, types, categoryId);
+  const asc = filterAndSortPairEntries(entries, types);
 
   const pairs: PairResult<E, K>[] = [];
   let pending: E | null = null;
@@ -384,7 +491,15 @@ export function buildPairs<
           pending = e;
         }
       } else {
-        if (pending) pairs.push({ verschluss: pending, oeffnen: null, active: false, kontrollen: [], interruptions: currentInterruptions });
+        if (pending) {
+          // Daten-Anomalie: zwei Schliess-Einträge ohne dazwischenliegenden Öffnen-Eintrag (z.B.
+          // Admin-Backdating, das zwischen ein bestehendes Paar rutscht). `active:true` hält das
+          // Invariant oeffnen===null ⟺ active — Konsumenten der "aktuell laufenden Session"
+          // müssen zusätzlich `orphaned` ausschliessen (siehe `getOpenPair`/`PairResult`).
+          // Sichtbar für den Keyholder über `get_session`s `dataQualityFlags` (sessions.ts), nicht
+          // hier geloggt — buildPairs läuft mehrfach pro Request, ein Log hier wäre reiner Lärm.
+          pairs.push({ verschluss: pending, oeffnen: null, active: true, orphaned: true, kontrollen: [], interruptions: currentInterruptions });
+        }
         currentInterruptions = [];
         pending = e;
       }
@@ -432,9 +547,45 @@ export function buildPairs<
   return pairs.reverse();
 }
 
+/** Die tatsächlich aktuell laufende Session/Pair aus einem `buildPairs`-Ergebnis. `active` allein
+ *  reicht nicht: ein verwaistes Pair (siehe `orphaned` auf `PairResult`) bekommt `active:true` nur,
+ *  um das Invariant oeffnen===null ⟺ active zu halten — es ist keine echte laufende Session.
+ *  EINZIGE Stelle für diesen Check, damit ein künftiger Aufrufer den `orphaned`-Ausschluss nicht
+ *  vergisst (sonst kann ein längst überholtes Pair wieder als "gerade jetzt aktiv" erscheinen). */
+export function getOpenPair<P extends { active: boolean; orphaned?: boolean }>(pairs: P[]): P | null {
+  return pairs.find((p) => p.active && !p.orphaned) ?? null;
+}
+
 /** Total pause duration from interruptions in ms */
 export function interruptionPauseMs(interruptions: { oeffnen: { startTime: Date }; verschluss: { startTime: Date } }[]): number {
   return interruptions.reduce((s, i) => s + i.verschluss.startTime.getTime() - i.oeffnen.startTime.getTime(), 0);
+}
+
+/** Alle (Wieder-)Verschluss-Zeitpunkte einer Session mit Gerätenamen — der Session-Start plus jeder
+ *  Wiederverschluss nach einer Reinigungspause. Basis für `wornDeviceNameAt`; geteilt von der
+ *  Sessions-Liste und dem Laufende-Session-Timeline. */
+export function buildLockPoints(pair: {
+  verschluss: { startTime: Date; device?: { name?: string | null } | null };
+  interruptions?: { verschluss: { startTime: Date; device?: { name?: string | null } | null } }[];
+}): { time: Date; name: string | null }[] {
+  return [
+    { time: pair.verschluss.startTime, name: pair.verschluss.device?.name ?? null },
+    ...(pair.interruptions ?? []).map((i) => ({ time: i.verschluss.startTime, name: i.verschluss.device?.name ?? null })),
+  ];
+}
+
+/** Getragenes Gerät zu einem Zeitpunkt innerhalb einer Session: nach einer Reinigungspause gilt die
+ *  Angabe des Wiederverschlusses, nicht die des Session-Starts (dasselbe Prinzip wie `currentLock` in
+ *  liveState.ts). `lockPoints` = alle (Wieder-)Verschluss-Zeitpunkte mit Gerätenamen; zurück kommt das
+ *  Gerät des jüngsten Verschlusses ≤ `at`. */
+export function wornDeviceNameAt(lockPoints: { time: Date; name: string | null }[], at: Date): string | null {
+  const sorted = [...lockPoints].sort((a, b) => a.time.getTime() - b.time.getTime());
+  let name = sorted[0]?.name ?? null;
+  for (const lp of sorted) {
+    if (lp.time.getTime() <= at.getTime()) name = lp.name;
+    else break;
+  }
+  return name;
 }
 
 /** Maps built pairs (from `buildPairs`) to completed sessions with interruption-adjusted
@@ -483,24 +634,24 @@ export function photoStatus(v: { imageUrl: string | null; imageExifTime: Date | 
 
 export type WearPair = { start: Date; end: Date };
 
-export type WearPairOptions = { types?: PairTypes; categoryId?: string | null };
-
-/** Builds close→open pairs from entries. Open sessions end at `now`.
- *  Defaults to KG (VERSCHLUSS/OEFFNEN). Pass `{ types: WEAR_PAIR, categoryId }` for
- *  user-defined categories. */
-export function buildWearPairs<
-  E extends { type: string; startTime: Date; device?: { categoryId?: string | null } | null }
->(entries: E[], now: Date, options?: WearPairOptions): WearPair[] {
-  const types = options?.types ?? KG_PAIR;
-  const categoryId = options?.categoryId ?? null;
-  const asc = filterAndSortPairEntries(entries, types, categoryId);
+/** Baut die KG-Trageintervalle (VERSCHLUSS→OEFFNEN); eine offene Session endet bei `now`.
+ *
+ *  BEWUSST nur KG: der eine `pending`-Slot genügt, weil immer nur EIN Gürtel getragen wird. Für
+ *  Trage-Kategorien (Plug, Halsband …) taugt dieser Automat nicht — dort können zwei Geräte
+ *  gleichzeitig laufen, und ein zweiter Beginn schlösse das erste Paar bei `now` statt beim
+ *  Beginn. Deshalb nimmt die Funktion keine `types`/`categoryId` mehr entgegen: die
+ *  Trage-Kategorien gehen über `wearHourPairsByCategory` (paart je GERÄT). */
+export function buildKgWearPairs<
+  E extends { type: string; startTime: Date }
+>(entries: E[], now: Date): WearPair[] {
+  const asc = filterAndSortPairEntries(entries, KG_PAIR);
   const pairs: WearPair[] = [];
   let pending: { startTime: Date } | null = null;
   for (const e of asc) {
-    if (e.type === types.close) {
+    if (e.type === KG_PAIR.close) {
       if (pending) pairs.push({ start: pending.startTime, end: now });
       pending = e;
-    } else if (e.type === types.open && pending) {
+    } else if (e.type === KG_PAIR.open && pending) {
       pairs.push({ start: pending.startTime, end: e.startTime });
       pending = null;
     }
@@ -509,7 +660,29 @@ export function buildWearPairs<
   return pairs;
 }
 
-/** Calculates wearing hours from pre-built pairs within a date range. */
+/** Verschmilzt überlappende (und aneinandergrenzende) Intervalle zu einer überlappungsfreien,
+ *  aufsteigenden Folge — aus getragener Zeit wird damit WANDUHR-Zeit: zwei gleichzeitig getragene
+ *  Geräte derselben Kategorie ergeben 2 h, nicht 4 h.
+ *
+ *  Nötig, weil `wearingHoursFromPairs` stumpf aufsummiert; überlappende Paare zählte es doppelt.
+ *  KG-Paare überlappen nie (ein Gürtel), Trage-Paare je Gerät sehr wohl. */
+export function mergeWearPairs(pairs: WearPair[]): WearPair[] {
+  const asc = [...pairs].sort((a, b) => a.start.getTime() - b.start.getTime());
+  const merged: WearPair[] = [];
+  for (const p of asc) {
+    const last = merged[merged.length - 1];
+    if (last && p.start.getTime() <= last.end.getTime()) {
+      if (p.end.getTime() > last.end.getTime()) last.end = p.end;
+    } else {
+      merged.push({ start: p.start, end: p.end });
+    }
+  }
+  return merged;
+}
+
+/** Calculates wearing hours from pre-built pairs within a date range.
+ *  Summiert stumpf — überlappende Paare zählen doppelt. Wer Wanduhr-Zeit will, gibt hier bereits
+ *  verschmolzene Paare hinein (`mergeWearPairs` / `wearHourPairsByCategory`). */
 export function wearingHoursFromPairs(pairs: WearPair[], rangeStart: Date, rangeEnd: Date): number {
   let totalMs = 0;
   for (const p of pairs) {
@@ -519,75 +692,19 @@ export function wearingHoursFromPairs(pairs: WearPair[], rangeStart: Date, range
   return totalMs / 3600000;
 }
 
-// ── Entry-based wearing hours (single-shot calculations) ─────────────────────
-
-/** Berechnet effektive Tragedauer in Stunden innerhalb eines Zeitraums.
- *  Jedes "open"-Entry stoppt die Tragedauer – Pausen werden dadurch automatisch
- *  ausgeschlossen. Defaults zu KG; per `options.types` für andere Kategorien.
- *
- *  Backward-compat: ein bare `ReinigungSettings` als 4. Arg ist erlaubt (wird ignoriert,
- *  wie bisher — die Funktion respektiert REINIGUNG-Pausen nicht). */
-export function wearingHoursInRange<
-  E extends {
-    type: string;
-    startTime: Date;
-    oeffnenGrund?: string | null;
-    device?: { categoryId?: string | null } | null;
-  }
->(
-  entries: E[],
-  from: Date,
-  to: Date,
-  optionsOrReinigung?: ReinigungSettings | WearPairOptions,
-): number {
-  const isLegacy = isLegacyReinigungArg(optionsOrReinigung);
-  const types = isLegacy ? KG_PAIR : (optionsOrReinigung?.types ?? KG_PAIR);
-  const categoryId = isLegacy ? null : (optionsOrReinigung?.categoryId ?? null);
-
-  const sorted = filterAndSortPairEntries(entries, types, categoryId);
-
-  let total = 0;
-  let wearStart: Date | null = null;
-
-  for (const e of sorted) {
-    if (e.type === types.close) {
-      wearStart = e.startTime;
-    } else if (e.type === types.open && wearStart) {
-      const s = Math.max(wearStart.getTime(), from.getTime());
-      const end = Math.min(e.startTime.getTime(), to.getTime());
-      if (end > s) total += end - s;
-      wearStart = null;
-    }
-  }
-  if (wearStart) {
-    const s = Math.max(wearStart.getTime(), from.getTime());
-    const end = to.getTime();
-    if (end > s) total += end - s;
-  }
-
-  return total / (1000 * 60 * 60);
-}
-
-/** Wearing hours for today / current week / current month.
- *  Builds wear-pairs once and reuses them for the three ranges (vs. three full sorts).
- *  Backward-compat: legacy callers pass `ReinigungSettings` (now ignored, same as before). */
+/** KG-Tragestunden für heute / laufende Woche / Monat / Jahr.
+ *  Baut die Paare einmal und nutzt sie für alle vier Zeiträume (statt vier voller Sortierungen). */
 export function calculateWearingHoursByRange<
   E extends {
     type: string;
     startTime: Date;
     oeffnenGrund?: string | null;
-    device?: { categoryId?: string | null } | null;
   }
 >(
   entries: E[],
   now: Date,
-  optionsOrReinigung?: ReinigungSettings | WearPairOptions,
 ): { tagH: number; wocheH: number; monatH: number; jahrH: number } {
-  const isLegacy = isLegacyReinigungArg(optionsOrReinigung);
-  const wearOptions: WearPairOptions = isLegacy
-    ? {}
-    : { types: optionsOrReinigung?.types, categoryId: optionsOrReinigung?.categoryId };
-  const pairs = buildWearPairs(entries, now, wearOptions);
+  const pairs = buildKgWearPairs(entries, now);
   return {
     tagH: wearingHoursFromPairs(pairs, getMidnightToday(now), now),
     wocheH: wearingHoursFromPairs(pairs, getWeekStart(now), now),
@@ -600,6 +717,9 @@ type KontrollAnforderungIn = {
   id: string; code: string; deadline: Date; kommentar: string | null;
   fulfilledAt: Date | null; createdAt: Date; withdrawnAt: Date | null; entryId: string | null;
   wirksamAb?: Date | null;
+  /** Pflichtfeld: unterscheidet ein Versäumnis von einem Rückzug (beide setzen `withdrawnAt`).
+   *  Fehlte es im `select`, fiele jedes Versäumnis stillschweigend auf "withdrawn" zurück. */
+  autoMarkedRemovedAt: Date | null;
   entry: { id: string; startTime: Date; imageUrl: string | null; note: string | null; verifikationStatus: string | null } | null;
 };
 type PruefungEntryIn = {
@@ -652,44 +772,13 @@ export function buildKontrolleItems(
   ];
 }
 
-export interface WearSessionRow {
-  id: string;
-  categoryName: string;
-  categoryColor: string;
-  categoryIcon: string;
-  startDateStr: string;
-  startTimeStr: string;
-  endDateStr: string;
-  endTimeStr: string;
-  durationStr: string;
-}
-
-type WearCategory = { id: string; name: string; color: string; icon: string };
-
-export function buildWearSessionRows(
-  categories: WearCategory[],
-  entries: { type: string; startTime: Date; device?: { categoryId: string | null } | null }[],
-  now: Date,
-  dl: string,
-): WearSessionRow[] {
-  return categories
-    .flatMap((cat) =>
-      buildWearPairs(entries, now, { types: WEAR_PAIR, categoryId: cat.id })
-        .filter((p) => p.end.getTime() !== now.getTime())
-        .map((p) => ({ cat, pair: p })),
-    )
-    .sort((a, b) => b.pair.start.getTime() - a.pair.start.getTime())
-    .map(({ cat, pair }) => ({
-      id: `${cat.id}-${pair.start.toISOString()}`,
-      categoryName: cat.name,
-      categoryColor: cat.color,
-      categoryIcon: cat.icon,
-      startDateStr: formatDate(pair.start, dl),
-      startTimeStr: formatTime(pair.start, dl),
-      endDateStr: formatDate(pair.end, dl),
-      endTimeStr: formatTime(pair.end, dl),
-      durationStr: formatDuration(pair.start, pair.end, dl),
-    }));
+/** Was der Sub von seinen Kontrollen zu sehen bekommt: alles ausser den WIRKLICH zurückgezogenen.
+ *  Ein Rückzug (Keyholder, Auto-Kontrolle bei offenem KG, Überschneidungs-Schutz) ist ein
+ *  Nicht-Ereignis. Ein VERSÄUMNIS bleibt sichtbar — es trägt den Status "missed", nicht "withdrawn".
+ *  Die Keyholder-Kontroll-History filtert bewusst NICHT: sie zeigt der Keyholderin ihre eigenen
+ *  Rückzüge. */
+export function isSubVisibleKontrolle(item: { anforderungStatus: string | null }): boolean {
+  return item.anforderungStatus !== "withdrawn";
 }
 
 export function toDatetimeLocal(date: Date | string | null | undefined, tz = APP_TZ): string {
@@ -722,20 +811,9 @@ export function fromDatetimeLocal(local: string | null | undefined, tz = APP_TZ)
   if (!m) return new Date(NaN);
   const [y, mo, d, h, mi] = [+m[1], +m[2], +m[3], +m[4], +m[5]];
   const guessUTC = Date.UTC(y, mo - 1, d, h, mi);
-  // How far `tz` sits ahead of UTC at a given instant (ms).
-  const offsetAt = (utcMs: number): number => {
-    const p = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz, hour12: false,
-      year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", second: "2-digit",
-    }).formatToParts(new Date(utcMs));
-    const g = (type: string) => +(p.find(x => x.type === type)?.value ?? "0");
-    const gh = g("hour") === 24 ? 0 : g("hour");
-    return Date.UTC(g("year"), g("month") - 1, g("day"), gh, g("minute"), g("second")) - utcMs;
-  };
   // Two-pass: the offset measured at the raw guess can land on the wrong side of a DST change; the
   // second pass evaluates it at the candidate instant, which is correct except inside the ~1h
   // spring-forward gap (a wall-clock that doesn't exist locally — the result stays a valid instant).
-  const candidate = guessUTC - offsetAt(guessUTC);
-  return new Date(guessUTC - offsetAt(candidate));
+  const candidate = guessUTC - tzOffsetMsAt(guessUTC, tz);
+  return new Date(guessUTC - tzOffsetMsAt(candidate, tz));
 }
