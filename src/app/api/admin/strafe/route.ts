@@ -3,29 +3,33 @@ import { NextResponse } from "next/server";
 import { requireKeyholderOrAdminApi } from "@/lib/authGuards";
 import { isUniqueConstraintOn } from "@/lib/prismaErrors";
 import { notifyUser } from "@/lib/notify";
-import { strafeVerhaengtNotice } from "@/lib/strafurteilService";
+import { strafeVerhaengtNotice, STORED_TYPE, entryIdFromCleaningNotRelockedRef, judgmentStatus, checkPenaltyText } from "@/lib/strafurteilService";
 import { executePenaltyAction, type PenaltyAction } from "@/lib/penaltyActions";
 import { bestaetigeErledigung, lehneErledigungAb } from "@/lib/strafErledigung";
+import { markLastAction } from "@/lib/appMeta";
+
+const VALID_OFFENSE_TYPES = new Set(Object.values(STORED_TYPE));
 
 export async function POST(req: Request) {
   const body = await req.json();
   const { userId, offenseType, refId, bestraftDatum, notiz, reason } = body;
-  // Optionale Straf-Aktion (Phase 3): wird nach dem Straf-Eintrag ausgeführt.
-  const action: PenaltyAction | null = body.action && typeof body.action.type === "string" ? body.action : null;
-  // status: "PUNISHED" (bestraft, default) | "DISMISSED" (verworfen / keine Strafe)
-  const status: string = body.status === "DISMISSED" ? "DISMISSED" : "PUNISHED";
+  // Optionale Straf-Aktion (Fork, Phase 3): wird nach dem Straf-Eintrag ausgefuehrt.
+  const penaltyAction: PenaltyAction | null = body.action && typeof body.action.type === "string" ? body.action : null;
+  // action: "punish" (bestraft, default) | "dismiss" (verworfen / keine Strafe)
+  const action: "punish" | "dismiss" = body.status === "DISMISSED" ? "dismiss" : "punish";
+  const status = judgmentStatus(action);
 
   if (!userId || !offenseType || !refId) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
-  // Bei einer Strafe ist der Freitext (reason) Pflicht; ein Verwerfen darf leer sein.
-  if (status === "PUNISHED" && !reason?.trim()) {
+  // Geteilte Regel mit judgeOffense (MCP) — punish verlangt Freitext, dismiss darf leer sein.
+  if (checkPenaltyText(action, reason)) {
     return NextResponse.json({ error: "Missing penalty text" }, { status: 400 });
   }
 
   const err = await requireKeyholderOrAdminApi(userId);
   if (err) return err;
-  if (!["KONTROLLANFORDERUNG", "OEFFNEN_ENTRY", "VERSCHLUSS_ANFORDERUNG", "FALSCHES_GERAET", "ORGASMUS_ANWEISUNG", "SESSION_VERSAEUMT", "EREKTION", "PAUSE_OVERAGE", "AUTO_ENTFERNT"].includes(offenseType)) {
+  if (!VALID_OFFENSE_TYPES.has(offenseType)) {
     return NextResponse.json({ error: "Invalid offenseType" }, { status: 400 });
   }
 
@@ -44,6 +48,11 @@ export async function POST(req: Request) {
   } else if (offenseType === "SESSION_VERSAEUMT") {
     const sa = await prisma.sessionAnforderung.findUnique({ where: { id: refId } });
     if (!sa || sa.userId !== userId) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  } else if (offenseType === "REINIGUNG_NICHT_VERSCHLOSSEN") {
+    // refId is "relock:<entryId>" — shares its entry with REINIGUNG_LIMIT, see cleaningNotRelockedRef.
+    const entryId = entryIdFromCleaningNotRelockedRef(refId);
+    const entry = entryId ? await prisma.entry.findUnique({ where: { id: entryId } }) : null;
+    if (!entry || entry.userId !== userId) return NextResponse.json({ error: "Not found" }, { status: 404 });
   } else {
     const entry = await prisma.entry.findUnique({ where: { id: refId } });
     if (!entry || entry.userId !== userId) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -66,15 +75,16 @@ export async function POST(req: Request) {
     // Konsistent zur MCP (judgeOffense): bei verhängter Strafe den Nutzer benachrichtigen.
     if (status === "PUNISHED") await notifyUser(userId, strafeVerhaengtNotice(reason?.trim() || null));
 
-    // Straf-Aktion (Phase 3) ausführen — nur bei verhängter Strafe. Fehler brechen das Urteil NICHT ab
-    // (der Straf-Eintrag bleibt), werden aber zurückgemeldet.
+    // Straf-Aktion (Fork, Phase 3) ausfuehren — nur bei verhaengter Strafe. Fehler brechen das Urteil
+    // NICHT ab (der Straf-Eintrag bleibt), werden aber zurueckgemeldet.
     let actionMessage: string | null = null;
     let actionError: string | null = null;
-    if (status === "PUNISHED" && action) {
-      const ar = await executePenaltyAction(userId, action);
+    if (status === "PUNISHED" && penaltyAction) {
+      const ar = await executePenaltyAction(userId, penaltyAction);
       if (ar.ok) actionMessage = ar.data.message;
       else actionError = ar.error;
     }
+    markLastAction();
     return NextResponse.json({ ...record, actionMessage, actionError }, { status: 201 });
   } catch (e: unknown) {
     if (isUniqueConstraintOn(e, "refId")) {

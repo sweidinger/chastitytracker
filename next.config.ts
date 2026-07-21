@@ -16,9 +16,10 @@ const nextConfig: NextConfig = {
   // Standalone-Server fehlschlägt ("Couldn't load fs/zlib" beim Start). Als externes Node-Modul
   // greift der Import real. Funktional harmlos (Buffer-Nutzung), aber so bleibt das Log sauber.
   serverExternalPackages: ["@simplewebauthn/server", "exifr"],
-  env: {
-    BUILD_DATE: process.env.BUILD_DATE || "",
-  },
+  // BUILD_DATE bewusst NICHT unter `env`: das würde den Wert zur BUILD-Zeit ins Bundle inlinen
+  // (leer, da im Dockerfile erst im Runtime-Stage gesetzt) und alle Laufzeit-Reads überschatten.
+  // process.env.BUILD_DATE wird zur Laufzeit im Runner gelesen (/api/version, /api/heartbeat,
+  // layout.tsx, getSettingsProps, utils.formatBuildDate).
   images: {
     remotePatterns: [],
   },

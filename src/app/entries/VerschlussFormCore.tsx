@@ -15,8 +15,10 @@ import DateTimePicker from "@/app/components/DateTimePicker";
 import Input from "@/app/components/Input";
 import Textarea from "@/app/components/Textarea";
 import Button from "@/app/components/Button";
+import EntryFormShell from "@/app/components/EntryFormShell";
 import Select from "@/app/components/Select";
 import Card from "@/app/components/Card";
+import Toggle from "@/app/components/Toggle";
 import type { DeviceOption } from "@/lib/queries";
 import type { VerschlussPayload, SubmitResult } from "./types";
 
@@ -38,6 +40,10 @@ interface Props {
   anforderungDeviceId?: string | null;
   /** Bildersafe-Instanz: zweiten, versiegelten Code-Foto-Schritt anzeigen. */
   bildersafe?: boolean;
+  /** Box-User: „Schlüssel ist in der Box"-Bestätigung (ersetzt Bildersafe); Submit verlangt sie. */
+  boxConfirm?: boolean;
+  /** Name(n) der Box(en) — in der „Schlüssel in Box"-Bestätigung angezeigt. */
+  boxName?: string;
   isEdit?: boolean;
   submitFn: (payload: VerschlussPayload) => Promise<SubmitResult>;
   onSuccess?: () => void;
@@ -48,6 +54,7 @@ interface Props {
 
 export default function VerschlussFormCore({
   initial, minTime, tz, nowDefault, mobileDesktopMode, devices = [], anforderungDeviceId, bildersafe = false,
+  boxConfirm = false, boxName,
   isEdit = false, submitFn, onSuccess, onCancel, submitVariant = "semantic", submitLabel,
 }: Props) {
   const t = useTranslations("common");
@@ -56,6 +63,10 @@ export default function VerschlussFormCore({
 
   const [startTime, setStartTime] = useState(toDatetimeLocal(initial?.startTime, tz) || nowDefault);
   const [note, setNote] = useState(initial?.note ?? "");
+  // Wahrheitsgemässe Angabe, KEIN Submit-Gate mehr: „nein" ist eine legitime Antwort (Schlüssel
+  // reist mit) und darf das Speichern nicht blockieren. Default an = der Normalfall, und die Box
+  // folgt dem Eintrag wie bisher; wer den Schlüssel behält, schaltet bewusst ab.
+  const [keyInBox, setKeyInBox] = useState(true);
 
   // Device defaulting: anforderung > single-device auto-pick > initial > empty
   const defaultDeviceId = anforderungDeviceId
@@ -127,6 +138,10 @@ export default function VerschlussFormCore({
     e.preventDefault();
     await submit({
       type: "VERSCHLUSS",
+      // Wahrheitsgemäss, nicht als Pflicht: der Verschluss ist real, auch wenn der Schlüssel
+      // mitreist. Wer hier „nein" sagt, bekommt keine verriegelte leere Box — und die Keyholderin
+      // keinen vorgetäuschten Hardware-Hold.
+      ...(boxConfirm ? { keyInBox } : {}),
       startTime: fromDatetimeLocal(startTime, tz).toISOString(),
       imageUrl: imageUrl || null,
       imageExifTime: imageExifTime || null,
@@ -140,7 +155,24 @@ export default function VerschlussFormCore({
   const defaultLabel = isEdit ? t("update") : tForm("saveBtn");
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+    <EntryFormShell
+      onSubmit={handleSubmit}
+      onCancel={onCancel}
+      cancelLabel={t("cancel")}
+      actions={
+        <Button
+          type="submit"
+          variant={submitVariant}
+          semantic={submitVariant === "semantic" ? "lock" : undefined}
+          fullWidth
+          loading={saving || uploading || codePhoto.uploading}
+          disabled={bildersafe && (!codeUrl || codeReadable === false)}
+          icon={submitVariant === "primary" ? <Lock size={16} /> : undefined}
+        >
+          {submitLabel ?? defaultLabel}
+        </Button>
+      }
+    >
       <RequiredHint />
 
       {showDeviceSelector && (
@@ -268,6 +300,22 @@ export default function VerschlussFormCore({
         {sealState === "not-detected" && !sealNumber && <p className="text-xs text-foreground-faint">{tForm("sealNotDetected")}</p>}
       </div>
 
+      {boxConfirm && (
+        <div className="flex flex-col gap-2">
+          <Card variant="semantic" semantic="sperrzeit" padding="compact">
+            {boxName && (
+              <p className="mb-2 text-xs font-medium text-foreground-muted">{tForm("keyInBoxName", { name: boxName })}</p>
+            )}
+            <Toggle
+              label={tForm("keyInBoxLabel")}
+              description={tForm("keyInBoxDesc")}
+              checked={keyInBox}
+              onChange={setKeyInBox}
+            />
+          </Card>
+        </div>
+      )}
+
       <Textarea
         label={t("noteOptional")}
         value={note}
@@ -276,25 +324,6 @@ export default function VerschlussFormCore({
       />
 
       <FormError message={error} />
-
-      <div className="flex flex-col-reverse sm:flex-row gap-3 pt-1">
-        {onCancel && (
-          <Button type="button" variant="secondary" fullWidth onClick={onCancel}>
-            {t("cancel")}
-          </Button>
-        )}
-        <Button
-          type="submit"
-          variant={submitVariant}
-          semantic={submitVariant === "semantic" ? "lock" : undefined}
-          fullWidth
-          loading={saving || uploading || codePhoto.uploading}
-          disabled={bildersafe && (!codeUrl || codeReadable === false)}
-          icon={submitVariant === "primary" ? <Lock size={16} /> : undefined}
-        >
-          {submitLabel ?? defaultLabel}
-        </Button>
-      </div>
-    </form>
+    </EntryFormShell>
   );
 }

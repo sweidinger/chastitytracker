@@ -13,22 +13,29 @@ import DateTimePicker from "@/app/components/DateTimePicker";
 import Select from "@/app/components/Select";
 import Textarea from "@/app/components/Textarea";
 import Button from "@/app/components/Button";
+import EntryFormShell from "@/app/components/EntryFormShell";
 import Card from "@/app/components/Card";
 import Sheet from "@/app/components/Sheet";
 import type { OeffnenPayload, ReinigungConfig, ToiletteConfig, SperrzeitState, SubmitResult } from "./types";
+import type { BoxHold } from "@/lib/boxOpenOutlook";
 
 interface Props {
   initial?: { startTime: string; note?: string | null; oeffnenGrund?: string | null };
   /** Owner-scoped, display-ready opening reasons (built-in defaults when the owner has no custom config).
-   *  REINIGUNG + TOILETTE are excluded in create mode (replaced by PAUSE_BEGIN/END flow);
-   *  they remain selectable in edit mode for backward compatibility with existing entries. */
+   *  REINIGUNG is always present (its code is frozen); only its label may be customized. */
   grundOptions: ResolvedReason[];
   maxTime?: string;
   tz: string;
   nowDefault: string;
   sperrzeit?: SperrzeitState;
   reinigung?: ReinigungConfig;
+  /** Fork: Toiletten-Freigabe (kein Server-Sammelurteil wie bei der Reinigung). */
   toilette?: ToiletteConfig;
+  /** Serverseitig gefälltes Urteil: hält die Box? null = der Riegel folgt (oder es gibt keine Box). */
+  boxHold?: BoxHold | null;
+  /** Hat der Sub überhaupt eine Box? `boxHold` taugt dafür nicht: es ist auch `null`, wenn eine Box
+   *  existiert und folgt. Entscheidet, ob das Warn-Sheet sagt, dass der Riegel zubleibt. */
+  hasBox?: boolean;
   isEdit?: boolean;
   submitFn: (payload: OeffnenPayload) => Promise<SubmitResult>;
   onSuccess?: () => void;
@@ -39,7 +46,7 @@ interface Props {
 }
 
 export default function OeffnenFormCore({
-  initial, grundOptions, maxTime, tz, nowDefault, sperrzeit, reinigung, toilette,
+  initial, grundOptions, maxTime, tz, nowDefault, sperrzeit, reinigung, toilette, boxHold, hasBox = false,
   isEdit = false, submitFn, onSuccess, onCancel, submitVariant = "semantic", submitLabel, defaultGrund,
 }: Props) {
   const t = useTranslations("openForm");
@@ -48,48 +55,87 @@ export default function OeffnenFormCore({
 
   const sperrzeitEndetAt = sperrzeit?.endetAt ?? null;
   const sperrzeitUnbefristet = sperrzeit?.unbefristet ?? false;
-  const sperrzeitReinigungErlaubt = sperrzeit?.reinigungErlaubt ?? false;
-  const sperrzeitToiletteErlaubt = sperrzeit?.toiletteErlaubt ?? false;
-  const reinigungErlaubt = reinigung?.erlaubt ?? false;
   const reinigungMaxMinuten = reinigung?.maxMinuten ?? 15;
-  const toiletteErlaubt = toilette?.erlaubt ?? false;
-  const toiletteMaxMinuten = toilette?.maxMinuten ?? 15;
+  const reinigungMaxProTag = reinigung?.maxProTag ?? 0;
+  const reinigungHeuteAnzahl = reinigung?.heuteAnzahl ?? 0;
+  // Ohne `reinigung`-Prop (Admin-Formular, Edit-Seite) gibt es keine Schranke — dort greifen die
+  // Sub-Warnungen ohnehin nicht, und ein Grund würde jede Reinigungsöffnung als Bruch anzeigen.
+  const cleaningBlock = reinigung?.cleaningBlock ?? null;
 
   const [startTime, setStartTime] = useState(toDatetimeLocal(initial?.startTime, tz) || nowDefault);
   const [grund, setGrund] = useState<OeffnenGrund | "">((initial?.oeffnenGrund as OeffnenGrund) ?? defaultGrund ?? "");
   const [note, setNote] = useState(initial?.note ?? "");
   const [showWarning, setShowWarning] = useState(false);
+  const [showReinigungLimitWarning, setShowReinigungLimitWarning] = useState(false);
+  const [forcedReinigung, setForcedReinigung] = useState(false);
   const { saving, error, setError, submit } = useEntrySubmit<OeffnenPayload>(submitFn, onSuccess);
 
+  const isReinigungLimitReached = !initial && reinigungMaxProTag > 0 && grund === "REINIGUNG" && reinigungHeuteAnzahl >= reinigungMaxProTag;
   const isGesperrt = sperrzeitUnbefristet || !!(sperrzeitEndetAt && new Date(sperrzeitEndetAt) > new Date());
-  // REINIGUNG/TOILETTE-Öffnungen verletzen die Sperre NICHT, wenn beide Seiten es erlauben.
-  const istErlaubteReinigungsOeffnung = grund === "REINIGUNG" && reinigungErlaubt && sperrzeitReinigungErlaubt;
+  // Das Urteil kommt fertig vom Server (`cleaningBlockReason`) — dieselbe Regel, die über den
+  // Sperrzeit-Bruch entscheidet. Hier nachzurechnen (User-Flag, Sperr-Flag, Fenster) hiesse, sie ein
+  // viertes Mal zu formulieren; genau so ist die Fenster-Prüfung anderswo verlorengegangen.
+  // KG: `cleaningBlock === null` ist das fertige Server-Urteil. Plug (Fork): dort gibt es kein
+  // solches Urteil, deshalb entscheidet zusaetzlich das mitgelieferte `erlaubt`-Flag. Fehlt es
+  // (KG-Pfad), bleibt es beim Server-Urteil allein.
+  const istErlaubteReinigungsOeffnung =
+    grund === "REINIGUNG" && cleaningBlock === null && (reinigung?.erlaubt ?? true);
+  // Fork: die Toilette hat kein Server-Sammelurteil und wird weiterhin hier verrechnet.
+  const sperrzeitToiletteErlaubt = sperrzeit?.toiletteErlaubt ?? false;
+  const toiletteErlaubt = toilette?.erlaubt ?? false;
+  const toiletteMaxMinuten = toilette?.maxMinuten ?? 15;
   const istErlaubteToiletteOeffnung = grund === "TOILETTE" && toiletteErlaubt && sperrzeitToiletteErlaubt;
   const isGesperrtBlockiert = isGesperrt && !istErlaubteReinigungsOeffnung && !istErlaubteToiletteOeffnung;
 
-  async function doSave() {
-    await submit({
+  /** Warum steht bei Grund „Reinigung" kein „max. X Minuten" da? Der Server nennt den Grund. */
+  const reinigungHintKey =
+    cleaningBlock === "lockPeriodForbids" ? "reinigungHintLockPeriod"
+    : cleaningBlock === "outsideWindow" ? "reinigungHintOutsideWindow"
+    : cleaningBlock === "userNotAllowed" ? "reinigungHintNoConfig"
+    : null;
+  /** Der Reinigungs-Hinweistext (Sheet + Inline-Karte teilen ihn). Ist die Öffnung ausserhalb des
+   *  Fensters, hängt „Nächstes Reinigungsfenster …" an — sonst weiss der Sub nicht, wann es wieder
+   *  geht. `nextWindow` ist dieselbe Quelle wie die Box-Karte auf der Übersicht. */
+  const reinigungHintText =
+    (reinigungHintKey ? t(reinigungHintKey) : t("modalSubtextReinigung", { minutes: reinigungMaxMinuten })) +
+    (cleaningBlock === "outsideWindow" && reinigung?.nextWindow
+      ? " " + t("boxNextWindow", { start: reinigung.nextWindow.start, end: reinigung.nextWindow.end })
+      : "");
+
+  // Hält die Box? Das Urteil kommt fertig vom Server (eine Uhr, Sub-Zeitzone). Bei einer erlaubten
+  // Reinigungsöffnung folgt der Riegel trotz laufender Sperrzeit (der Tracker setzt den Dauerauftrag
+  // in Heimdall aus) — dann wäre die Halte-Warnung falsch. Der Bruch-Fall gehört `isGesperrtBlockiert`
+  // und wird von der Sperrzeit-Karte plus dem Absende-Sheet abgedeckt.
+  const zeigeBoxHalt = !initial && !!boxHold && !isGesperrtBlockiert && !istErlaubteReinigungsOeffnung;
+
+  async function doSave(forced = false) {
+    const payload: OeffnenPayload = {
       type: "OEFFNEN",
       startTime: fromDatetimeLocal(startTime, tz).toISOString(),
       oeffnenGrund: grund,
       note: note.trim() || null,
-    });
+    };
+    if (forced) payload.forcedReinigung = true;
+    await submit(payload);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!grund) { setError(t("grundRequired")); return; }
     if (!note.trim()) { setError(t("commentRequired")); return; }
+    if (isReinigungLimitReached) { setShowReinigungLimitWarning(true); return; }
     if (isGesperrtBlockiert) { setShowWarning(true); return; }
     await doSave();
   }
 
-  // REINIGUNG + TOILETTE are removed from create-mode (replaced by PAUSE_BEGIN/END flow).
-  // In edit mode they remain selectable for backward compat with existing entries.
-  const HIDDEN_IN_CREATE = new Set(["REINIGUNG", "TOILETTE"]);
-  const grundSelectOptions = grundOptions
-    .filter((r) => isEdit || !HIDDEN_IN_CREATE.has(r.code))
-    .map((r) => ({ value: r.code, label: r.label }));
+  function handleReinigungLimitConfirm() {
+    setShowReinigungLimitWarning(false);
+    setForcedReinigung(true);
+    if (isGesperrtBlockiert) setShowWarning(true);
+    else doSave(true);
+  }
+
+  const grundSelectOptions = grundOptions.map((r) => ({ value: r.code, label: r.label }));
   // Bestandswert erhalten: ein entfernter/umbenannter Grund (nicht mehr in der Liste) wird als Option
   // ergänzt, damit ein reiner Zeit-Edit nicht an einem fehlenden Match scheitert.
   if (initial?.oeffnenGrund && !grundSelectOptions.some((o) => o.value === initial.oeffnenGrund)) {
@@ -100,6 +146,28 @@ export default function OeffnenFormCore({
 
   return (
     <>
+      <Sheet open={showReinigungLimitWarning} onClose={() => setShowReinigungLimitWarning(false)} title="">
+        <div className="flex flex-col gap-5">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={28} className="flex-shrink-0 text-warn mt-0.5" />
+            <div className="flex flex-col gap-1.5">
+              <p className="font-bold text-foreground text-base leading-snug">{t("reinigungLimitTitle")}</p>
+              <p className="text-sm text-foreground-muted">
+                {t("reinigungLimitSubtext", { count: reinigungHeuteAnzahl, max: reinigungMaxProTag })}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Button variant="primary" fullWidth onClick={() => setShowReinigungLimitWarning(false)}>
+              {t("reinigungLimitStay")}
+            </Button>
+            <Button variant="secondary" fullWidth loading={saving} onClick={handleReinigungLimitConfirm}>
+              {t("reinigungLimitOpenAnyway")}
+            </Button>
+          </div>
+        </div>
+      </Sheet>
+
       <Sheet open={showWarning} onClose={() => setShowWarning(false)} title="">
         <div className="flex flex-col gap-5">
           <div className="flex items-start gap-3">
@@ -109,16 +177,19 @@ export default function OeffnenFormCore({
                 {grund === "REINIGUNG" ? t("modalTitleReinigung") : grund === "TOILETTE" ? t("modalTitleToilette") : t("modalTitle")}
               </p>
               <p className="text-sm text-foreground-muted">
-                {grund === "REINIGUNG" && reinigungErlaubt
-                  ? t("modalSubtextReinigung", { minutes: reinigungMaxMinuten })
-                  : grund === "REINIGUNG"
-                    ? t("reinigungHintNoConfig")
-                    : grund === "TOILETTE" && toiletteErlaubt
-                      ? t("toiletteHint", { minutes: toiletteMaxMinuten })
-                      : grund === "TOILETTE"
-                        ? t("toiletteHintNoConfig")
-                        : t("modalSubtext")}
+                {grund === "REINIGUNG"
+                  ? reinigungHintText
+                  : grund === "TOILETTE"
+                    ? (toiletteErlaubt ? t("toiletteHint", { minutes: toiletteMaxMinuten }) : t("toiletteHintNoConfig"))
+                    : t("modalSubtext")}
               </p>
+              {/* Der Eintrag dokumentiert die Öffnung — er vollzieht sie nicht. Bei einem VERBOTENEN
+                  Öffnen sendet der Server bewusst kein Box-Kommando (sonst vollstreckte das
+                  Dokumentieren des Verstosses den Verstoss). Ohne diesen Satz liest der Sub
+                  „Konsequenzen" und denkt ans Strafbuch, nicht an den Notschlüssel. */}
+              {hasBox && (
+                <p className="text-sm font-semibold text-warn mt-1">{t("modalBoxStaysLocked")}</p>
+              )}
               <p className="text-xs text-sperrzeit font-semibold mt-1">
                 {sperrzeitUnbefristet
                   ? t("modalLockedIndefinite")
@@ -132,14 +203,32 @@ export default function OeffnenFormCore({
             <Button variant="primary" fullWidth onClick={() => setShowWarning(false)}>
               {t("modalStay")}
             </Button>
-            <Button variant="secondary" fullWidth loading={saving} onClick={() => { setShowWarning(false); doSave(); }}>
-              {t("modalOpenAnyway")}
+            <Button variant="secondary" fullWidth loading={saving} onClick={() => { setShowWarning(false); doSave(forcedReinigung); }}>
+              {/* Mit Box trägt der Knopf nur ein — er öffnet nichts. Ohne Box ist der Eintrag die
+                  ganze Wahrheit, dort bleibt „Trotzdem öffnen" richtig. */}
+              {t(hasBox ? "modalRecordAnyway" : "modalOpenAnyway")}
             </Button>
           </div>
         </div>
       </Sheet>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+      <EntryFormShell
+        onSubmit={handleSubmit}
+        onCancel={onCancel}
+        cancelLabel={tCommon("cancel")}
+        actions={
+          <Button
+            type="submit"
+            variant={submitVariant}
+            semantic={submitVariant === "semantic" ? "unlock" : undefined}
+            fullWidth
+            loading={saving}
+            icon={submitVariant === "primary" ? <LockOpen size={16} /> : undefined}
+          >
+            {submitLabel ?? defaultLabel}
+          </Button>
+        }
+      >
         <RequiredHint />
 
         {isGesperrtBlockiert && (
@@ -175,13 +264,23 @@ export default function OeffnenFormCore({
           options={grundSelectOptions}
         />
 
-        {grund === "REINIGUNG" && (
-          <Card variant="semantic" semantic="inspect" padding="compact">
-            <p className="text-xs text-inspect-text">
-              {reinigungErlaubt
-                ? t("modalSubtextReinigung", { minutes: reinigungMaxMinuten })
-                : t("reinigungHintNoConfig")}
-            </p>
+        {zeigeBoxHalt && (
+          <Card variant="semantic" semantic="warn" padding="compact">
+            <div className="flex items-start gap-2">
+              <Lock size={15} className="text-warn shrink-0 mt-0.5" />
+              <div className="flex flex-col gap-1">
+                <p className="text-xs font-bold text-warn-text">{t("boxWontOpenTitle")}</p>
+                <p className="text-xs text-warn-text">
+                  {boxHold!.until
+                    ? t("boxHoldsUntil", { date: new Date(boxHold!.until).toLocaleString(dl, { hour: "2-digit", minute: "2-digit", timeZone: tz }) })
+                    : t("boxHoldsIndefinitely")}
+                  {reinigung?.nextWindow ? " " + t("boxNextWindow", { start: reinigung.nextWindow.start, end: reinigung.nextWindow.end }) : ""}
+                </p>
+                <p className="text-xs text-warn-text">
+                  {grund === "REINIGUNG" ? t("boxStillCountsCleaning") : t("boxStillCounts")}
+                </p>
+              </div>
+            </div>
           </Card>
         )}
 
@@ -195,6 +294,19 @@ export default function OeffnenFormCore({
           </Card>
         )}
 
+        {grund === "REINIGUNG" && (
+          <Card variant="semantic" semantic={isReinigungLimitReached ? "warn" : "inspect"} padding="compact">
+            <div className="flex flex-col gap-1">
+              <p className="text-xs text-inspect-text">{reinigungHintText}</p>
+              {reinigungMaxProTag > 0 && (
+                <p className={`text-xs font-semibold ${isReinigungLimitReached ? "text-warn" : "text-inspect-text"}`}>
+                  {t("reinigungLimitHint", { count: reinigungHeuteAnzahl, max: reinigungMaxProTag })}
+                </p>
+              )}
+            </div>
+          </Card>
+        )}
+
         <Textarea
           label={tCommon("comment")}
           value={note}
@@ -205,25 +317,7 @@ export default function OeffnenFormCore({
         />
 
         <FormError message={error} />
-
-        <div className="flex flex-col-reverse sm:flex-row gap-3 pt-1">
-          {onCancel && (
-            <Button type="button" variant="secondary" fullWidth onClick={onCancel}>
-              {tCommon("cancel")}
-            </Button>
-          )}
-          <Button
-            type="submit"
-            variant={submitVariant}
-            semantic={submitVariant === "semantic" ? "unlock" : undefined}
-            fullWidth
-            loading={saving}
-            icon={submitVariant === "primary" ? <LockOpen size={16} /> : undefined}
-          >
-            {submitLabel ?? defaultLabel}
-          </Button>
-        </div>
-      </form>
+      </EntryFormShell>
     </>
   );
 }

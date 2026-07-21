@@ -13,6 +13,8 @@ import Select from "@/app/components/Select";
 import Textarea from "@/app/components/Textarea";
 import Checkbox from "@/app/components/Checkbox";
 import Button from "@/app/components/Button";
+import { parseApiErrorCode } from "@/lib/apiClient";
+import { useApiError } from "@/app/hooks/useApiError";
 
 /** Kuratierte Art-Presets für „Orgasmus anfordern". Jedes Preset codiert Orgasmus-Art + ob geöffnet
  *  werden darf — dadurch entfällt eine separate „Öffnen erlaubt"-Checkbox. */
@@ -26,6 +28,7 @@ const ART_PRESETS: Record<ArtPreset, { vorgegebeneArt: string; oeffnenErlaubt: b
 export default function OrgasmusAnforderungForm({ userId, tz, nowDefault }: { userId: string; tz: string; nowDefault: string }) {
   const t = useTranslations("admin");
   const tc = useTranslations("common");
+  const apiError = useApiError();
   const router = useRouter();
   const target = `/admin/users/${userId}/aktionen`;
 
@@ -81,9 +84,8 @@ export default function OrgasmusAnforderungForm({ userId, tz, nowDefault }: { us
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await res.json().catch(() => ({}));
       if (res.ok) router.push(target);
-      else setError(data.error || tc("error"));
+      else setError(apiError(await parseApiErrorCode(res)));
     } catch {
       setError(tc("networkError"));
     } finally {

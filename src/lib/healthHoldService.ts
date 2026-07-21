@@ -34,7 +34,7 @@ export async function isHealthHoldActive(userId: string): Promise<boolean> {
 /** Startet einen Gesundheits-Stopp (schließt einen evtl. laufenden). Benachrichtigt die Keyholder. */
 export async function startHealthHold(userId: string, reason: string): Promise<ServiceResult<ActiveHealthHold>> {
   const text = reason?.trim();
-  if (!text) return { ok: false, status: 400, error: "Bitte gib kurz an, was los ist." };
+  if (!text) return { ok: false, status: 400, error: "HEALTH_HOLD_REASON_REQUIRED" };
 
   const created = await prisma.$transaction(async (tx) => {
     await tx.healthHold.updateMany({

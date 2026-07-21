@@ -15,6 +15,8 @@ export type OffenseStoredType =
   | "SESSION_VERSAEUMT"
   | "EREKTION"
   | "PAUSE_OVERAGE"
+  | "REINIGUNG_LIMIT"
+  | "REINIGUNG_NICHT_VERSCHLOSSEN"
   /** Direkt verhängte Strafe (Keyholderin/KI im Chat) — kein automatisch erkanntes Vergehen. */
   | "AI_KEYHOLDER";
 
@@ -139,6 +141,31 @@ interface Labels {
   aktKontrolleFrist: string;
   aktKontrolleCode: string;
   aktEntzugKeinGuthaben: string;
+  // Aus dem Upstream-Merge ergaenzt: die Server-Seite reicht diese Labels jetzt mit.
+  errorFallback?: string;
+  networkError?: string;
+  frist?: string;
+  systemLabel?: string;
+  givenLabel?: string;
+  timeCorrected?: string;
+  fulfilledLabel?: string;
+  instructionLabel?: string;
+  strafbuchUnerlaubteOeffnungen?: string;
+  strafbuchZuSpaet?: string;
+  strafbuchAbgelehnt?: string;
+  strafbuchAutoEntfernt?: string;
+  strafbuchAutoEntferntAm?: string;
+  strafbuchGeoeffnetAm?: string;
+  strafbuchTrotzUnbefristet?: string;
+  strafbuchSperreLiefBis?: string;
+  strafbuchKontrollePrefix?: string;
+  strafbuchEingereicht?: string;
+  strafbuchFristWar?: string;
+  strafbuchVordatiert?: string;
+  strafbuchAbgelehntAm?: string;
+  strafbuchAblehnungsgrund?: string;
+  strafbuchReinigungLimit?: string;
+  strafbuchReinigungLimitDate?: string;
 }
 
 /** Eine Zeile der Schwere-Übersicht (Legende). */

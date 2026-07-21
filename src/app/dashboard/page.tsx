@@ -3,21 +3,23 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
   formatDateTime, formatHours,
-  buildPairs, interruptionPauseMs, buildKontrolleItems,
+  buildPairs, getOpenPair, interruptionPauseMs, buildKontrolleItems,
   toDateLocale, calculateWearingHoursByRange,
   getMidnightToday, getWeekStart, getMonthStart,
-  buildWearSessionRows,
-  buildWearPairs, WEAR_PAIR, APP_TZ,
+  wearingHoursFromPairs, APP_TZ,
   type ReinigungSettings,
 } from "@/lib/utils";
+import { buildWearSessions, wearHourPairsByCategory } from "@/lib/sessionModel";
+import { buildWearSessionRows } from "@/lib/wearSessionRows";
 import { proratedVorgabeTargets } from "@/lib/goalFulfillment";
 import { buildSessionEvents, buildPlugSessionEvents } from "@/lib/sessionHelpers";
 import { buildCategoryWearGoals } from "@/lib/categoryGoals";
-import { getActiveVorgabe, getActiveSperrzeit, getActiveWearSessions, getNonKgTrackingCategories, getSessionCategories, getActiveOrgasmusAnforderung, getActivePlugAnforderung, getActivePlugSperrzeit, aktiveKontrolleWhere, activeVerschlussAnforderungWhere } from "@/lib/queries";
+import { getActiveVorgabe, getActiveSperrzeit, getActiveWearSessions, getNonKgTrackingCategories, getSessionCategories, getActiveOrgasmusAnforderung, getActivePlugAnforderung, getActivePlugSperrzeit, aktiveKontrolleWhere, activeVerschlussAnforderungWhere, cleaningBlockReason } from "@/lib/queries";
 import { getActiveSessionsAllCategories, getAllActiveSessionAnforderungen } from "@/lib/sessionService";
 import { plugCategoryId } from "@/lib/deviceCategories";
-import { deviceCategoriesEnabled } from "@/lib/constants";
+import { deviceCategoriesEnabled, heimdallEnabled } from "@/lib/constants";
 import { getActivePause } from "@/lib/pauseService";
+import { buildReinigungView, reinigungVerbrauchtHeute, nextReinigungsFenster } from "@/lib/reinigungService";
 import { effectiveOrgasmusArten, resolveReasonLabel, resolveOrgasmusArtDisplay } from "@/lib/reasonsService";
 import { getTranslations, getLocale } from "next-intl/server";
 import DashboardClient, { type DashboardProps } from "./DashboardClient";
@@ -37,6 +39,8 @@ import { getActiveHealthHold } from "@/lib/healthHoldService";
 import TimerDisplay from "@/app/components/TimerDisplay";
 import { LockOpen } from "lucide-react";
 import TagesformWidget from "@/app/components/TagesformWidget";
+import InactiveCategories from "./InactiveCategories";
+import BoxStatusCard from "@/app/components/BoxStatusCard";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -80,7 +84,7 @@ export default async function DashboardPage() {
     prisma.entry.findMany({
       where: { userId },
       orderBy: { startTime: "desc" },
-      include: { device: { select: { categoryId: true, name: true } } },
+      include: { device: { select: { id: true, categoryId: true, name: true } } },
     }),
     // Zeitversetzt geplante Kontrollen (wirksamAb in der Zukunft) bleiben für den Sub unsichtbar.
     prisma.kontrollAnforderung.findMany({ where: { userId, ...aktiveKontrolleWhere(now) }, orderBy: { createdAt: "desc" }, include: { entry: true } }),
@@ -92,7 +96,7 @@ export default async function DashboardPage() {
       include: { device: { select: { name: true } } },
     }),
     getActiveSperrzeit(userId),
-    prisma.user.findUnique({ where: { id: userId }, select: { reinigungErlaubt: true, reinigungMaxMinuten: true, orgasmusArtenConfig: true, oeffnenGruendeConfig: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { reinigungErlaubt: true, reinigungMaxMinuten: true, reinigungMaxProTag: true, reinigungsFenster: true, orgasmusArtenConfig: true, oeffnenGruendeConfig: true } }),
     flagOn ? getActiveWearSessions(userId) : Promise.resolve([]),
     flagOn ? getNonKgTrackingCategories(userId) : Promise.resolve([]),
     flagOn ? getSessionCategories(userId) : Promise.resolve([]),
@@ -110,6 +114,23 @@ export default async function DashboardPage() {
     erlaubt: userSettings?.reinigungErlaubt ?? false,
     maxMinuten: userSettings?.reinigungMaxMinuten ?? 15,
   };
+
+  // Reinigungs-Regeln für die Box-Karte: einmal je Seitenaufbau, nicht im 5s-Poll. Dieselbe Quelle
+  // wie `get_context.cleaning` im MCP — der Sub sah die Fenster bisher nirgends. `blockedBy` kommt
+  // aus derselben Regel wie die Durchsetzung und kennt als einziges die AKTIVE Sperrzeit: ohne es
+  // versprach die Karte Fenster, die eine reinigungsverbietende Sperre längst gesperrt hatte.
+  const jetzt = new Date();
+  const boxReinigung = heimdallEnabled() && userSettings
+    ? {
+        ...buildReinigungView(userSettings, await reinigungVerbrauchtHeute(userId, jetzt, tz), jetzt, tz),
+        nextWindow: nextReinigungsFenster(userSettings.reinigungsFenster, jetzt, tz),
+        blockedBy: cleaningBlockReason(
+          { reinigungErlaubt: userSettings.reinigungErlaubt, reinigungsFenster: userSettings.reinigungsFenster, timezone: tz },
+          activeSperrzeit ? [activeSperrzeit] : [],
+          jetzt,
+        ),
+      }
+    : null;
 
   // ── Compute derived state ──
   // Aktive (offene) Kontrollen — max. eine je Gerät (neueste), Cage-Legacy (device null) = CAGE.
@@ -140,7 +161,7 @@ export default async function DashboardPage() {
   // Cage-Timeline: nur KG-Kontrollen (device CAGE/null) — Plug-Kontrollen erscheinen in der Plug-Karte.
   const kontrollItems = buildKontrolleItems(alleAnforderungen.filter((k) => k.device !== "PLUG"), entries.filter(e => e.type === "PRUEFUNG"), now);
   const pairs = buildPairs(entries, kontrollItems, reinigung);
-  const activePair = pairs.find((p) => p.active) ?? null;
+  const activePair = getOpenPair(pairs);
 
   const orgasmusEntries = entries
     .filter((e) => e.type === "ORGASMUS")
@@ -151,9 +172,9 @@ export default async function DashboardPage() {
     ? buildSessionEvents(activePair, orgasmusEntries, dl, (art) => resolveOrgasmusArtDisplay(art, orgasmCfg, tOrgasm))
     : [];
 
-  const { tagH, wocheH, monatH, jahrH } = calculateWearingHoursByRange(entries, now, reinigung);
+  const { tagH, wocheH, monatH, jahrH } = calculateWearingHoursByRange(entries, now);
 
-  // Cage offen → separate Trainingsvorgabe-Box (gleicher Stil wie Kategorie-Ziele), nur im offenen Zustand.
+  // Cage offen -> separate Trainingsvorgabe-Box (gleicher Stil wie Kategorie-Ziele), nur im offenen Zustand.
   const cageOpen = currentStatus?.type === "OEFFNEN";
   const cageProrated = activeVorgabe ? proratedVorgabeTargets(activeVorgabe, now, tz) : null;
   const cageHasGoal = !!cageProrated && (cageProrated.minProTagH != null || cageProrated.minProWocheH != null || cageProrated.minProMonatH != null || cageProrated.minProJahrH != null);
@@ -170,7 +191,11 @@ export default async function DashboardPage() {
     active: false,
   } : null;
 
-  const wearSessionRows = buildWearSessionRows(allNonKgCategories, entries, now, dl);
+  // Die Trage-Sessions EINMAL bauen — Zeilen-Liste und Wanduhr-Stunden je Kategorie leiten sich
+  // beide daraus ab (je GERAET gepaart, Ueberlappungen fuer die Stunden verschmolzen).
+  const wearSessionList = buildWearSessions(entries, now);
+  const wearSessionRows = buildWearSessionRows(allNonKgCategories, wearSessionList, dl);
+  const wearPairsByCategory = wearHourPairsByCategory(wearSessionList, now);
 
   // Offene Session-Anforderungen (von Admin/AI-Keyholderin) → Banner mit „Session starten"-Button.
   const sessionAnforderungen = flagOn ? await getAllActiveSessionAnforderungen(userId) : [];
@@ -329,6 +354,7 @@ export default async function DashboardPage() {
       {cageGoalRow && (
         <CategoryGoalsLive rows={[cageGoalRow]} serverNow={now.toISOString()} />
       )}
+      {heimdallEnabled() && <BoxStatusCard tz={tz} reinigung={boxReinigung} />}
       {activePair && rawSessionEvents.length > 0 && (
         <div className="w-full max-w-2xl mx-auto px-4 pt-6 pb-2">
           <LaufendeSessionCard
@@ -339,6 +365,13 @@ export default async function DashboardPage() {
             sperrzeitEndetAt={activeSperrzeit?.endetAt ?? null}
             sperrzeitUnbefristet={!!activeSperrzeit && activeSperrzeit.endetAt === null}
             sperrzeitNachricht={activeSperrzeit?.nachricht ?? null}
+            // Sub-Sicht: nur wenn er grundsätzlich reinigen darf. Sonst verspräche die Zeile etwas,
+            // das seine Benutzer-Einstellung ohnehin verbietet.
+            cleaningNote={
+              activeSperrzeit && userSettings?.reinigungErlaubt
+                ? t(activeSperrzeit.reinigungErlaubt ? "cleaningNoteAllowed" : "cleaningNoteForbidden")
+                : null
+            }
             activeVorgabe={activeVorgabe ? proratedVorgabeTargets(activeVorgabe, now, tz) : null}
             tagH={tagH}
             wocheH={wocheH}
@@ -417,6 +450,19 @@ export default async function DashboardPage() {
       <div className="w-full max-w-2xl mx-auto px-4 pb-2">
         <TagesformWidget />
       </div>
+      {flagOn && <CategoryGoalsToday userId={userId} activeWearSessions={wearSessions} entries={entries} />}
+      <InactiveCategories
+        categories={allNonKgCategories
+          .filter((c) => !wearSessions.some((s) => s.categoryId === c.id))
+          .map((c) => ({
+            ...c,
+            todayHours: wearingHoursFromPairs(
+              wearPairsByCategory.get(c.id) ?? [],
+              getMidnightToday(now, tz),
+              now,
+            ),
+          }))}
+      />
       <DashboardClient {...clientProps} tz={tz} />
       {pairs.length > 0 && (
         <div className="w-full max-w-2xl mx-auto px-4 pb-6">

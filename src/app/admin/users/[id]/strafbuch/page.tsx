@@ -12,7 +12,7 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
   const session = await auth();
   const { id } = await params;
   await assertKeyholderOrAdmin(id);
-  const [t, dl] = [await getTranslations("admin"), toDateLocale(await getLocale())];
+  const [t, tCommon, dl] = [await getTranslations("admin"), await getTranslations("common"), toDateLocale(await getLocale())];
   const now = new Date();
 
   const user = await prisma.user.findUnique({ where: { id } });
@@ -65,11 +65,14 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
       sortAt: (k.entryStartTime ?? k.deadline).getTime(),
     });
   }
-  for (const m of sb.missedLockRequests) {
+  // Upstreams `lateLocks` erkennt zusaetzlich verspaetet erfuellte Anforderungen (fulfilledAt gesetzt,
+  // aber nach der Frist) — deshalb nennt die Zeile bei Bedarf auch den Zeitpunkt des Einschliessens.
+  for (const m of sb.lateLocks) {
     offenses.push({
-      refId: m.id, offenseType: "VERSCHLUSS_ANFORDERUNG", severity: OFFENSE_SEVERITY["missed_lock"], typeLabel: t("strafbuchVerpassteVerschluss"),
+      refId: m.id, offenseType: "VERSCHLUSS_ANFORDERUNG", severity: OFFENSE_SEVERITY["late_lock"], typeLabel: t("strafbuchVerpassteVerschluss"),
       headline: `${t("strafbuchVerpassteVerschluss")}${m.categoryName ? ` (${m.categoryName})` : ""} — ${t("strafbuchFristWar")} ${fmtDual(m.endetAt)}`,
-      detail: null, note: m.nachricht, sortAt: m.endetAt.getTime(),
+      detail: m.fulfilledAt ? `${t("fulfilledLabel")} ${fmtDual(m.fulfilledAt)}` : null,
+      note: m.nachricht, sortAt: (m.fulfilledAt ?? m.endetAt).getTime(),
     });
   }
   for (const v of sb.wrongDeviceViolations) {
@@ -163,6 +166,22 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
 
   const labels = {
     strafbuchVergehen: t("strafbuchVergehen"),
+    errorFallback: tCommon("error"),
+    networkError: tCommon("networkError"),
+    lockedUntil: t("lockedUntil"),
+    lockedIndefinite: t("lockedIndefinite"),
+    frist: t("frist"),
+    systemLabel: t("systemLabel"),
+    givenLabel: t("givenLabel"),
+    timeCorrected: t("timeCorrected"),
+    fulfilledLabel: t("fulfilledLabel"),
+    instructionLabel: t("instructionLabel"),
+    strafbuchUnerlaubteOeffnungen: t("strafbuchUnerlaubteOeffnungen"),
+    strafbuchZuSpaet: t("strafbuchZuSpaet"),
+    strafbuchAbgelehnt: t("strafbuchAbgelehnt"),
+    strafbuchAutoEntfernt: t("strafbuchAutoEntfernt"),
+    strafbuchAutoEntferntAm: t("strafbuchAutoEntferntAm"),
+    strafbuchEmpty: t("strafbuchEmpty"),
     strafbuchNoEntries: t("strafbuchNoEntries"),
     strafbuchAlleVergehenBestraft: t("strafbuchAlleVergehenBestraft"),
     strafbuchWurdeBestraft: t("strafbuchWurdeBestraft"),
@@ -237,7 +256,9 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
     rejected_control: t("strafbuchAbgelehnt"),
     auto_removed_control: t("strafbuchAutoEntfernt"),
     wrong_device: t("strafbuchFalschesGeraet"),
-    missed_lock: t("strafbuchVerpassteVerschluss"),
+    late_lock: t("strafbuchVerpassteVerschluss"),
+    cleaning_limit: t("strafbuchReinigungLimit"),
+    cleaning_not_relocked: t("strafbuchReinigungNichtVerschlossen"),
     missed_session: t("strafbuchVersaeumteSession"),
     missed_orgasm: t("strafbuchVerpassteOrgasmus"),
     pause_overage: t("strafbuchPauseUeberzug"),

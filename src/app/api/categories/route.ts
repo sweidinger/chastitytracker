@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { deviceCategoriesGate } from "@/lib/authGuards";
+import { requireApi, deviceCategoriesGate } from "@/lib/authGuards";
+import { entryManageAccess } from "@/lib/keyholder";
 import {
   validateCategoryInput,
   slugifyCategoryName,
@@ -35,13 +35,15 @@ async function pickUniqueCategorySlug(userId: string, baseSlug: string): Promise
 export async function GET(req: NextRequest) {
   const gate = deviceCategoriesGate();
   if (gate) return gate;
-  const session = await auth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await requireApi();
+  if (session instanceof NextResponse) return session;
 
   let userId = session.user.id;
   const queryUserId = req.nextUrl.searchParams.get("userId");
   if (queryUserId && queryUserId !== session.user.id) {
-    if (session.user.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!(await entryManageAccess(session.user.id, session.user.role, queryUserId)).allowed) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     userId = queryUserId;
   }
 
@@ -98,8 +100,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const gate = deviceCategoriesGate();
   if (gate) return gate;
-  const session = await auth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await requireApi();
+  if (session instanceof NextResponse) return session;
 
   const body = await req.json();
   const { name, color, icon, sortOrder, trackingEnabled, requirePhoto, allowVorgaben,
@@ -107,7 +109,9 @@ export async function POST(req: NextRequest) {
 
   let userId = session.user.id;
   if (body.userId && body.userId !== session.user.id) {
-    if (session.user.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!(await entryManageAccess(session.user.id, session.user.role, body.userId)).allowed) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     userId = body.userId;
   }
 

@@ -31,6 +31,15 @@ model User {
   autoKontrolleRuheBis           String                   @default("06:00")
   autoKontrolleFristVon          Int                      @default(15)
   autoKontrolleFristBis          Int                      @default(60)
+  // Optionales festes AUSLÖSE-Fenster ("HH:MM", "" = aus): sind beide gesetzt und Von<Bis, fallen die
+  // Auslösungen (wirksamAb) in dieses Fenster statt gleichmässig übers Wach-Fenster. Die Frist läuft
+  // danach normal und darf übers Fensterende hinaus, wird aber am nächsten Schlaf-Beginn gekappt.
+  autoKontrolleFensterVon        String                   @default("")
+  autoKontrolleFensterBis        String                   @default("")
+  // true = Auto-Kontrollen nur auslösen, während eine aktive Sperrzeit (SPERRZEIT) läuft. Die Slots
+  // werden weiter für jeden Tag geplant; wird eine bei Fälligkeit ohne aktive Sperrzeit angetroffen,
+  // zieht der Poller sie zurück (kein Nachholen — dieselbe Behandlung wie eine Auslösung bei offenem KG).
+  autoKontrolleNurBeiSperre      Boolean                  @default(false)
   // Kontroll-Eskalation (Stufe 1: Mahnung, Stufe 2: automatisch als abgelegt markieren). Beide
   // Stufen sind unabhängig voneinander schaltbar und standardmässig AUS (Opt-in, kein
   // Verhaltenswechsel für Bestandsnutzer). Delay-Werte in Minuten; Stufe 2 zählt ab dem Zeitpunkt
@@ -169,7 +178,12 @@ model RecurringContext {
   // null = jede Woche (Default, bisheriges Verhalten). 1..5 = n-ter <weekday> im Monat.
   // -1 = letzter <weekday> im Monat (z.B. "erster Mittwoch" = weekday:3, ordinal:1).
   ordinal    Int?
+  // Optimistic-Concurrency-Token: inkrementiert bei jedem MCP-Edit (siehe writeFramework).
+  version    Int      @default(1)
   deviceFree Boolean  @default(false)
+  // JSON-Array von Ausnahme-Daten ("YYYY-MM-DD"), an denen der Slot NICHT stattfindet (iCalendar-
+  // EXDATE-Modell). null/leer = keine Ausnahmen. Der Planer wendet sie beim Aufzählen der Termine an.
+  exclusionDates String?
   note       String?
   createdAt  DateTime @default(now())
 
@@ -185,6 +199,8 @@ model Appointment {
   typ        String? // z.B. "Therapie", "Arzt"
   deviceFree Boolean  @default(false)
   note       String?
+  // Optimistic-Concurrency-Token: inkrementiert bei jedem MCP-Edit (siehe writeFramework).
+  version    Int      @default(1)
   createdAt  DateTime @default(now())
 
   @@index([userId, when])
@@ -237,6 +253,8 @@ model KeyholderNote {
   validUntil   DateTime?
   // doDont: JSON {"do":[...],"dont":[...]} — strukturiert für BOUNDARY-Notes
   doDont       String?
+  // Optimistic-Concurrency-Token: inkrementiert bei jedem MCP-Edit (siehe writeFramework).
+  version      Int       @default(1)
 
   refs NoteRef[]
 
@@ -343,9 +361,16 @@ model TrainingVorgabe {
   minProJahrH      Float?
   notiz            String?
   createdAt        DateTime        @default(now())
+  // Soft-Delete (B-04, MCP-Befundliste 2026-07-17): null = aktiv. Gesetzt = gelöscht, Zeile bleibt
+  // für die Historie erhalten (explain_model §13 verspricht "Supersession statt Delete" als
+  // durchgängiges Prinzip — vorher galt für Trainingsziele das Gegenteil, harter Delete ohne Spur).
+  deletedAt        DateTime?
 
   @@index([userId])
   @@index([categoryId])
+  // Spiegelt Device.@@index([userId, archivedAt]) — dieselbe "aktive Zeilen eines Users" Query-Form,
+  // die listVorgaben/getActiveVorgabe/reorderVorgabenDates etc. jetzt alle über deletedAt filtern.
+  @@index([userId, deletedAt])
 }
 
 model KontrollAnforderung {
@@ -382,22 +407,30 @@ model KontrollAnforderung {
 }
 
 model VerschlussAnforderung {
-  id          String    @id @default(cuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  art         String    // "ANFORDERUNG" | "SPERRZEIT"
-  nachricht   String?
-  endetAt     DateTime? // ANFORDERUNG: Frist zum Einschliessen; SPERRZEIT: darf nicht öffnen bis
-  dauerH      Float?    // ANFORDERUNG only: Mindest-Tragedauer (h) – erzeugt nach Einschliessen automatisch SPERRZEIT
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  art              String // "ANFORDERUNG" | "SPERRZEIT"
+  nachricht        String?
+  endetAt          DateTime? // ANFORDERUNG: Frist zum Einschliessen; SPERRZEIT: darf nicht öffnen bis
+  dauerH           Float? // ANFORDERUNG only: Mindest-Tragedauer (h) – erzeugt nach Einschliessen automatisch SPERRZEIT (relativ zur Verschlusszeit)
+  sperrEndetAt     DateTime? // ANFORDERUNG only: absolutes Sperr-Ende (Wanduhr). Wird bei Fulfill 1:1 als SPERRZEIT.endetAt übernommen – unabhängig vom tatsächlichen Verschlusszeitpunkt (Spät-Verschluss verschiebt das Ende NICHT). Alternative zu dauerH.
   deviceId         String?
   device           Device?         @relation(fields: [deviceId], references: [id], onDelete: SetNull)
   deviceCategoryId String?         // null = KG (backward compat); non-null = Plug oder andere non-KG Kategorie
   deviceCategory   DeviceCategory? @relation(fields: [deviceCategoryId], references: [id], onDelete: SetNull)
-  reinigungErlaubt Boolean @default(false) // SPERRZEIT: Reinigungsöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
-  toiletteErlaubt  Boolean @default(false) // SPERRZEIT: Toilettenöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
-  createdAt   DateTime  @default(now())
-  fulfilledAt DateTime? // ANFORDERUNG: gesetzt wenn User VERSCHLUSS erstellt
-  withdrawnAt DateTime?
+  reinigungErlaubt Boolean   @default(false) // SPERRZEIT: Reinigungsöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
+  toiletteErlaubt  Boolean   @default(false) // SPERRZEIT: Toilettenöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
+  createdAt        DateTime  @default(now())
+  fulfilledAt      DateTime? // ANFORDERUNG: gesetzt wenn User VERSCHLUSS erstellt
+  withdrawnAt      DateTime?
+  // WARUM withdrawnAt gesetzt wurde. Ohne dieses Feld sah eine vom Sub aufgebrochene Sperrzeit
+  // exakt aus wie eine, die die Keyholderin bewusst zurückgezogen hat — und wie eine, die es nie
+  // gab. Die Konsequenz verschwand spurlos aus dem Dashboard.
+  //   "keyholder" = bewusst zurückgezogen (withdraw / Admin-UI)
+  //   "opening"   = durch eine Öffnung des Subs unterbrochen (releaseSperrzeitenOnOpen)
+  // null = noch aktiv, ODER Altbestand vor v4.50.30 (dann ist die Endart nicht mehr rekonstruierbar).
+  endedReason      String?
   // Zeitversetzte Auslösung: null = sofort. Gesetzt = geplant; bis dahin für den Sub
   // unsichtbar (gilt nicht als aktiv), Benachrichtigung + Frist starten erst dann (Poller verschickt sie).
   wirksamAb        DateTime?
@@ -500,9 +533,9 @@ model RateLimit {
 model StrafeRecord {
   id            String    @id @default(cuid())
   userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  offenseType   String   // "KONTROLLANFORDERUNG" | "OEFFNEN_ENTRY" | "REINIGUNG_LIMIT" | "FALSCHES_GERAET" | "ORGASMUS_ANWEISUNG" | "AI_KEYHOLDER"
-  refId         String   @unique
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  offenseType   String // "KONTROLLANFORDERUNG" | "OEFFNEN_ENTRY" | "AUTO_ENTFERNT" | "VERSCHLUSS_ANFORDERUNG" | "REINIGUNG_LIMIT" | "FALSCHES_GERAET" | "ORGASMUS_ANWEISUNG" | "REINIGUNG_NICHT_VERSCHLOSSEN" | "AI_KEYHOLDER"
+  refId         String    @unique
   bestraftDatum DateTime // Urteilszeitpunkt (bei PUNISHED = Strafdatum)
   notiz         String?
   // Urteils-Status + Audit
@@ -541,11 +574,13 @@ model Device {
   securityLevel      String?
   // lookalikeClusterId: gleiche Optik = gleicher Cluster. Mismatch INNERHALB eines Clusters ist soft, nie ein Vergehen.
   lookalikeClusterId String?
-  abstreifbar        Boolean @default(false) // Anti-Auszieh-Status
+  pullOffRisk        Boolean? // true = abstreifbar (unsicher), false = geprüft sicher, null = nie beurteilt (K-08)
   material           String? // Edelstahl | Kunststoff | Silikon
   bauform            String? // flach | voll | standard | Plug ...
   healthFlags        String? // JSON string[] — Druckstellen, scheuert, rutscht ...
   retentionNotes     String? // z.B. "njoy: rutscht beim Entspannen"
+  // Optimistic-Concurrency-Token: inkrementiert bei jedem MCP-Edit (siehe writeFramework).
+  version            Int     @default(1)
 
   entries                 Entry[]
   verschlussAnforderungen VerschlussAnforderung[]
@@ -604,6 +639,9 @@ model BoxStatus {
   boxId                  String // Heimdall-Geräte-id (stabil)
   name                   String
   locked                 Boolean   @default(false)
+  // Physisches IST der frischen Sync-Meldung — `locked` ist das SOLL. Seit dem Präsenz-Guard
+  // (FW 0.2.33) kann die Box offen stehen, obwohl sie zu sein soll. null = Alt-Zeile (Fallback SOLL).
+  reportedLocked         Boolean?
   lockUntil              DateTime? // effektive Sperre (eigene + Tracker-Sperrzeit, gekappt)
   simpleLock             Boolean   @default(false)
   keyholderLocked        Boolean   @default(false) // durch Tracker-Sperrzeit gehalten (Sub kann lokal nicht öffnen)
@@ -612,9 +650,10 @@ model BoxStatus {
   boltPos                String?
   fwVersion              String?
   lastSyncAt             DateTime?
-  // Vom Sub ausgelöstes, noch nicht vollzogenes Kommando.
-  pendingCommand         String? // "lock" | "open" | "clean_open"
-  pendingCommandRelockBy DateTime? // nur clean_open: Re-Lock-Frist
+  offlineOpenHours       Int? // Offline-Failsafe-Schwelle der Box → für staleLock/hardwareEnforced im MCP
+  // Aus einem Eintrag abgeleitetes, noch nicht vollzogenes Kommando. Kein Reinigungs-Kommando und
+  // keine Frist: die Box öffnet auf "open" und bleibt offen, bis ein "lock" kommt.
+  pendingCommand         String? // "lock" | "open"
   pendingCommandAt       DateTime?
   updatedAt              DateTime  @updatedAt
 
@@ -634,6 +673,11 @@ model Entry {
   // imageUrl (offenes Siegel/Gerät). Wird erst freigegeben, wenn Öffnen erlaubt ist.
   codeImageUrl                  String?
   codeReadable                  Boolean? // detectSealNumber hat Ziffern erkannt (nur "lesbar ✓", Zahl wird NICHT gespeichert)
+  // Nur VERSCHLUSS: Deklaration des Subs, ob der Schlüssel in der Heimdall-Box liegt.
+  // false = er behält ihn (z.B. auf Reise) → die Box bekommt bewusst KEIN lock-Kommando
+  // (siehe boxCommand.ts). null = nicht gefragt (keine Box, Admin-Pfad, Alt-Client/Alt-Eintrag).
+  // Ohne dieses Feld wäre "nicht hardware-vollstreckt" nicht von "Box war offline" zu unterscheiden.
+  keyInBox                      Boolean?
   note                          String?
   oeffnenGrund                  String?
   orgasmusArt                   String?

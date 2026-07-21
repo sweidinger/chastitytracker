@@ -1,55 +1,70 @@
-# Tracker-Modell & Abhängigkeiten — Referenz für den MCP-Keyholder
+# Tracker-Modell — Referenz für den MCP-Keyholder
 
 > Spiegel von `src/lib/mcpModelDoc.ts` (Single Source). Das MCP-Tool `explain_model` gibt
 > denselben Text zurück. Bei Änderungen beide synchron halten.
 
-Diese Erklärung beschreibt, wie die Begriffe zusammenhängen, die du über den MCP siehst.
-Sie setzt KEINEN Code-Zugriff voraus. Lies sie, wenn ein Feld oder eine Regel unklar ist —
-sie verhindert die häufigsten Fehldeutungen.
+Kurzreferenz, wie die Begriffe zusammenhängen, die du über den MCP siehst. Lies einen Abschnitt, wenn
+ein Feld oder eine Regel unklar ist. Kein Code-Zugriff nötig.
+
+## 0. Deine Rolle: du wertest, der Server zählt
+Die API liefert **Zahlen und Zustände, keine Urteile.** Ob ein Trainingsstand gut, knapp oder
+enttäuschend ist, entscheidest DU im Kontext — dieselben Zahlen dürfen je nach Situation zu
+verschiedenen Aussagen führen. Vorgerechnete Indikatoren (`todayPct`/`weekPct`, `trendRising`,
+`*VsPbPct`) sind **Eingaben für dein Urteil, kein Verdikt** — nimm sie als Hinweis, nicht als Befund.
+Deine Notizen und Urteile sieht der Sub nie. Alle Writes sind agent-autonom: entscheide und führe
+direkt aus, ohne Rückfrage oder Bestätigung.
 
 ## 1. Zwei Systeme, eine Wahrheit
-- **ChastityTracker** — das, was du über den MCP siehst: Tragezeiten, Sperrzeiten, Reinigung,
-  Kontrollen, Strafbuch, Notizen. Hier setzt du als Keyholderin Regeln.
-- **Heimdall + die Box** — die physische Schlüssel-Lockbox (Hardware). Du steuerst sie NICHT
-  direkt; du setzt Regeln im Tracker, die Box vollzieht sie. Du siehst die Box nur indirekt
-  (über die Tragezeiten/Einträge, die entstehen).
+- **KG**: eine Session ist ein Paar VERSCHLUSS (zu) → OEFFNEN (auf). `wearingHoursKg`
+  (heute/Woche/Monat) ist die Summe dieser Zeiten — Gerätewechsel bereits eingerechnet.
+- **WEAR** (Plug, Halsband, Knebel …): eigene Paare WEAR_BEGIN → WEAR_END, nicht KG.
+- **Segmente**: eine KG-Session zerfällt an REINIGUNG-Öffnungen in Segmente, pro Segment GENAU EIN
+  Gerät. Ein Gerätewechsel **bricht die Session nicht** — die Tragezeit läuft als Ganzes weiter.
+- **Wahrheit kommt aus Segmenten/Bildern, nicht aus Labels.** Das massgebliche Gerät ist
+  `deviceEffective`: bei einem Bild-gegen-Deklaration-Konflikt **gewinnt das Bild**, nicht der Freitext.
 
-## 2. Tragen & Sessions
-- Eine **KG-Session** ist ein Paar **VERSCHLUSS** (zu) → **OEFFNEN** (auf). `wearingHoursKg`
-  (heute/Woche/Monat) ist die Summe dieser Session-Zeiten.
-- Ein **Geräte-Wechsel** innerhalb einer Session (KG A raus, KG B rein) **bricht die Session
-  NICHT** — die Tragezeit läuft als Ganzes weiter. `wearingHoursKg` zählt das bereits korrekt
-  durch; rechne Wechsel nicht doppelt und nimm nicht an, ein Wechsel beende die Kontinuität.
-- **WEAR_BEGIN/WEAR_END** sind für Nicht-KG-Kategorien (Plug, Halsband, Knebel …), nicht für KG.
+## 2. Sperrzeit & Box
+- **Sperrzeit** = eine von dir angeordnete Sperrperiode (`endetAt` oder unbefristet). Währenddessen
+  darf der Sub NICHT selbst öffnen.
+- **`reinigungErlaubt` auf der Sperrzeit** ist der Schalter: nur wenn gesetzt, ist ein Öffnen zur
+  Reinigung (oder ein Gerätewechsel) während DIESER Sperre rechtmässig.
+- **Box** = die physische Schlüssel-Lockbox hinter einer Sperre. **Während einer Sperrzeit hält die
+  Box den Schlüssel fest** — eine Sperre ist nicht bloss ein Tracker-Eintrag, sondern ein echter
+  physischer Zugriffsschutz. Du bedienst die Box nicht — sie folgt den Einträgen des Subs. Für dich
+  zählt eine Frage: **`hardwareEnforced: true` = gerade real verschlossen** (online-unabhängig, der
+  zuletzt gemeldete Stand gilt); bei `false` nennt `hardwareEnforcedReason` genau EINEN Grund (z.B.
+  der Sub hat den Schlüssel behalten). `keySecured` fasst „Käfig zu UND Schlüssel drin UND aktuell"
+  in einem Feld zusammen. Ein absolutes Hard-Cap und Sicherheits-Failsafes (leerer Akku, offline)
+  öffnen im Notfall immer — auch gegen dich.
 
-## 3. Lock & Sperrzeit
-- `lock.isLocked` / `currentDurationHours`: aktueller Verschluss-Zustand & -Dauer.
-- **Sperrzeit** (`activeSperrzeit`) = eine von dir angeordnete Sperrperiode (`endetAt` oder
-  unbefristet). Während ihr **darf der Sub nicht selbst öffnen**.
-- **`reinigungErlaubt` auf der Sperrzeit**: ob während GENAU DIESER Sperre Reinigungsöffnungen
-  erlaubt sind. Das ist der Schalter, der entscheidet, ob ein Öffnen zur Reinigung (oder ein
-  Wechsel) in der Sperre rechtmäßig ist (siehe §5).
-- **Hard-Cap** (Heimdall, lokal): absolute Obergrenze der Verschlussdauer — nie überschreitbar,
-  auch nicht durch dich. Sicherheits-Failsafes (low battery, offline) öffnen notfalls immer.
+## 3. Reinigung
+- `allowed`: ob Reinigungspausen grundsätzlich erlaubt sind.
+- `maxMinutesPerBreak`: Minuten pro EINZELNER Pause. `maxPausesPerDay`: **ANZAHL** Öffnungen pro
+  CH-Kalendertag (ein Stückzähler, KEINE Minuten). `usedToday`: heute verbraucht; Rest = Differenz.
+- **`openingAllowedNow`** beantwortet direkt, ob JETZT eine Reinigungsöffnung erlaubt ist — nutze das,
+  statt aus `windows` selbst zu schliessen. `windows` (Tages-Zeitfenster) binden NUR während einer
+  aktiven Sperrzeit, die Reinigung erlaubt; ausserhalb einer Sperre ist eine Reinigungsöffnung immer
+  erlaubt. `windowsBinding`/`windowsBindingReason` sagt, ob und warum `windows` gerade greift.
+- Eine Reinigungsöffnung = ein OEFFNEN mit `oeffnenGrund=REINIGUNG`.
 
-## 4. Reinigung — die Begriffe sauber
-- `reinigung.allowed`: ob Reinigungspausen grundsätzlich erlaubt sind.
-- `reinigung.maxMinutesPerBreak`: Max-**Minuten** pro EINZELNER Pause (z.B. 15).
-- `reinigung.maxPausesPerDay`: Max-**ANZAHL** Reinigungsöffnungen pro **Kalendertag** (CH).
-  **Das ist ein Stückzähler, KEINE Minutenangabe.** (Früher hieß das Feld irreführend
-  "maxMinutesPerDay" — ein "2" bedeutet *zwei Öffnungen/Tag*, nicht zwei Minuten.)
-- Eine **Reinigungsöffnung** = ein `OEFFNEN` mit `oeffnenGrund=REINIGUNG`.
-- **"pro Tag" = CH-Kalendertag** (Reset um Mitternacht lokal), kein rollendes 24h-Fenster.
+## 4. Geräte-Wechsel
+Es gibt keinen eigenen Wechsel-Vorgang: ein Wechsel läuft über eine **Reinigungsöffnung**. Folgen: er
+verbraucht das Tages-Reinigungskontingent, und während einer Sperre ist er nur rechtmässig, wenn die
+Sperre `reinigungErlaubt` hat. Freie Wechsel erlauben ⇒ `reinigungErlaubt` setzen UND
+`maxPausesPerDay` hoch genug halten.
 
-## 5. Geräte-Wechsel — wie er abgebildet ist (zentral!)
-- Es gibt **keinen eigenen "Wechsel"-Vorgang.** Ein Wechsel läuft über die **Reinigungs-
-  öffnung** (`OEFFNEN`, grund=REINIGUNG). Das ist bewusst so.
-- Folge: Ein Wechsel **verbraucht das Tages-Reinigungskontingent** (`maxPausesPerDay`) wie
-  jede andere Reinigungspause.
-- Folge: Ein Wechsel **während einer Sperre** ist nur rechtmäßig, wenn die Sperre
-  `reinigungErlaubt` hat (sonst gilt er als unautorisierte Öffnung, siehe §6).
-- **Praxis:** Willst du dem Sub freie Wechsel erlauben → setze `reinigungErlaubt` auf der
-  Sperrzeit UND halte `maxPausesPerDay` hoch genug.
+## 5. Vergehen: ERKANNT ≠ BESTRAFT
+- `detectedOffenseCount` zählt vom System **erkannte** Auffälligkeiten (meist live abgeleitet) — das
+  sind KEINE Strafen. `punished` ist nur gesetzt, wenn DU bestraft hast. Eine Erkennung ist eine
+  **Vorlage für dein Urteil, keine automatische Konsequenz.**
+- Kanonische Typen (`get_offenses`): `unauthorized_opening`, `cleaning_limit`, `late_control`,
+  `rejected_control`, `auto_removed_control`, `wrong_device`, `missed_orgasm`, `late_lock`,
+  `cleaning_not_relocked`.
+- **Urteilen** via `judge_offense` (ref = `id` aus `get_offenses`): `dismiss` (verwerfen),
+  `punish` + `text` (die Strafe als **freier Text** — kein Typen-Zoo, keine automatische Sperre),
+  `complete` (Strafe erledigt), `reopen` (revidieren). `openOffenseCount` = unbeurteilt ODER
+  bestraft-aber-nicht-erledigt. Willst du eine Sperre als Strafe, setze sie separat über
+  `set_lock_period`.
 
 ## 6. Strafbuch — ERKANNT vs. BESTRAFT (wichtigster Punkt)
 - `detectedOffenseCount` zählt vom System **erkannte** Auffälligkeiten. Die meisten sind
@@ -60,85 +75,74 @@ sie verhindert die häufigsten Fehldeutungen.
   - **unauthorizedOpenings**: ein Öffnen während einer aktiven Sperrzeit, das KEINE erlaubte
     Reinigung war (erlaubt nur, wenn grund=REINIGUNG UND Reinigung beim User UND auf der Sperre
     erlaubt). Abgeleitet, `punished:false` bis du strafst.
-  - **reinigungLimitViolations**: eine Reinigungsöffnung **über** dem Tageskontingent
-    (`maxPausesPerDay`). Abgeleitet, `punished:false` bis du strafst. (Wird NICHT mehr
-    automatisch bestraft.)
   - **lateControls / rejectedControls**: zu spät erfüllte bzw. abgelehnte Kontrollen.
   - **wrongDeviceViolations**: ein anderes Gerät getragen als die Anforderung verlangte.
   - **missedOrgasmInstructions**: eine **ANWEISUNG** (Orgasmus-Pflicht, §11), deren Fenster ablief,
     ohne dass ein passender ORGASMUS erfasst wurde. Abgeleitet, `punished:false` bis du strafst.
     (Eine GELEGENHEIT erzeugt KEIN Vergehen, wenn ungenutzt.)
+  - **missedSessions**: eine **Session-Anforderung**, deren Frist ablief, ohne dass eine passende
+    (Mindestdauer/Gerät/Nachweis erfüllende) Session erfasst wurde. Abgeleitet, `punished:false` bis du strafst.
+  - **lateLocks**: eine **Verschluss-Anforderung**, die zu spät (oder gar nicht) erfüllt wurde —
+    die Frist zum Einschliessen lief ab, ohne dass rechtzeitig eingeschlossen wurde. Abgeleitet,
+    `punished:false` bis du strafst. Kanonischer Typ: `late_lock`.
+  - **erektionViolations**: beim Öffnen (Reinigung/Toilette) wurde eine Erektion gemeldet. Abgeleitet,
+    `punished:false` bis du strafst. (Wird NICHT mehr automatisch bestraft.)
+  - **pauseOverageViolations**: eine abgeschlossene Pause überschritt die erlaubte Maximaldauer.
+    Abgeleitet, `punished:false` bis du strafst. (Wird NICHT mehr automatisch bestraft.)
 - **Merke:** Eine erkannte Auffälligkeit ist eine **Vorlage für deine Beurteilung**, keine
   automatische Konsequenz. Ein vereinbarter Wechsel kann erkannt werden, ist aber kein Vergehen
   — du entscheidest, ob du ihn wertest.
+- **Schwere & Strafmaß:** Jedes Vergehen im Ledger trägt eine `severity` (leicht|mittel|schwer);
+  `penaltySuggestionsBySeverity` liefert passende, NICHT bindende Straf-Vorschläge je Stufe.
+  Wähle das Strafmaß proportional zur Schwere. Leitlinie: ein ruinierter Orgasmus (Pflicht) und
+  eine angeordnete Session sind STRAFEN; ein normaler Orgasmus (Gelegenheit/Erlaubnis) ist eine
+  BELOHNUNG und wird NIE als Strafe vergeben.
 
-## 7. Box-Steuerung (über den Tracker, nicht über dich)
-- Der Sub kann aus der Tracker-App die Box **verschließen / öffnen / zur Reinigung öffnen**.
-- **clean_open** = eine Reinigungspause, die die Box trotz Sperrzeit **temporär** öffnet (nur im
-  Fenster + mit Kontingent) und danach wieder verschließt. **Die Sperrzeit bleibt bestehen** und
-  greift nach der Frist weiter.
-- Du als Keyholderin steuerst die Box nicht direkt per MCP — du setzt Sperrzeiten und
-  Reinigungsregeln; die Box enforced sie lokal (auch offline).
+## 7. Orgasmus-Direktive (`request_orgasm`)
+Ein Orgasmus-Fenster mit zwei Charakteren: **ANWEISUNG** = Pflicht (ungenutzt ⇒ `missed_orgasm`,
+erkannt, nicht automatisch bestraft); **GELEGENHEIT** = Erlaubnis (ungenutzt ⇒ keine Folge).
+`openAllowed` erlaubt dem Sub, sich im Fenster zu öffnen, ohne dass das als unautorisierte Öffnung
+zählt. Es ist immer nur EINE Direktive aktiv; Erfüllung automatisch bei passendem ORGASMUS im Fenster.
 
-## 8. Keyholder-Notizen
-- `upsert_note` / `query_notes` / `link_note` (V2): deine privaten, strukturierten Beobachtungen
-  (type, pinned, refs an Objekte, Supersession statt Delete). Gepinnte DIRECTIVE/BOUNDARY-Notizen
-  erscheinen direkt in `keyholder_dashboard`. **Nur über den MCP** — der Sub sieht sie nie.
-  (`add_keyholder_note` / `list_keyholder_notes` / `delete_keyholder_note` sind VERALTET, per
-  `ENABLE_LEGACY_MCP` abschaltbar — nicht mehr verwenden.)
+## 8. Feld-Fallen (die häufigen Fehldeutungen)
+- `maxPausesPerDay` ist eine ANZAHL, keine Minuten.
+- Ein Geräte-Wechsel ist normal (Reinigungspfad) — kein Vergehen an sich. `wearingHoursKg` enthält
+  ihn bereits; nicht doppeln, die Kontinuität bleibt über den Wechsel erhalten.
+- `openControl: null` = gerade keine Kontrolle offen, NICHT „ausgelaufen". Kontrollen verschwinden
+  nie von selbst; eine überfällige bleibt offen mit `overdue: true`.
+- `deviceCheck.status: "wrong"` ist KEIN Vergehen — der Check vergleicht Bild vs. DEKLARATION, nie
+  gegen eine `request_lock`-Anforderung (nur die erzeugt `wrong_device`). `not_checked`/`null` =
+  nicht geprüft, kein Vorwurf. `expected`/`detected` sind zum Prüfzeitpunkt eingefroren — ein altes
+  `wrong` NICHT gegen das heute deklarierte Gerät lesen.
+- `windowOpenNow: null` = kein Fenster offen, NICHT „Öffnen verboten" (die Antwort ist `openingAllowedNow`).
+- `pullOffRisk`: `true` = abstreifbar/unsicher, `false` = geprüft sicher, `null` = nie beurteilt.
+- `securityLevel` (SECURING/TRUST_ONLY) ist v.a. für sichernde Geräte (KG, Halsreif) sinnvoll; `null`
+  ist keine Datenlücke. `trackingEnabled: false` = Inventory-only, liefert per Design keine Sessions —
+  Abwesenheit in `device_stats` ist keine Nichtnutzung.
+- Ehrliche Dauertrage-Marke = `longestUnbrokenSegmentHours` (längstes EINZELNES ununterbrochenes
+  Segment, ein Gerät). `longestRunHours`/`maxHours` sind Session-Bruttosummen über Pausen/Wechsel
+  hinweg — arithmetisch höher, aber keine echte Strecke.
+- `lookalikeClusterId` ist kein lokales Feld: ein Mismatch INNERHALB eines Clusters ist nie ein
+  echtes Vergehen (soft), und ein Setzen rechnet die Geräte-Zuordnung JEDER historischen Session mit
+  Bild-Konflikt rückwirkend neu — vorher den `dryRun`-`diff` prüfen.
 
-## 9. Die Abhängigkeiten in einem Satz
-Geräte-Wechsel → wird als Reinigungsöffnung geloggt → verbraucht das Tageskontingent
-(`maxPausesPerDay`, CH-Kalendertag) → **über Budget** ⇒ `reinigungLimitViolation` (erkannt,
-nicht bestraft); **während einer Sperre ohne `reinigungErlaubt`** ⇒ zusätzlich
-`unauthorizedOpening` (erkannt, nicht bestraft). In beiden Fällen entscheidest **du**, ob es
-eine Strafe gibt.
-
-## 10. Häufige Fehldeutungen (vermeiden)
-- `maxPausesPerDay` ist eine **Anzahl**, keine Minuten. "2" = zwei Öffnungen/Tag.
-- Eine **erkannte** Auffälligkeit ist **nicht automatisch bestraft** (`punishedCount`).
-- Ein **Geräte-Wechsel** ist normal und läuft über den Reinigungspfad — kein Vergehen an sich.
-- `wearingHoursKg` summiert bereits alle Sessions inkl. Wechsel — nicht doppeln, Kontinuität
-  bleibt über einen Wechsel hinweg erhalten.
-- **`get_overview.openKontrolle: null` heißt NICHT „ausgelaufen".** Es heißt nur: gerade ist keine
-  Kontrolle offen. Eine eingereichte Kontrolle ist nicht mehr offen → steht unter
-  `get_overview.lastKontrolle` (mit Code-Verifikation + Geräte-Check). Eine überfällige bleibt offen
-  mit `overdue: true`. Kontrollen verschwinden nie automatisch. Für den vollen Verlauf `list_entries`.
-- **Geräte-Erkennung lesen:** ob das richtige Gerät auf dem Kontroll-Foto war, steht im `deviceCheck`
-  je Eintrag in `list_entries` (und in `lastKontrolle`): `status` ok/wrong/missing + `detected`/
-  `expected`. `null` = nicht geprüft (z.B. keine Referenzfotos hinterlegt) — kein Vorwurf.
-
-## 11. Orgasmus-Direktive (request_orgasm)
-- Du kannst dem Sub einen Orgasmus mit **Zeitfenster** vorgeben (`request_orgasm`). Zwei Charaktere:
-  - **ANWEISUNG** = Pflicht. Wird im Fenster kein passender ORGASMUS erfasst, entsteht ein
-    `missedOrgasmInstructions`-Vergehen (§6, erkannt — nicht automatisch bestraft).
-  - **GELEGENHEIT** = Erlaubnis. Ungenutzt ⇒ keine Konsequenz.
-- Parameter: `art`, Fenster (`beginsAt`/`endsAt` oder `windowHours`), optional `requiredType`
-  (verlangte Orgasmus-Art; sonst zählt jeder), `openAllowed`, `message`.
-- **`openAllowed`**: erlaubt dem Sub, sich im Fenster zum Orgasmus zu **öffnen, ohne** dass das
-  als unautorisierte Öffnung (§6) zählt — analog zur Reinigungs-Ausnahme. Ohne dieses Flag bleibt
-  eine Sperrzeit unangetastet, d.h. Öffnen wäre ein Vergehen.
-- **Erfüllung**: automatisch, sobald der Sub einen ORGASMUS im Fenster (und passend zu
-  `requiredType`, falls gesetzt) erfasst. Es ist immer nur **eine** Direktive aktiv — eine neue
-  ersetzt die vorige. Zurückziehen via `withdraw` mit `target:"orgasm_directive"`.
-- **Lesen**: die aktuell offene Direktive steht in `get_overview.openOrgasmusAnforderung`;
-  verpasste ANWEISUNGEN in `get_strafbuch.missedOrgasmInstructions`.
-
-## 12. Urteils-Loop — über ein Vergehen entscheiden (judge_offense)
-Jedes erkannte Vergehen durchläuft: **erkannt → verworfen** ODER **bestraft → erledigt**.
-- In `get_strafbuch` trägt jedes Vergehen ein `judgment`: `open` (unbeurteilt), `dismissed`
-  (verworfen) oder `punished` (bestraft), plus `judgedBy` (`ai`/`admin`), `judgedAt` und eine stabile
-  `ref {type,id}`. Bei `punished`: `penalty` (der Strafe-Text) und `done`/`doneAt`. Bei `dismissed`: `reason`.
-- **`openOffenseCount`** = die relevanten: unbeurteilt **ODER** bestraft-aber-nicht-erledigt. Ein
-  Vergehen fällt erst raus, wenn es **verworfen** ODER die Strafe **erledigt** ist.
-- **Die Strafe ist ein freier Text** — was „20 Schläge" bedeutet, entscheidest du beim Reinschreiben.
-  Kein Typen-Zoo, keine automatische Sperrzeit. Willst du eine Sperre als Strafe, setze sie separat
-  über `set_lock_period`.
-- **`judge_offense`** (ref = `ref.id` aus get_strafbuch):
-  - `action:"dismiss"` (+ optional `text` = Grund) → **keine Strafe** (verbindlich, sofort).
-  - `action:"punish"` + `text` (die Strafe, erforderlich) → hält die Strafe als Text fest.
-  - `action:"complete"` → markiert die Strafe als **erledigt** (schließt den Loop).
-  - `action:"reopen"` → Urteil zurücknehmen (revidieren).
-- `penalties.punishedCount` in get_overview zählt nur bestrafte Vergehen, keine verworfenen.
-- **Praxis:** Nicht jede Kleinigkeit hart ahnden — verwirf mit kurzem Grund, oder schreib eine Strafe
-  rein und markier sie später erledigt. Klar in der Konsequenz, ohne Automatik.
+## 9. Lesen & Schreiben — der Vertrag
+- **Lesen**: `keyholder_dashboard` beantwortet ~90 % (currentRun vs Personal Best, was JETZT getragen
+  wird, nextRelevant, Ziele/Adhärenz, offene Vergehen, gepinnte Direktiven/Grenzen, BoxState,
+  HealthHold). Danach gezielt Deep-Views: `get_session` (Segmente + `deviceBreakdown`),
+  `device_stats`, `records`, `period_summary`, `denial_trend`, `get_offenses`, `get_devices`,
+  `get_context`, `query_notes`, `get_action_log`, `get_box_state`, `timeline`, `list_entries`
+  (Roh-Einträge). Jede Deep-View trägt eine `schemaVersion` — gleiche Nummer = gleiche Feld-Bedeutung.
+- **Schreiben**: jeder Write braucht **`reason`** (Audit → `get_action_log`) und kennt
+  **`dryRun:true`** (Wirkung/Konflikte vor dem Commit). Ein Edit liefert einen **`diff`** `[alt, neu]`
+  plus den projizierten Nachher-Zustand. Bei einigen direktiven Tools ist `dryRun` ein
+  Vorab-Plausibilitätscheck, keine volle Simulation. Edits auf versionierten Objekten (Note, Gerät,
+  Termin, Wochen-Slot) nehmen **`expectedVersion`** (Optimistic Concurrency: weicht die aktuelle
+  Version ab, wird der Write abgelehnt statt still zu überschreiben — dann neu lesen und wiederholen).
+- **Notizen** (`upsert_note`/`query_notes`/`link_note`) sind deine privaten, versionierten
+  Beobachtungen. Supersession statt Delete: eine abgelöste Note wird `superseded`, die aktuelle trägt
+  `isLatest: true`. Gepinnte DIRECTIVE/BOUNDARY erscheinen im Dashboard. Auch Trainingsziele werden
+  soft-gelöscht (`delete_training_goal` setzt `deletedAt`; `list_training_goals(includeDeleted:true)`
+  zeigt die volle Historie).
+- **Zeiten** sind ISO-8601 mit Offset. Ausnahme: `list_entries` zeigt die Roh-Einträge menschenlesbar
+  im Instanz-Format.

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
-import type { ServiceResult } from "@/lib/serviceResult";
+import { serviceFail, type ServiceResult } from "@/lib/serviceResult";
 import { APP_TZ, midnightInTZ, clamp } from "@/lib/utils";
+import { NO_FIELDS_TO_UPDATE } from "@/lib/constants";
 
 export interface ReinigungsFenster {
   start: string; // "HH:MM"
@@ -57,14 +58,31 @@ export function aktivesReinigungsFenster(raw: unknown, now: Date, tz = APP_TZ): 
   return null;
 }
 
-/** Heute (Sub-Kalendertag in `tz`, default APP_TZ) bereits verbrauchte Reinigungs-Öffnungen — gezählt über CLEAN_OPEN-Fakten (Spur 2). */
+/**
+ * Das nächste Reinigungs-Fenster, das nach `now` (Sub-Lokalzeit `tz`) BEGINNT — sonst das früheste
+ * des Tages (dann liegt es morgen). null, wenn keine Fenster konfiguriert sind (= nicht zeitgebunden).
+ *
+ * Läuft `now` gerade IN einem Fenster, liefert das trotzdem das darauffolgende: „aktuell offen"
+ * beantwortet {@link aktivesReinigungsFenster}, hier geht es um „wann wieder".
+ */
+export function nextReinigungsFenster(raw: unknown, now: Date, tz = APP_TZ): ReinigungsFenster | null {
+  const fenster = parseReinigungsFenster(raw);
+  if (fenster.length === 0) return null;
+  const hhmm = hhmmInTZ(now, tz);
+  const sortiert = [...fenster].sort((a, b) => a.start.localeCompare(b.start));
+  return sortiert.find((f) => f.start > hhmm) ?? sortiert[0];
+}
+
+/** Heute (Sub-Kalendertag in `tz`, default APP_TZ) bereits verbrauchte Reinigungs-Öffnungen — gezählt
+ *  über die OEFFNEN(REINIGUNG)-Einträge des Tages. (Die frühere CLEAN_OPEN-BoxEvent-Zählung war tot:
+ *  solche Events werden nie geschrieben, `usedToday` war real immer 0 und das Tages-Limit griff nie.) */
 export async function reinigungVerbrauchtHeute(userId: string, now: Date, tz = APP_TZ): Promise<number> {
-  return prisma.boxEvent.count({
-    where: { userId, type: "CLEAN_OPEN", at: { gte: midnightInTZ(now, tz) } },
+  return prisma.entry.count({
+    where: { userId, type: "OEFFNEN", oeffnenGrund: "REINIGUNG", startTime: { gte: midnightInTZ(now, tz) } },
   });
 }
 
-/** Stabile MCP-Sicht der Reinigungs-(Cleaning-)Regeln. Eine Quelle für get_overview.reinigung (V1) und
+/** Stabile MCP-Sicht der Reinigungs-(Cleaning-)Regeln. Eine Quelle für
  *  get_context.cleaning (V2): allowed = Öffnungen erlaubt; maxMinutesPerBreak = max Minuten je Öffnung;
  *  maxPausesPerDay = max Öffnungen/Tag (COUNT, null = unbegrenzt); usedToday = heute verbraucht;
  *  timeBound = true wenn Reinigung nur in definierten Zeitfenstern erlaubt ist; false = keine Zeitbeschränkung (jederzeit erlaubt).
@@ -89,6 +107,15 @@ export interface ReinigungUserFields {
   reinigungsFenster: unknown;
 }
 
+/** Die load-bearing Null-Sentinel-Regel für `reinigungMaxProTag`: `0` (der Spalten-Default) heisst
+ *  „unbegrenzt" — nach aussen (get_context.cleaning, MCP dryRun-Previews) immer als `null` zeigen,
+ *  nie als die Zahl `0`, sonst liest sich dieselbe Bedeutung an zwei Stellen unterschiedlich (siehe
+ *  buildReinigungView, mcpSetCleaning-dryRun). EINE Stelle statt der Ausdruck mehrfach hingeschrieben. */
+export function maxPausesPerDaySentinel(raw: number | null | undefined): number | null {
+  const maxProTag = raw ?? 0;
+  return maxProTag > 0 ? maxProTag : null;
+}
+
 /** Baut die ReinigungView aus den User-Feldern + heute-verbraucht + jetzt. Kapselt die load-bearing
  *  Null-Sentinel-Regel (maxProTag>0 ? : null) und die windowOpenNow-Ableitung an EINER Stelle.
  *  `tz` = Sub-Zeitzone (default APP_TZ) — governiert das Wanduhr-Fenster; explizit übergeben statt aus
@@ -97,12 +124,14 @@ export interface ReinigungUserFields {
 export function buildReinigungView(user: ReinigungUserFields, usedToday: number, now: Date, tz = APP_TZ): ReinigungView {
   const maxProTag = user.reinigungMaxProTag ?? 0;
   const parsedWindows = parseReinigungsFenster(user.reinigungsFenster);
+  // timeBound=false (keine Fenster definiert) heisst "jederzeit erlaubt" — dann darf
+  // aktivesReinigungsFenster() gar nicht erst befragt werden, sonst waere windowOpenNow faelschlich null.
   const timeBound = parsedWindows.length > 0;
-  const windowEnd = timeBound ? aktivesReinigungsFenster(user.reinigungsFenster, now, tz) : null;
+  const windowEnd = timeBound ? aktivesReinigungsFenster(user.reinigungsFenster, now, tz) : null; // "HH:MM" oder null
   return {
     allowed: user.reinigungErlaubt ?? false,
     maxMinutesPerBreak: user.reinigungMaxMinuten ?? 15,
-    maxPausesPerDay: maxProTag > 0 ? maxProTag : null,
+    maxPausesPerDay: maxPausesPerDaySentinel(user.reinigungMaxProTag),
     usedToday,
     timeBound,
     windows: parsedWindows,
@@ -110,10 +139,12 @@ export function buildReinigungView(user: ReinigungUserFields, usedToday: number,
   };
 }
 
-/** Max minutes per cleaning pause is clamped to this range. */
-const MAX_MINUTEN_RANGE = { min: 1, max: 120, fallback: 15 } as const;
+/** Max minutes per cleaning pause is clamped to this range. Exported so MCP dryRun previews
+ *  (mcpWrite.ts) can show the CLAMPED value before commit instead of the raw input — the tool's
+ *  own K-06-style silent-clamping trap, closed by construction rather than by another guard. */
+export const MAX_MINUTEN_RANGE = { min: 1, max: 120, fallback: 15 } as const;
 /** Max cleaning pauses per day is clamped to this range (0 = unlimited). */
-const MAX_PRO_TAG_RANGE = { min: 0, max: 20, fallback: 0 } as const;
+export const MAX_PRO_TAG_RANGE = { min: 0, max: 20, fallback: 0 } as const;
 
 /**
  * Updates a user's cleaning-pause (Reinigung) settings. Only provided fields change; numeric
@@ -131,7 +162,7 @@ export async function setReinigungSettings(userId: string, params: SetReinigungP
   // Als JSON-String ablegen (TEXT-Spalte) — nur validierte Paare.
   if (params.fenster !== undefined) data.reinigungsFenster = JSON.stringify(parseReinigungsFenster(params.fenster));
 
-  if (Object.keys(data).length === 0) return { ok: false, status: 400, error: "Keine Felder zum Aktualisieren" };
+  if (Object.keys(data).length === 0) return serviceFail(400, NO_FIELDS_TO_UPDATE);
 
   await prisma.user.update({ where: { id: userId }, data });
   return { ok: true, data: null };

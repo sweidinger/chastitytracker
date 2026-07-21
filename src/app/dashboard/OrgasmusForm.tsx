@@ -6,6 +6,8 @@ import useToast from "@/app/hooks/useToast";
 import useOfflineQueue from "@/app/hooks/useOfflineQueue";
 import OrgasmusFormCore from "@/app/entries/OrgasmusFormCore";
 import type { OrgasmusPayload, SubmitResult } from "@/app/entries/types";
+import { entryRequest, parseApiErrorCode } from "@/lib/apiClient";
+import { useApiError } from "@/app/hooks/useApiError";
 import type { OrgasmusOption } from "@/lib/reasonsService";
 
 interface Props {
@@ -22,6 +24,7 @@ interface Props {
 
 export default function OrgasmusForm({ initial, artOptions, maxTime, tz, nowDefault, redirectTo, fotoPflicht, mobileDesktopMode }: Props) {
   const tCommon = useTranslations("common");
+  const apiError = useApiError();
   const tDash = useTranslations("dashboard");
   const router = useRouter();
   const toast = useToast();
@@ -29,18 +32,11 @@ export default function OrgasmusForm({ initial, artOptions, maxTime, tz, nowDefa
   const target = redirectTo ?? "/dashboard";
 
   async function submitFn(payload: OrgasmusPayload): Promise<SubmitResult> {
-    const url = initial ? `/api/entries/${initial.id}` : "/api/entries";
-    const init: RequestInit = {
-      method: initial ? "PATCH" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    };
+    const [url, init] = entryRequest(initial?.id, payload);
+    // Nur beim Anlegen offline-queuefaehig; ein Edit braucht den echten Server.
     const res = initial ? await fetch(url, init) : await offlineFetch(url, init);
     if (res === null) return { ok: true, offline: true };
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      return { ok: false, error: err.error || tCommon("savingError") };
-    }
+    if (!res.ok) return { ok: false, error: apiError(await parseApiErrorCode(res)) };
     toast.success(initial ? tDash("entryUpdated") : tDash("entrySaved"));
     return { ok: true };
   }
@@ -57,7 +53,7 @@ export default function OrgasmusForm({ initial, artOptions, maxTime, tz, nowDefa
       mobileDesktopMode={mobileDesktopMode}
       submitFn={submitFn}
       onSuccess={() => router.push(target)}
-      onCancel={() => router.push("/dashboard")}
+      onCancel={() => router.push(target)}
       submitVariant="semantic"
     />
   );

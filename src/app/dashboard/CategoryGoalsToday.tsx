@@ -1,4 +1,5 @@
 import { buildCategoryWearGoals, hasAnyGoal } from "@/lib/categoryGoals";
+import { type SegmentEntry } from "@/lib/sessionModel";
 import CategoryGoalsLive from "./CategoryGoalsLive";
 
 interface Props {
@@ -9,14 +10,16 @@ interface Props {
   /** Kategorien, deren Trainingsvorgaben bereits in einer eigenen Session-Karte gezeigt werden
    *  (z.B. der aktive Plug in LaufendePlugSessionCard) — hier NICHT nochmal rendern (kein Doppel). */
   excludeCategoryIds?: string[];
+  /** Die schon geladenen Einträge des Dashboards — erspart eine zweite Entry-Query. */
+  entries?: SegmentEntry[];
 }
 
 /** Server component — fetches per-category wear hours + goals (tracking-enabled non-KG categories
  *  with at least one period target) and hands them to the live client renderer. Categories with a
  *  running wear session tick up live there. Hidden when no goal data. */
-export default async function CategoryGoalsToday({ userId, activeWearSessions = [], excludeCategoryIds = [] }: Props) {
+export default async function CategoryGoalsToday({ userId, activeWearSessions = [], excludeCategoryIds = [], entries }: Props) {
   const now = new Date();
-  const allRows = await buildCategoryWearGoals(userId, now);
+  const allRows = await buildCategoryWearGoals(userId, now, entries);
   const activeCategoryIds = new Set(activeWearSessions.map((s) => s.categoryId));
   const excluded = new Set(excludeCategoryIds);
 

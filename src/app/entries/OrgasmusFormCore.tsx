@@ -15,6 +15,7 @@ import DateTimePicker from "@/app/components/DateTimePicker";
 import Select from "@/app/components/Select";
 import Textarea from "@/app/components/Textarea";
 import Button from "@/app/components/Button";
+import EntryFormShell from "@/app/components/EntryFormShell";
 import { useEntrySubmit } from "@/app/hooks/useEntrySubmit";
 import type { OrgasmusPayload, SubmitResult } from "./types";
 
@@ -106,7 +107,23 @@ export default function OrgasmusFormCore({
   const defaultLabel = isEdit ? tc("update") : t("saveBtn");
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+    <EntryFormShell
+      onSubmit={handleSubmit}
+      onCancel={onCancel}
+      cancelLabel={tc("cancel")}
+      actions={
+        <Button
+          type="submit"
+          variant={submitVariant}
+          semantic={submitVariant === "semantic" ? "orgasm" : undefined}
+          fullWidth
+          loading={saving}
+          icon={submitVariant === "primary" ? <Droplets size={16} /> : undefined}
+        >
+          {submitLabel ?? defaultLabel}
+        </Button>
+      }
+    >
       <RequiredHint />
       <DateTimePicker
         label={tc("dateTime")}
@@ -172,25 +189,6 @@ export default function OrgasmusFormCore({
       />
 
       <FormError message={error} />
-
-      <div className="flex flex-col-reverse sm:flex-row gap-3 pt-1">
-        {onCancel && (
-          <Button type="button" variant="secondary" fullWidth onClick={onCancel}>
-            {tc("cancel")}
-          </Button>
-        )}
-        <Button
-          type="submit"
-          variant={submitVariant}
-          semantic={submitVariant === "semantic" ? "orgasm" : undefined}
-          fullWidth
-          loading={saving}
-          disabled={uploading}
-          icon={submitVariant === "primary" ? <Droplets size={16} /> : undefined}
-        >
-          {submitLabel ?? defaultLabel}
-        </Button>
-      </div>
-    </form>
+    </EntryFormShell>
   );
 }

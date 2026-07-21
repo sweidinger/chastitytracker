@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { verifyKontrolleCodeDetailed } from "@/lib/verifyCode";
-import { deriveSealCode, getLatestKgEntry } from "@/lib/kontrolleService";
+import { requireApi } from "@/lib/authGuards";
+import { verifyKontrolleCodeDeduped } from "@/lib/verifyCache";
+import { deriveSealCode } from "@/lib/kontrolleService";
+import { getLatestKgEntry } from "@/lib/queries";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { isValidImageUrl, VALID_ROTATIONS, type Rotation } from "@/lib/constants";
 import { structuredLog } from "@/lib/serverLog";
@@ -9,8 +10,8 @@ import { structuredLog } from "@/lib/serverLog";
 const log = (label: string, fields: Record<string, unknown>) => structuredLog("verify", label, fields);
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await requireApi();
+  if (session instanceof NextResponse) return session;
 
   const rl = await checkRateLimit(`user:${session.user.id}`, 10, 60_000);
   if (rl.limited) {
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
   // verifyKontrolleCodeDetailed selbst (verify:vision_call/verify:result), keine Doppelung hier.
   const safeRotation: Rotation = VALID_ROTATIONS.includes(rotation) ? rotation : 0;
   log("route:start", { user: session.user.id, codeLen: expectedCode.length, rotation: safeRotation });
-  const result = await verifyKontrolleCodeDetailed(imageUrl, expectedCode, safeRotation, sealCode);
+  const result = await verifyKontrolleCodeDeduped(session.user.id, imageUrl, expectedCode, safeRotation, sealCode);
   if (result === null) {
     return NextResponse.json({ detected: null, match: false, error: true });
   }

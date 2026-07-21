@@ -22,6 +22,10 @@ interface Props {
   /** Nur Keyholder-Sicht: geplante (noch nicht ausgelöste) Sperrzeit → Footer zeigt "geplant für"
    *  statt "gesperrt bis". Sub-Sichten setzen dies NIE (geplante bleiben für den Sub unsichtbar). */
   sperrzeitScheduledFor?: Date | null;
+  /** Erlaubt diese Sperre Reinigungsöffnungen? Fertig übersetzt (i18n bleibt beim Aufrufer).
+   *  Weglassen = nicht anzeigen — ein Sub, der grundsätzlich nicht reinigen darf, soll keine Zeile
+   *  über etwas lesen, das seine Einstellung ohnehin verbietet. */
+  cleaningNote?: string | null;
   activeVorgabe: {
     minProTagH: number | null;
     minProWocheH: number | null;
@@ -38,6 +42,8 @@ interface Props {
   activeCagePauseSince?: string | null;
   /** Name des getragenen KG-Geräts (null = keins gewählt → Unterzeile ausgeblendet). */
   deviceName?: string | null;
+  /** Blendet die „Gerät"-Zeile im Kontroll-Detail ein (true, wenn der Nutzer Geräte hat). */
+  userHasDevices?: boolean;
 }
 
 export default async function LaufendeSessionCard({
@@ -49,6 +55,7 @@ export default async function LaufendeSessionCard({
   sperrzeitUnbefristet = false,
   sperrzeitNachricht,
   sperrzeitScheduledFor = null,
+  cleaningNote,
   activeVorgabe,
   tagH,
   wocheH,
@@ -57,6 +64,7 @@ export default async function LaufendeSessionCard({
   tz = APP_TZ,
   activeCagePauseSince = null,
   deviceName = null,
+  userHasDevices = false,
 }: Props) {
   const t = await getTranslations("dashboard");
   const tCommon = await getTranslations("common");
@@ -150,6 +158,8 @@ export default async function LaufendeSessionCard({
             timeCorrected: isTimeCorrected(ev.time, ev.submittedAt),
             timeCorrectedSystemStr: isTimeCorrected(ev.time, ev.submittedAt)
               ? formatDateTime(ev.submittedAt!, dl, tz) : null,
+            deviceName: ev.deviceName ?? null,
+            showDevice: userHasDevices,
           };
         })}
         sessionStart={sessionStart.toISOString()}
@@ -176,6 +186,9 @@ export default async function LaufendeSessionCard({
           )}
           {sperrzeitNachricht && (
             <span className="text-xs text-sperrzeit truncate">· {sperrzeitNachricht}</span>
+          )}
+          {cleaningNote && (
+            <span className="text-xs text-sperrzeit shrink-0">· {cleaningNote}</span>
           )}
         </div>
       )}

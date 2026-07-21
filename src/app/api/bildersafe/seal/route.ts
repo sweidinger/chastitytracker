@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireApi } from "@/lib/authGuards";
 import { prisma } from "@/lib/prisma";
 import { bildersafeEnabled, isValidImageUrl } from "@/lib/constants";
+import { markLastAction } from "@/lib/appMeta";
 
 /**
  * Bildersafe: ein (neues) versiegeltes Schlüsselbox-Code-Foto an den AKTUELLEN Verschluss hängen.
@@ -9,8 +10,8 @@ import { bildersafeEnabled, isValidImageUrl } from "@/lib/constants";
  * den Reinigungs-Re-Lock-Zyklus ab (neuer Code nach jeder Reinigungsöffnung).
  */
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await requireApi();
+  if (session instanceof NextResponse) return session;
   if (!bildersafeEnabled()) return NextResponse.json({ error: "Bildersafe nicht aktiviert" }, { status: 404 });
 
   const userId = session.user.id;
@@ -33,5 +34,6 @@ export async function POST(req: NextRequest) {
     where: { id: latest.id },
     data: { codeImageUrl, codeReadable: codeReadable ?? null },
   });
+  markLastAction();
   return NextResponse.json({ ok: true });
 }

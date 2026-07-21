@@ -1,5 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
-import { toDateLocale, formatDuration, formatDate, formatTime, formatDateTime, hasExifMismatch, interruptionPauseMs, APP_TZ, isTimeCorrected, type ReinigungSettings } from "@/lib/utils";
+import { toDateLocale, formatDuration, formatDate, formatTime, formatDateTime, hasExifMismatch, interruptionPauseMs, buildLockPoints, wornDeviceNameAt, APP_TZ, isTimeCorrected, isSubVisibleKontrolle, type ReinigungSettings } from "@/lib/utils";
 import { getKombinierterPill } from "@/lib/kontrollePills";
 import { effectiveOrgasmusArten, effectiveOeffnenGruende, resolveOrgasmusArtDisplay, resolveReasonLabel } from "@/lib/reasonsService";
 import SessionListClient, { SessionListData } from "./SessionListClient";
@@ -34,6 +34,10 @@ interface Pair {
   verschluss: Entry;
   oeffnen: Entry | null;
   active: boolean;
+  /** Siehe `PairResult.orphaned` (utils.ts): ein verwaister Verschluss ohne Öffnen ist KEINE echte
+   *  laufende Session, auch wenn `active` (Invariant-bedingt) `true` ist — sonst zeigt die Liste
+   *  einen längst überholten Eintrag dauerhaft als "noch verschlossen" an. */
+  orphaned?: boolean;
   kontrollen: KontrolleItem[];
   interruptions?: { oeffnen: Entry; verschluss: Entry }[];
 }
@@ -64,7 +68,12 @@ export default async function SessionList({ pairs, orgasmusEntries, userHasDevic
   const openLabel = (grund: string | null) => grund ? resolveReasonLabel(grund, openCfg, "opening", tOpen) : null;
 
   const sessions: SessionListData[] = pairs.map((pair) => {
-    const { verschluss, oeffnen, active, kontrollen } = pair;
+    const { verschluss, oeffnen, active: rawActive, orphaned, kontrollen } = pair;
+    const active = rawActive && !orphaned;
+
+    // Getragenes Gerät zu einer Kontroll-Zeit — inkl. Gerätewechsel bei einer Reinigungspause (das
+    // Gerät des jüngsten Verschlusses ≤ Zeitpunkt). Geteilte Logik mit dem Laufende-Session-Timeline.
+    const lockPoints = buildLockPoints(pair);
 
     const dateStr = formatDate(verschluss.startTime, dl, tz);
     const timeStr = formatTime(verschluss.startTime, dl, tz);
@@ -121,7 +130,7 @@ export default async function SessionList({ pairs, orgasmusEntries, userHasDevic
         showDevice: userHasDevices,
       },
       ...kontrollen
-        .filter((k) => k.anforderungStatus !== "withdrawn")
+        .filter(isSubVisibleKontrolle)
         .map((k) => {
           const pill = getKombinierterPill(k.anforderungStatus, k.verifikationStatus, ta);
           const corrected = isTimeCorrected(k.time, k.submittedAt);
@@ -145,6 +154,10 @@ export default async function SessionList({ pairs, orgasmusEntries, userHasDevic
             orgasmusArt: null,
             timeCorrected: corrected,
             timeCorrectedSystemStr: corrected ? formatDateTime(k.submittedAt!, dl, tz) : null,
+            // Getragenes Gerät zum Kontroll-Zeitpunkt (berücksichtigt Gerätewechsel bei einer
+            // Reinigungspause). Wird im Detail unter Datum/Zeit gezeigt.
+            deviceName: wornDeviceNameAt(lockPoints, k.time),
+            showDevice: userHasDevices,
           };
         }),
       ...sessionOrgasmen.map((e) => ({

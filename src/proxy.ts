@@ -1,6 +1,8 @@
 import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { touchAppMeta } from "@/lib/appMeta";
+import { logTimestamp } from "@/lib/logFormat";
 
 // ── Rate limiter für Login-Endpunkt ──────────────────────────────────────────
 const loginBucket = new Map<string, { count: number; resetAt: number }>();
@@ -93,6 +95,10 @@ export default auth(async (req) => {
 
   // "Kein eigener Tracker": der grüne Tracker ist gesperrt und wird nach /admin umgeleitet.
   // /dashboard/settings + /dashboard/changelog bleiben erreichbar (Einstellung zurückschalten, Version).
+  // /dashboard/edit/[id] bleibt erreichbar: Admin/Keyholder erreichen den Edit eines SUB-Eintrags über
+  // /admin/users/[id]/eintraege → EntryActions (editHref=/dashboard/edit/[id]?from=admin&userId=...) —
+  // dort greift entryManageAccess() als eigentliche Ownership-Prüfung; die pauschale Umleitung hier
+  // würde diesen Zugriff blind abfangen, bevor sie überhaupt läuft (Regression, gemeldet 2026-07-17).
   // Frisch aus der DB (nur auf betroffenen /dashboard-Routen abgefragt), damit ein Umschalten sofort greift.
   if (
     isLoggedIn &&
@@ -102,7 +108,8 @@ export default auth(async (req) => {
     (role === "admin" || user.controlsSubs === true) &&
     pathname.startsWith("/dashboard") &&
     !pathname.startsWith("/dashboard/settings") &&
-    !pathname.startsWith("/dashboard/changelog")
+    !pathname.startsWith("/dashboard/changelog") &&
+    !pathname.startsWith("/dashboard/edit")
   ) {
     const dbUser = await prisma.user.findUnique({
       where: { id: user.id },
@@ -129,17 +136,12 @@ export default auth(async (req) => {
       req.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() ??
       req.headers.get("x-real-ip") ??
       "unknown";
-    const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
-    console.log(`[ACCESS] ${ts} | ${user?.name ?? "?"} | ${pathname} | ${ip}`);
+    console.log(`[ACCESS] ${logTimestamp().replace("T", " ")} | ${user?.name ?? "?"} | ${pathname} | ${ip}`);
   }
 
   // Fire-and-forget: track last activity for portal overview
   if (isLoggedIn) {
-    prisma.appMeta.upsert({
-      where:  { key: "lastUsedAt" },
-      create: { key: "lastUsedAt", value: new Date().toISOString() },
-      update: { value: new Date().toISOString() },
-    }).catch(() => {});
+    touchAppMeta("lastUsedAt");
   }
 
   return NextResponse.next();

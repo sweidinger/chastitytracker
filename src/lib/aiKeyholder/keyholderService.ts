@@ -189,7 +189,7 @@ async function buildMessageHistory(
         lines.push(`- Verspätete Kontrolle (Code ${o.code}, Frist ${o.deadline}, Urteil: ${o.judgment})`);
       for (const o of sb.rejectedControls)
         lines.push(`- Abgelehnte Kontrolle (Code ${o.code}, Urteil: ${o.judgment})`);
-      for (const o of sb.missedLockRequests)
+      for (const o of sb.lateLocks)
         lines.push(`- Versäumte Verschluss-Anforderung (${o.categoryName ?? "?"}, Frist bis ${o.windowEndedAt}, Urteil: ${o.judgment})`);
       for (const o of sb.wrongDeviceViolations)
         lines.push(`- Falsches Gerät (${o.deviceName ?? "?"}) am ${o.time ?? "?"} (Urteil: ${o.judgment})`);
@@ -773,7 +773,7 @@ export async function runAutonomousAction(
         lines.push(`- Verspätete Kontrolle (Code ${o.code}, Frist ${o.deadline}, Urteil: ${o.judgment})`);
       for (const o of sb.rejectedControls)
         lines.push(`- Abgelehnte Kontrolle (Code ${o.code}, Urteil: ${o.judgment})`);
-      for (const o of sb.missedLockRequests)
+      for (const o of sb.lateLocks)
         lines.push(`- Versäumte Verschluss-Anforderung (${o.categoryName ?? "?"}, Frist bis ${o.windowEndedAt}, Urteil: ${o.judgment})`);
       for (const o of sb.wrongDeviceViolations)
         lines.push(`- Falsches Gerät (${o.deviceName ?? "?"}) am ${o.time ?? "?"} (Urteil: ${o.judgment})`);

@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { deviceCategoriesGate } from "@/lib/authGuards";
+import { requireApi, deviceCategoriesGate } from "@/lib/authGuards";
+import { entryManageAccess } from "@/lib/keyholder";
 import { validateCategoryInput } from "@/lib/categoryConstants";
 
 type Params = { params: Promise<{ id: string }> };
 
-/** Ownership check: returns the category if the session user owns it (or is admin). */
+/** Access check: returns the category if the session user may manage it — owner, global admin, or
+ *  keyholder of the owner (same rule as entries/devices, see entryManageAccess). */
 async function getOwnedCategory(id: string, sessionUserId: string, sessionRole: string) {
   const category = await prisma.deviceCategory.findUnique({ where: { id } });
   if (!category) return null;
-  if (category.userId !== sessionUserId && sessionRole !== "admin") return null;
+  if (!(await entryManageAccess(sessionUserId, sessionRole, category.userId)).allowed) return null;
   return category;
 }
 
@@ -19,8 +20,8 @@ async function getOwnedCategory(id: string, sessionUserId: string, sessionRole: 
 export async function PATCH(req: NextRequest, { params }: Params) {
   const gate = deviceCategoriesGate();
   if (gate) return gate;
-  const session = await auth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await requireApi();
+  if (session instanceof NextResponse) return session;
 
   const { id } = await params;
   const category = await getOwnedCategory(id, session.user.id, session.user.role);
@@ -62,8 +63,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 export async function DELETE(_req: NextRequest, { params }: Params) {
   const gate = deviceCategoriesGate();
   if (gate) return gate;
-  const session = await auth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await requireApi();
+  if (session instanceof NextResponse) return session;
 
   const { id } = await params;
   const category = await getOwnedCategory(id, session.user.id, session.user.role);
@@ -75,6 +76,10 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
 
   const [deviceCount, vorgabeCount] = await Promise.all([
     prisma.device.count({ where: { categoryId: id } }),
+    // B-04: bewusst OHNE deletedAt-Filter — TrainingVorgabe.categoryId hat ON DELETE SET NULL; würde
+    // eine Kategorie mit nur noch soft-gelöschten Zielen löschbar, verlöre deren Historie stillschweigend
+    // die Kategorie-Zuordnung (fällt auf "KG" zurück). Historische Ziele blockieren die Löschung daher
+    // weiterhin, exakt wie aktive.
     prisma.trainingVorgabe.count({ where: { categoryId: id } }),
   ]);
   if (deviceCount > 0 || vorgabeCount > 0) {

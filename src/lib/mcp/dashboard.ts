@@ -1,72 +1,169 @@
 import { prisma } from "@/lib/prisma";
-import { buildOverview } from "@/lib/mcpOverview";
-import { makeIso, resolveUserContext, loadTrackingContext, type Iso, type NoteDTO } from "@/lib/mcp/common";
-import { buildSessions, type Session } from "@/lib/mcp/segments";
+import { getOpenKontrolle, getActiveSperrzeit, getActiveWearSessions, getActiveOrgasmusAnforderung, getInterruptedSperrzeit, getCurrentLockKeyInBox, getOpenLockRequest } from "@/lib/queries";
+import {
+  buildLockState, mapOpenKontrolle, mapActiveSperrzeit, mapOpenOrgasmusAnforderung,
+  mapActiveWearSessions, mapInterruptedSperrzeit, mapOpenLockRequest,
+  type Fmt, type OpenKontrolleView, type ActiveSperrzeitView, type OpenOrgasmusAnforderungView,
+  type InterruptedSperrzeitView, type OpenLockRequestView,
+} from "@/lib/mcp/liveState";
+import { makeIso, makeFmt, buildEnvelope, resolveUserContext, loadTrackingContext, type Envelope, type Iso, type NoteDTO, type TrackingEntry } from "@/lib/mcp/common";
+import { buildPairs, msToHours } from "@/lib/utils";
+import { buildSessions, isLiveOpenSession, type Session, type DeviceConfidence } from "@/lib/sessionModel";
 import { records, periodSummary, type PeriodSummaryResult } from "@/lib/mcp/stats";
 import { getOffenses, type OffenseRow } from "@/lib/mcp/ledger";
 import { queryNotes } from "@/lib/mcp/notes";
 import { loadActiveHealthHold, type HealthHoldView } from "@/lib/mcp/context";
 
-/** keyholder_dashboard (§0/§12) — EIN Call, der 90 % der Keyholder-Fragen beantwortet: aktueller
+/** keyholder_dashboard (explain_model §13) — EIN Call, der 90 % der Keyholder-Fragen beantwortet: aktueller
  *  Lauf vs. Personal Best, was JETZT getragen wird (alle Kategorien), das Nächst-Relevante, Ziele +
  *  Adhärenz, offene Vergehen, gepinnte Direktiven + Grenzen, BoxState. Komponiert die V2/V1-
  *  Aggregate — rein lesend, MCP-only. */
 
+/** Der EINE Grund für hardwareEnforced:false, in fester Rangfolge (A-07). */
+export type HardwareEnforcedReason = "soll-open" | "reported-open" | "key-not-in-box" | "open-armed" | "stale-lock";
+
 export interface BoxStateView {
   name: string;
+  /** SOLL: soll die Box gerade zu sein? (`boxLocked()` — jede Sperrquelle, eigen ODER Tracker-Sperrzeit).
+   *  Der zuletzt von Heimdall gemeldete Wert; er kippt NICHT durch blossen Zeitablauf, solange die Box
+   *  nicht wieder synct — dafür ist `staleLock` da. */
   locked: boolean;
+  /** Physisches IST: war die Box beim letzten Sync wirklich zu? Kann seit dem Präsenz-Guard
+   *  (FW 0.2.33) vom SOLL abweichen — „soll zu, steht aber offen und wartet auf Knopf/USB".
+   *  `null` = Alt-Zeile ohne IST-Meldung; dann gilt das SOLL (`locked`) als bester Stand. */
+  reportedLocked: boolean | null;
   lockUntil: string | null;
-  /** Konfigurierte ABSICHT (letzter von Heimdall gemeldeter Wert): true = Sperrzeit soll die Box
-   *  physisch halten. Bleibt unverändert stehen, solange die Box nicht wieder synct — bei offline
-   *  KEINE Garantie, dass gerade tatsächlich vollstreckt wird. Für die reale Lage `hardwareEnforcedEffective`. */
+  /** Hält die Box den Schlüssel gerade fest — die EINE ehrliche Vollstreckungs-Antwort, **unabhängig**
+   *  davon, ob die Box gerade online ist. Basiert auf dem IST: true nur, wenn sie zuletzt physisch
+   *  zu gemeldet hat (`reportedLocked`, Fallback `locked`), der Schlüssel wirklich drin liegt
+   *  (`keyInBox !== false`), die Öffnung nicht scharfgestellt ist (`!openArmed`) UND seit dem letzten
+   *  Sync keine Selbst-Öffnung gefeuert hat (`!staleLock`). Ist sie false, nennt genau EIN Feld das
+   *  WARUM: `locked:false` (soll offen), `reportedLocked:false` (steht offen, z.B. wartet auf das
+   *  Präsenz-Fenster), `keyInBox:false` (Ehrensache, Schlüssel beim Sub), `openArmed:true` (zu, aber
+   *  ein Knopfdruck vom Offen entfernt) oder `staleLock:true` (hat sich offline selbst geöffnet). */
   hardwareEnforced: boolean;
-  /** Reale Vollstreckung JETZT: nur true, wenn die Box sowohl online ist als auch hardwareEnforced
-   *  meldet. Offline → immer false (nicht verifizierbar; Box kann nicht mehr lokal blockieren) —
-   *  die Sperre ist dann faktisch Ehrensache, unabhängig vom zuletzt gemeldeten Zustand. */
-  hardwareEnforcedEffective: boolean;
-  /** true = lockUntil liegt in der Vergangenheit UND die Box hat seither nicht mehr gesynct (online:false)
-   *  — der Wert ist veraltet/unbestätigt, nicht zwingend noch gültig. */
-  lockUntilStale: boolean;
+  /** Maschinenlesbare Fassung des „genau EIN Feld nennt das Warum"-Kontrakts (A-07): null wenn
+   *  hardwareEnforced true, sonst der EINE Grund in fester Rangfolge — "soll-open" (locked:false),
+   *  "reported-open" (reportedLocked:false), "key-not-in-box" (keyInBox:false), "open-armed"
+   *  (openArmed:true), "stale-lock" (staleLock:true). */
+  hardwareEnforcedReason: HardwareEnforcedReason | null;
+  /** Die Öffnung ist SCHARFGESTELLT: die Box ist (laut IST) zu, aber die Frist ist verstrichen oder
+   *  das SOLL steht auf offen — seit FW 0.2.34 öffnet sie dann nicht mehr von selbst, sondern beim
+   *  nächsten Knopf/USB-Kontakt, ohne weitere Prüfung. „Hält" zählt das ehrlicherweise nicht mehr. */
+  openArmed: boolean;
+  /** Der zuletzt gemeldete „zu"-Stand (IST) ist nicht mehr verlässlich, weil die Box sich seit dem
+   *  letzten Sync per **Offline-Failsafe** (nach `offlineOpenHours` ohne Sync) **selbst geöffnet**
+   *  hat — der einzige verbliebene deterministische Selbst-Öffner neben Akku-Not (eine abgelaufene
+   *  Frist öffnet seit FW 0.2.34 nicht mehr autonom → dafür `openArmed`). Auch OFFLINE — „online"
+   *  spielt hier bewusst keine Rolle. */
+  staleLock: boolean;
+  /** Deklaration des Subs beim aktuellen Verschluss: liegt der Schlüssel überhaupt in dieser Box?
+   *  `false` = NEIN, er trägt ihn bei sich (z.B. auf Reise) — die Box hat dann bewusst KEIN
+   *  lock-Kommando bekommen. Das ERKLÄRT ein `hardwareEnforced: false`, das sonst wie eine Box-Störung
+   *  aussieht. `null` = nicht erklärt (Alt-Eintrag, Admin-Pfad, keine Box) oder gerade nicht
+   *  verschlossen — sagt NICHTS über den Schlüssel aus und ist KEIN „nein". */
+  keyInBox: boolean | null;
+  /** Direkte Antwort auf die Frage, die eine Alleinzeit-Vorgabe stellt (Käfig zu UND Schlüssel
+   *  drin): `reportedLocked === true && keyInBox === true && !openArmed && !staleLock`. Beide Booleans
+   *  müssen explizit `true` sein UND die Box darf weder scharfgestellt sein (`openArmed` — ein
+   *  Knopfdruck vom Offen) noch sich seit dem letzten Sync deterministisch selbst geöffnet haben
+   *  (`staleLock`) — sonst gilt der gemeldete "zu"-Stand nicht mehr als gesichert (dieselbe Bedingung
+   *  wie bei `hardwareEnforced`, siehe dort) —
+   *  `null` auf einer Seite (nicht gemeldet / nicht erklärt) zählt bewusst NICHT als gesichert,
+   *  auch wenn `keyInBox: null` für sich genommen kein „nein" ist (s. oben). Erspart das
+   *  Verrechnen von `reportedLocked`+`keyInBox`, das A-06 als stille Falle identifiziert hat
+   *  (`keyInBox: true` bei `locked: false` sieht wie eine erfüllte Vorgabe aus, ist aber ein
+   *  offener Käfig mit Schlüssel drin). */
+  keySecured: boolean;
   battery: number | null;
   charging: boolean | null;
-  online: boolean;
   lastSeen: string | null;
+  /** Alter von `lastSeen` in Sekunden zum Zeitpunkt dieser Antwort (`generatedAt`) — beantwortet
+   *  "ist die Box aktuell?" ohne dass die Instanz `lastSeen` gegen `generatedAt` selbst verrechnet
+   *  (A-08: genau dieses Nachrechnen führte am 16.07.2026 zu einem erfundenen Zeitzonen-Bug).
+   *  null = keine Box-Meldung bisher (`lastSeen` ebenfalls null). */
+  lastSeenAgeSeconds: number | null;
 }
 
-export interface DashboardResult {
-  schemaVersion: 2;
+export interface DashboardResult extends Envelope {
+  /** v3: `currentRun.since` = Lauf-Anfang statt jüngster KG-Eintrag (A-01).
+   *  v4 (N-2, MCP-Restliste 2026-07-17): `currentRun.deviceName` und `wornNow[].deviceName` sind
+   *  jetzt das MASSGEBLICHE Gerät (`deviceEffective` — bei image-conflict gewinnt das Bild), NICHT
+   *  mehr das deklarierte. Vorher widersprach das Dashboard als einziger Endpunkt den Deep-Views.
+   *  Neu daneben: `deviceDeclared` + `deviceConfidence`, damit der Konflikt am Ort der Frage sichtbar
+   *  ist. Semantik-Änderung eines Bestandsfelds → schemaVersion-Bump (nicht rein additiv).
+   *  v5 (MCP-Restliste 2026-07-18): `currentRun.since` ist bei `isLocked:false` jetzt `null` (kein
+   *  aktiver Lauf) statt des Öffnen-Zeitpunkts — konsistent mit den dann ebenfalls null-Feldern
+   *  durationHours/deviceName/currentSegmentSince. */
+  schemaVersion: 5;
   user: string;
-  generatedAt: string;
-  timezone: string;
   /** Freitext-Regeln des menschlichen Keyholders (mcpKeyholderInstructions) — bewusst als erstes
    *  Inhaltsfeld: alle Direktiven/Writes müssen diese Regeln befolgen. null = keine gesetzt. */
   keyholderInstructions: string | null;
   currentRun: {
     isLocked: boolean;
+    /** Verschlossen: Beginn des LAUFS (Session-Kopf), deckt sich mit `durationHours`. Nicht
+     *  verschlossen: `null` (kein aktiver Lauf — wie durationHours/deviceName/currentSegmentSince).
+     *  Siehe `currentSegmentSince` für den Segment-Anfang bei Reinigungspausen. */
     since: string | null;
+    /** NUR bei isLocked mit Pausen abweichend von `since`: Beginn des AKTUELLEN Segments (letzter
+     *  Wiederverschluss). Ohne Pausen identisch mit `since`, weiterhin gesetzt (kein Sonderfall). */
+    currentSegmentSince: string | null;
     durationHours: number | null;
+    /** MASSGEBLICHES Gerät des aktuellen Segments (deviceEffective — bei image-conflict das
+     *  verifizierte). Deckt sich mit get_session/device_stats. Siehe deviceDeclared für den Konflikt. */
     deviceName: string | null;
+    /** Am Lock-Entry deklariertes Gerät des aktuellen Segments. Weicht von deviceName ab, wenn eine
+     *  Bildkontrolle widerspricht (deviceConfidence: "image-conflict"). */
+    deviceDeclared: string | null;
+    deviceConfidence: DeviceConfidence | null;
     personalBestHours: number;
     vsPersonalBestPct: number | null;
     /** true, wenn goals.kg.today einen Anteil einer FRÜHEREN (heute geendeten) Session enthält —
      *  dann ist `today` grösser als der durchgehende `durationHours`, ist also NICHT die Lauf-Dauer. */
     todayIncludesPriorSession: boolean;
+    /** Hat der Sub beim Verschluss erklärt, den Schlüssel in die Box gelegt zu haben?
+     *  `false` = er behält ihn (z.B. auf Reise) → die Sperre ist Ehrensache, nicht hardware-vollstreckt.
+     *  `null` = nicht gefragt (keine Box, Admin-Pfad, Alt-Eintrag) oder nicht verschlossen — KEIN „nein". */
+    keyInBox: boolean | null;
   };
   /** Echte (nicht cluster-interne) Bild-Diskrepanzen als reiner Daten-Hinweis — KEINE Vergehen
    *  (eine Routine-Kontrolle hat kein verlangtes Gerät). Cluster-interne Verwechslungen sind hier
    *  bewusst ausgeblendet. */
   dataDiscrepancies: { count: number; items: DiscrepancyItem[] };
-  /** Was JETZT getragen wird — KG + alle Kategorien vereint. */
-  wornNow: { category: string; deviceName: string | null; since: string | null; durationHours: number | null }[];
+  /** Was JETZT getragen wird — KG + alle Kategorien vereint. `since` = Lauf-Anfang (wie
+   *  `currentRun.since`; für das KG-Segment-Detail bei Reinigungspausen `get_session` nutzen —
+   *  diese Zeile hier bleibt bewusst kompakt, ohne Segment-Granularität). */
+  wornNow: { category: string; deviceName: string | null; deviceDeclared: string | null; deviceConfidence: DeviceConfidence | null; since: string | null; durationHours: number | null }[];
   /** Das als Nächstes Relevante: offene Kontrolle / aktive Sperrzeit / Orgasmus-Fenster.
-   *  Zeiten ISO-8601 mit Offset (buildOverview wird mit iso:true komponiert); zusätzlich
+   *  Zeiten ISO-8601 mit Offset (die liveState-Mapper bekommen das `iso`-Format durchgereicht); zusätzlich
    *  remainingMinutes/overdue für direkte Fristfragen. Beim Orgasmus-Fenster zeigt `active` an,
    *  ob der Start (`beginntAt`) schon erreicht ist — `active:false` = geplant, läuft noch NICHT
-   *  (remainingMinutes zählt bis `endetAt`). */
+   *  (remainingMinutes zählt bis `endetAt`).
+   *
+   *  Die Sichten aus `mcp/liveState.ts` werden unverändert übernommen, statt sie hier erneut zu
+   *  beschreiben und Feld für Feld umzukopieren: sonst müsste jedes neue Feld an zwei Stellen
+   *  nachgezogen werden, und wer es vergisst, lässt es stillschweigend aus dem Dashboard fallen.
+   *  Dadurch trägt `openControl` jetzt auch den Kommentar des Keyholders und `openOrgasmWindow`
+   *  dessen Nachricht. */
   nextRelevant: {
-    openControl: { code: string; deadline: string; overdue: boolean; remainingMinutes: number } | null;
-    activeLockPeriod: { endetAt: string | null; indefinite: boolean; remainingMinutes: number | null; reinigungErlaubt: boolean; message: string | null; deviceName: string | null } | null;
-    openOrgasmWindow: { art: string; beginntAt: string; endetAt: string; active: boolean; requiredType: string | null; remainingMinutes: number } | null;
+    openControl: OpenKontrolleView | null;
+    activeLockPeriod: ActiveSperrzeitView | null;
+    /** Eine durch eine ÖFFNUNG beendete Sperrzeit, deren ursprüngliches Ende noch nicht verstrichen
+     *  ist. Sie wird gerade NICHT vollstreckt (`activeLockPeriod` bleibt null) — aber die Konsequenz
+     *  der Keyholderin ist damit auch nicht erledigt. Ohne dieses Feld verschwand sie spurlos, und
+     *  `activeLockPeriod: null` war nicht mehr von „es gab nie eine" zu unterscheiden.
+     *
+     *  Das Feld sagt WIE sie endete, nicht OB sich der Sub etwas zuschulden kommen liess: auch eine
+     *  erlaubte Öffnung (z.B. ein offenes Orgasmus-Fenster) beendet sie und erscheint hier. Ob die
+     *  Öffnung ein Vergehen war, beantwortet allein `get_offenses` — nicht dieses Feld. */
+    interruptedLockPeriod: InterruptedSperrzeitView | null;
+    openOrgasmWindow: OpenOrgasmusAnforderungView | null;
+    /** Offene Verschluss-ANFORDERUNG: der Sub SOLL sich einschliessen, hat es aber noch nicht getan
+     *  (`overdue: true`, wenn die Frist verstrichen ist). Nicht zu verwechseln mit `activeLockPeriod`
+     *  — die Sperrzeit hält einen bestehenden Verschluss, die Anforderung verlangt ihn erst.
+     *  Nur die bereits ausgelöste; geplante stehen in `scheduledDirectives`. */
+    openLockRequest: OpenLockRequestView | null;
   };
   goals: { kg: PeriodSummaryResult["kg"]; categories: PeriodSummaryResult["categories"] };
   openOffenses: { count: number; pendingPenalties: number; top: OffenseRow[] };
@@ -135,7 +232,6 @@ async function loadScheduledDirectives(userId: string, now: Date, iso: Iso): Pro
   return out.sort((a, b) => a.wirksamAb.localeCompare(b.wirksamAb));
 }
 
-const BOX_ONLINE_THRESHOLD_MS = 10 * 60 * 1000;
 /** Toleranz beim Vergleich zweier auf 0.1 h gerundeter Stundenwerte (halbe Bucket-Breite). */
 const ROUND_EPSILON_H = 0.05;
 
@@ -158,65 +254,152 @@ function collectImageConflicts(sessions: Session[], iso: Iso): DiscrepancyItem[]
   );
 }
 
-async function loadBoxState(userId: string, now: Date, iso: Iso): Promise<BoxStateView | null> {
-  const box = await prisma.boxStatus.findFirst({ where: { userId }, orderBy: { updatedAt: "desc" } });
+const loadBoxRow = (userId: string) =>
+  prisma.boxStatus.findFirst({ where: { userId }, orderBy: { updatedAt: "desc" } });
+
+type BoxRow = Awaited<ReturnType<typeof loadBoxRow>>;
+
+/** `keyInBox` kommt vom Verschluss-EINTRAG, nicht aus der Box-Zeile: die Box weiss nicht, ob der
+ *  Schlüssel in ihr liegt — nur der Sub hat das erklärt. Deshalb reicht der Aufrufer die Deklaration
+ *  durch: das Dashboard hat sie gratis aus dem Lock-Zustand (derselbe Wert wie `currentRun.keyInBox`,
+ *  die beiden können so nicht auseinanderlaufen), `get_box_state` lädt sie via `getCurrentLockKeyInBox`. */
+function mapBoxState(box: BoxRow, now: Date, iso: Iso, keyInBox: boolean | null): BoxStateView | null {
   if (!box) return null;
-  const online = box.lastSyncAt ? now.getTime() - box.lastSyncAt.getTime() < BOX_ONLINE_THRESHOLD_MS : false;
+  // Bester bekannter physischer Stand: das gemeldete IST, bei Alt-Zeilen ohne IST-Meldung das SOLL
+  // (= bisheriges Verhalten, bis der erste Heimdall-Push nach dem Rollout das Feld füllt). Bewusst
+  // NICHT `reportedLocked` genannt — das Rückgabefeld gleichen Namens trägt den ROHEN Wert (nullable).
+  const effectiveLocked = box.reportedLocked ?? box.locked;
+  // Scharfgestellt (FW ≥ 0.2.34): Frist verstrichen oder SOLL offen, Box aber (laut IST) noch zu —
+  // sie öffnet nicht mehr von selbst, sondern beim nächsten Knopf/USB-Kontakt. Ein Druck genügt,
+  // ohne Eintrag und ohne weitere Prüfung — als „hält fest" darf das nicht mehr zählen.
+  const openArmed =
+    effectiveLocked && (!box.locked || (box.lockUntil !== null && box.lockUntil <= now));
+  // Selbst geöffnet hat sich die Box seit FW 0.2.34 nur noch per Offline-Failsafe (`offlineOpenHours`
+  // ohne Sync) — nur das entwertet den zuletzt gemeldeten „zu"-Stand; sonst gilt er weiter, egal ob
+  // die Box gerade online ist. `offlineOpenHours` fehlt bei Alt-Zeilen → Term entfällt sicher.
+  const staleLock =
+    effectiveLocked &&
+    box.lastSyncAt !== null &&
+    box.offlineOpenHours != null &&
+    msToHours(now.getTime() - box.lastSyncAt.getTime()) >= box.offlineOpenHours;
+  // hardwareEnforced zieht openArmed zusätzlich ab (main/FW 0.2.34: eine verstrichene Frist öffnet
+  // nicht mehr autonom, sie „armt" — die Box hält physisch nicht mehr im Sinne von „bleibt zu").
+  const hardwareEnforced = effectiveLocked && keyInBox !== false && !openArmed && !staleLock;
+  // Genau EIN Grund, feste Rangfolge (A-07). Muss am SELBEN Wert ansetzen wie `hardwareEnforced`,
+  // nämlich `effectiveLocked` (= reportedLocked ?? locked) — sonst nennt der Grund bei
+  // {locked:false, reportedLocked:true} fälschlich "soll-open", obwohl die Box effektiv zu ist und der
+  // echte Grund key/armed/stale wäre. Ist die Box nicht wirksam zu, trennt reportedLocked===false (IST
+  // offen, "reported-open") von „kein IST-Report + SOLL offen" ("soll-open").
+  const hardwareEnforcedReason: HardwareEnforcedReason | null =
+    hardwareEnforced ? null
+      : !effectiveLocked ? (box.reportedLocked === false ? "reported-open" : "soll-open")
+      : keyInBox === false ? "key-not-in-box"
+      : openArmed ? "open-armed"
+      : "stale-lock";
   return {
     name: box.name,
     locked: box.locked,
+    reportedLocked: box.reportedLocked,
     lockUntil: iso(box.lockUntil),
-    hardwareEnforced: box.keyholderLocked,
-    hardwareEnforcedEffective: online && box.keyholderLocked,
-    lockUntilStale: !online && box.lockUntil !== null && box.lockUntil < now,
+    hardwareEnforced,
+    hardwareEnforcedReason,
+    openArmed,
+    staleLock,
+    keyInBox,
+    keySecured: box.reportedLocked === true && keyInBox === true && !openArmed && !staleLock,
     battery: box.battery,
     charging: box.charging,
-    online,
     lastSeen: iso(box.lastSyncAt),
+    // Math.max(0, …): eine Box, deren gemeldeter Sync minimal vor der Server-Uhr liegt (Netzwerk-
+    // Latenz, leichte Uhr-Drift), soll nie eine negative "Alter"-Zahl liefern — das wäre selbst
+    // wieder der Anlass für eine erfundene Zeitzonen-Theorie (siehe A-08-Kommentar oben).
+    lastSeenAgeSeconds: box.lastSyncAt ? Math.max(0, Math.round((now.getTime() - box.lastSyncAt.getTime()) / 1000)) : null,
   };
 }
 
-export interface BoxStateResult {
-  schemaVersion: 2;
+export interface BoxStateResult extends Envelope {
+  /** v4: neues Feld openArmed (Öffnung scharfgestellt — Frist verstrichen/SOLL offen, Box wartet
+   *  auf Knopf/USB, FW ≥ 0.2.34); staleLock umgedeutet auf NUR den Offline-Failsafe-Term;
+   *  hardwareEnforced zieht openArmed zusätzlich ab. Dazu hardwareEnforcedReason (A-07,
+   *  maschinenlesbarer EINE-Grund-Kontrakt) und der gemeinsame Envelope (generatedAt/timezone, A-08).
+   *  v3: hardwareEnforced IST-basiert (reportedLocked), staleLock ersetzte online. */
+  schemaVersion: 4;
   user: string;
   boxState: BoxStateView | null;
 }
 
-/** Dedizierter BoxState-Read (§11): hardwareEnforced unterscheidet physische Vollstreckung von
- *  Ehrensache. null = keine Box registriert. Throws, wenn der User unbekannt ist. */
+/** Dedizierter BoxState-Read (explain_model §13): hardwareEnforced unterscheidet physische
+ *  Vollstreckung von Ehrensache. null = keine Box registriert. Throws, wenn der User unbekannt ist. */
 export async function getBoxState(username: string): Promise<BoxStateResult> {
   const { id: userId, timezone } = await resolveUserContext(username);
-  return { schemaVersion: 2, user: username, boxState: await loadBoxState(userId, new Date(), makeIso(timezone)) };
+  // Box-Zeile und Schlüssel-Deklaration hängen beide nur an userId — parallel, nicht nacheinander.
+  const [box, keyInBox] = await Promise.all([loadBoxRow(userId), getCurrentLockKeyInBox(userId)]);
+  const now = new Date();
+  const iso = makeIso(timezone);
+  return { schemaVersion: 4, user: username, ...buildEnvelope(now, iso, timezone), boxState: mapBoxState(box, now, iso, keyInBox) };
 }
 
 /** Baut das Dashboard durch Komposition der Aggregate. Throws, wenn der User unbekannt ist. */
 export async function keyholderDashboard(username: string): Promise<DashboardResult> {
   const now = new Date();
-  // Entries/Reinigung/User-id EINMAL laden und an die segment-basierten Aggregate durchreichen,
-  // statt sie pro Aggregat erneut zu scannen. (buildOverview/getOffenses sind V1-Reuse mit eigenem Load.)
+  // Entries/Reinigung/User-id/Keyholder-Regeln EINMAL laden und an alle Aggregate durchreichen,
+  // statt sie pro Aggregat erneut zu scannen. (getOffenses lädt noch selbst.)
   const trackingCtx = await loadTrackingContext(username, now);
   const iso = makeIso(trackingCtx.timezone);
+  // `iso` nimmt auch null; die liveState-Mapper übergeben immer ein Date. Ein Adapter statt eines
+  // Casts an jeder Aufrufstelle.
+  const fmt: Fmt = makeFmt(trackingCtx.timezone);
+  // Paare EINMAL bauen und an buildSessions + buildLockState durchreichen (deren `prePairs`-Doku
+  // erklärt das Sharing).
+  const pairs = buildPairs<TrackingEntry, never>(trackingCtx.entries, [], trackingCtx.reinigung);
   // Sessions EINMAL bauen und teilen (records + dataDiscrepancies), statt buildSessions doppelt.
-  const sessions = buildSessions(trackingCtx.entries, trackingCtx.reinigung, now, trackingCtx.devices);
+  const sessions = buildSessions(trackingCtx.entries, trackingCtx.reinigung, now, trackingCtx.devices, pairs);
 
-  const [overview, rec, periods, ledger, pinned, boxState, healthHold, scheduledDirectives] = await Promise.all([
-    buildOverview(username, { iso: true }),
+  // Live-Zustand direkt aus der Helfer-Schicht (mcp/liveState.ts) — nicht mehr durch die fertige
+  // V1-Antwort von buildOverview hindurch, die ~14 weitere Felder samt vier ungenutzter Queries
+  // (Strafen-Zähler, Keyholder-Notizen, Reinigungs-Verbrauch, offene Verschluss-Anforderung) baute.
+  const [openKontrolleRow, activeSperrzeitRow, openLockRequestRow, interruptedSperrzeitRow, activeWearRows, openOrgasmusRow,
+         rec, periods, ledger, pinned, boxRow, healthHold, scheduledDirectives] = await Promise.all([
+    getOpenKontrolle(trackingCtx.userId, now),
+    getActiveSperrzeit(trackingCtx.userId),
+    getOpenLockRequest(trackingCtx.userId, now),
+    getInterruptedSperrzeit(trackingCtx.userId, now),
+    getActiveWearSessions(trackingCtx.userId),
+    getActiveOrgasmusAnforderung(trackingCtx.userId, now),
     records(username, trackingCtx, sessions),
     periodSummary(username, trackingCtx),
     getOffenses(username),
     queryNotes(username, { pinned: true, status: "active", limit: 50 }),
-    loadBoxState(trackingCtx.userId, now, iso),
+    loadBoxRow(trackingCtx.userId),
     loadActiveHealthHold(trackingCtx.userId, iso),
     loadScheduledDirectives(trackingCtx.userId, now, iso),
   ]);
 
+  const lock = buildLockState(trackingCtx.entries, trackingCtx.reinigung, now, fmt, pairs);
+  // N-2: das MASSGEBLICHE Gerät des laufenden KG-Segments (deviceEffective — bei image-conflict
+  // gewinnt das Bild), aus derselben Session-Segmentierung wie die Deep-Views. `lock.deviceName`
+  // trägt nur das DEKLARIERTE Gerät; ohne diese Überlagerung sagte das Dashboard als einziger
+  // Endpunkt das falsche Gerät. Das aktuelle Segment ist das letzte einer offenen, nicht-orphaned
+  // Session; fehlt es (Alt-Verschluss ohne Segment), fällt alles auf die Deklaration zurück.
+  const currentSegment = sessions.find(isLiveOpenSession)?.segments.at(-1) ?? null;
+  const kgEffectiveName = currentSegment?.deviceEffective.name ?? lock.deviceName;
+  const kgDeclaredName = currentSegment?.deviceDeclared.name ?? lock.deviceName;
+  const kgConfidence = currentSegment?.deviceConfidence ?? null;
+  const activeWearSessions = mapActiveWearSessions(activeWearRows, now, fmt);
+  // Die Box-Sicht erbt die Schlüssel-Deklaration aus DEMSELBEN Lock-Zustand wie currentRun — die
+  // beiden Felder einer Antwort können so nicht auseinanderlaufen, und es kostet keine Query.
+  const boxState = mapBoxState(boxRow, now, iso, lock.keyInBox);
+
   // wornNow: KG-Lock (falls verschlossen) + aktive Wear-Sessions der Kategorien.
   const wornNow: DashboardResult["wornNow"] = [];
-  if (overview.lock.isLocked) {
-    wornNow.push({ category: "KG", deviceName: overview.lock.deviceName, since: overview.lock.since, durationHours: overview.lock.currentDurationHours });
+  if (lock.isLocked) {
+    wornNow.push({ category: "KG", deviceName: kgEffectiveName, deviceDeclared: kgDeclaredName, deviceConfidence: kgConfidence, since: lock.since, durationHours: lock.currentDurationHours });
   }
-  for (const w of overview.activeWearSessions) {
-    wornNow.push({ category: w.category, deviceName: w.deviceName, since: w.since, durationHours: w.durationHours });
+  for (const w of activeWearSessions) {
+    // Wear-Sessions durchlaufen keine KG-Bildkontroll-Segmentierung → deklariert == effektiv,
+    // deviceConfidence "declared" — konsistent mit get_session, das eine Wear-Session über
+    // reconcileDevice ohne Bildkontrolle ebenfalls auf "declared" auflöst (N-2).
+    wornNow.push({ category: w.category, deviceName: w.deviceName, deviceDeclared: w.deviceName, deviceConfidence: "declared", since: w.since, durationHours: w.durationHours });
   }
 
   const openOffenseRows = ledger.offenses.filter((o) => o.status === "open");
@@ -230,32 +413,36 @@ export async function keyholderDashboard(username: string): Promise<DashboardRes
   const discrepancyItems = collectImageConflicts(sessions, iso);
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 5,
     user: username,
-    generatedAt: iso(now)!,
-    timezone: trackingCtx.timezone,
-    keyholderInstructions: overview.keyholderInstructions,
+    ...buildEnvelope(now, iso, trackingCtx.timezone),
+    keyholderInstructions: trackingCtx.keyholderInstructions,
     currentRun: {
-      isLocked: overview.lock.isLocked,
-      since: overview.lock.since,
-      durationHours: overview.lock.currentDurationHours,
-      deviceName: overview.lock.deviceName,
+      isLocked: lock.isLocked,
+      since: lock.since,
+      currentSegmentSince: lock.currentSegmentSince,
+      durationHours: lock.currentDurationHours,
+      deviceName: kgEffectiveName,
+      deviceDeclared: kgDeclaredName,
+      deviceConfidence: kgConfidence,
       personalBestHours: rec.longestRunHours,
       vsPersonalBestPct: rec.currentRunVsPbPct,
       todayIncludesPriorSession,
+      keyInBox: lock.keyInBox,
     },
     dataDiscrepancies: { count: discrepancyItems.length, items: discrepancyItems.slice(0, 5) },
     wornNow,
     nextRelevant: {
-      openControl: overview.openKontrolle
-        ? { code: overview.openKontrolle.code, deadline: overview.openKontrolle.deadline, overdue: overview.openKontrolle.overdue, remainingMinutes: overview.openKontrolle.remainingMinutes }
-        : null,
-      activeLockPeriod: overview.activeSperrzeit
-        ? { endetAt: overview.activeSperrzeit.endetAt, indefinite: overview.activeSperrzeit.indefinite, remainingMinutes: overview.activeSperrzeit.remainingMinutes, reinigungErlaubt: overview.activeSperrzeit.reinigungErlaubt, message: overview.activeSperrzeit.message, deviceName: overview.activeSperrzeit.deviceName }
-        : null,
-      openOrgasmWindow: overview.openOrgasmusAnforderung
-        ? { art: overview.openOrgasmusAnforderung.art, beginntAt: overview.openOrgasmusAnforderung.beginntAt, endetAt: overview.openOrgasmusAnforderung.endetAt, active: overview.openOrgasmusAnforderung.active, requiredType: overview.openOrgasmusAnforderung.requiredType, remainingMinutes: overview.openOrgasmusAnforderung.remainingMinutes }
-        : null,
+      openControl: mapOpenKontrolle(openKontrolleRow, now, fmt),
+      activeLockPeriod: mapActiveSperrzeit(activeSperrzeitRow, now, fmt),
+      // Eine laufende Sperrzeit LÖST die unterbrochene AB: die Keyholderin hat auf den Bruch
+      // geantwortet, die alte muss nicht weiter angemahnt werden. Ohne diese Ablösung bliebe eine
+      // UNBEFRISTETE unterbrochene Sperrzeit (`endetAt: null`) für immer stehen — sie läuft nie ab,
+      // und jeder Withdraw-Pfad filtert auf `withdrawnAt: null`, greift bei ihr also nicht mehr.
+      // Sie wäre ein Dauer-Gespenst im Dashboard, das niemand mehr wegbekommt.
+      interruptedLockPeriod: activeSperrzeitRow ? null : mapInterruptedSperrzeit(interruptedSperrzeitRow, fmt),
+      openOrgasmWindow: mapOpenOrgasmusAnforderung(openOrgasmusRow, now, fmt),
+      openLockRequest: mapOpenLockRequest(openLockRequestRow, now, fmt),
     },
     goals: { kg: periods.kg, categories: periods.categories },
     openOffenses: { count: ledger.openOffenseCount, pendingPenalties: ledger.pendingPenaltyCount, top: openOffenseRows.slice(0, 5) },

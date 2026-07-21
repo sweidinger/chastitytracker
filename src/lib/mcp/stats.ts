@@ -1,10 +1,11 @@
-import { calculateWearingHoursByRange } from "@/lib/utils";
+import { calculateWearingHoursByRange, median, msToHours, round1, summarizeDurations } from "@/lib/utils";
 import { proratedVorgabeTargets } from "@/lib/goalFulfillment";
 import { getActiveVorgabe } from "@/lib/queries";
 import { buildCategoryWearGoals, hasAnyGoal } from "@/lib/categoryGoals";
-import { buildSessions, deviceGroupKey, deviceDisplayName, type Session } from "@/lib/mcp/segments";
-import { round1, msToHours, pct } from "@/lib/mcp/format";
-import { makeIso, loadTrackingContext, type TrackingContext, type TrackingEntry } from "@/lib/mcp/common";
+import { buildSessions, buildWearSessions, deviceDisplayName, deviceGroupKey, isLiveOpenSession, isUnassignedDevice, segmentsByDevice, type DeviceRef, type Session, type Segment } from "@/lib/sessionModel";
+import { pct } from "@/lib/mcp/format";
+import { makeIso, buildEnvelope, loadTrackingContext, loadCategoryNames, type Envelope, type TrackingContext, type TrackingEntry } from "@/lib/mcp/common";
+import { prisma } from "@/lib/prisma";
 
 /** Vorberechnete Statistiken & Rekorde aus SEGMENTEN (nicht Labels) — §5/§6/§7. Rein lesend.
  *  Jedes Tool nimmt optional einen vorgeladenen TrackingContext (vom keyholder_dashboard), um
@@ -13,15 +14,6 @@ import { makeIso, loadTrackingContext, type TrackingContext, type TrackingEntry 
 /** Liefert den vorgeladenen Kontext oder lädt ihn (Einzel-Aufruf). */
 const ctxOf = (username: string, ctx?: TrackingContext) => ctx ?? loadTrackingContext(username);
 
-/** Median einer Zahlenliste (leere Liste → 0). */
-function median(values: number[]): number {
-  if (values.length === 0) return 0;
-  const s = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(s.length / 2);
-  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-}
-
-const HOUR = 3_600_000;
 const DAY = 86_400_000;
 
 // ── device_stats ─────────────────────────────────────────────────────────────
@@ -29,66 +21,195 @@ const DAY = 86_400_000;
 export interface DeviceStatRow {
   deviceId: string | null;
   deviceName: string | null;
-  segmentCount: number;
+  /** Name der Geräte-Kategorie („KG", „Plug", „Halsband" …). Beim Sammel-Posten ohne Gerät immer
+   *  die KG-Kategorie: nur ein KG-Verschluss kann ohne Gerät gebucht werden, ein WEAR-Eintrag
+   *  verlangt eines. Damit ist der Posten nicht länger mehrdeutig. */
+  category: string | null;
+  /** Wie oft das Gerät GETRAGEN wurde. Eine Reinigungspause trennt nicht: ein KG, das über zwei
+   *  Pausen hinweg drangeblieben ist, ist EINE Session (mit drei Segmenten), nicht drei. */
+  sessionCount: number;
   totalHours: number;
   avgHours: number;
   medianHours: number;
   minHours: number;
-  /** Längste durchgehende Strecke (ein Segment). */
+  /** Längste einzelne SESSION dieses Geräts (Reinigungspausen sind darin abgezogen, aber nicht
+   *  trennend) — kann also mehrere Segmente über Pausen hinweg umfassen und liegt damit ARITHMETISCH
+   *  über einer echten Dauertrage-Strecke. Für die ehrliche, ununterbrochene Marke
+   *  `maxUnbrokenSegmentHours` nutzen (A-15, MCP-Restliste 2026-07-17). */
   maxHours: number;
+  /** Längstes EINZELNES, ununterbrochenes Segment dieses Geräts — die ehrliche Dauertrage-Marke,
+   *  deckt sich mit `records.longestUnbrokenSegmentHours`, wenn dieses Gerät den Rekord hält. */
+  maxUnbrokenSegmentHours: number;
+  /** Start der zuletzt begonnenen Session dieses Geräts (NICHT das Ende). */
   lastWornAt: string | null;
+  /** Ende der zuletzt getragenen Strecke, oder `null`, wenn das Gerät GERADE getragen wird (dann
+   *  sagt `isWornNow: true`). Behebt, dass `lastWornAt` allein nicht unterscheidet „seither abgelegt"
+   *  von „läuft noch" (K-20, MCP-Restliste 2026-07-17). */
+  lastWornUntil: string | null;
+  /** true, wenn das Gerät im Moment getragen wird (die aktuell offene Strecke gehört ihm). */
+  isWornNow: boolean;
 }
 
-export interface DeviceStatsResult {
-  schemaVersion: 2;
+/** Grund, warum eine Strecke ohne Geräte-Zuordnung dasteht (A-09, MCP-Restliste 2026-07-17). */
+export type UnassignedReason = "pre_device_tracking" | "not_declared";
+export interface UnassignedStatRow extends DeviceStatRow {
+  /** `pre_device_tracking`: aus der Zeit vor der Geräte-Erfassung (kein Gerät WÄHLBAR, echte
+   *  Projektgeschichte). `not_declared`: aktuelle Strecke, bei der schlicht kein Gerät gewählt wurde
+   *  (Erfassungslücke, korrigierbar). Getrennt am Stichtag = frühestes Geräte-`createdAt`. */
+  reason: UnassignedReason;
+}
+
+export interface DeviceStatsResult extends Envelope {
+  /** v5: `unassigned` ist jetzt eine LISTE, aufgeteilt nach `reason` (pre_device_tracking vs
+   *  not_declared, A-09); jede Geräte-Zeile trägt zusätzlich `lastWornUntil`+`isWornNow` (K-20).
+   *  v4: `devices` enthält nur echte Geräte; der Sammel-Posten ohne Zuordnung steht separat. */
+  schemaVersion: 5;
   user: string;
   devices: DeviceStatRow[];
+  /** KG-Tragezeiten ohne Geräte-Zuordnung (deviceId null), getrennt nach `reason` — kein Gerät,
+   *  nicht mit `devices` mischen. Leer, wenn alles zugeordnet ist. */
+  unassigned: UnassignedStatRow[];
 }
 
-/** Pro Gerät total/avg/median/min/max + längste Strecke + zuletzt getragen, aus allen Segmenten. */
-export async function deviceStats(username: string, ctx?: TrackingContext): Promise<DeviceStatsResult> {
-  const { entries, reinigung, devices, now, timezone } = await ctxOf(username, ctx);
-  const iso = makeIso(timezone);
-  const sessions = buildSessions(entries, reinigung, now, devices);
+/** Was pro Gerät gesammelt wird, bevor daraus eine Zeile wird. `lastSeg*`/`wornNow` verfolgen das
+ *  zuletzt BEGONNENE Segment (für K-20 lastWornUntil/isWornNow). */
+type DeviceAgg = {
+  device: DeviceRef; category: string | null; durations: number[]; lastWorn: Date; maxSegmentMs: number;
+  lastSegStart: Date; lastWornEnd: Date | null; wornNow: boolean;
+};
 
-  const byDevice = new Map<string, { id: string | null; name: string | null; durations: number[]; lastWorn: Date }>();
-  for (const s of sessions) {
-    for (const seg of s.segments) {
-      // Nach dem MASSGEBLICHEN Gerät (Bild gewinnt bei echtem Konflikt), wie deviceBreakdown.
-      const key = deviceGroupKey(seg.deviceEffective);
-      const row = byDevice.get(key) ?? { id: seg.deviceEffective.id, name: seg.deviceEffective.name, durations: [], lastWorn: seg.start };
-      row.durations.push(seg.durationMs);
-      if (seg.start > row.lastWorn) row.lastWorn = seg.start;
+/** Aggregations-Schlüssel: echte Geräte über `deviceGroupKey`; Strecken OHNE Gerät werden am
+ *  Stichtag in zwei Töpfe getrennt (A-09), damit Projektgeschichte nicht mit einer aktuellen
+ *  Erfassungslücke verschmilzt. */
+function aggKey(device: DeviceRef, whenMs: number, cutoffMs: number): string {
+  if (!isUnassignedDevice(device)) return deviceGroupKey(device);
+  return whenMs < cutoffMs ? "unassigned:pre_device_tracking" : "unassigned:not_declared";
+}
+
+/** Die Geräte-Strecken einer Session-Liste in ihre Geräte-Töpfe. Gezählt werden damit SESSIONS,
+ *  nicht Segmente: `deviceWearingsOf` fasst die Segmente eines Geräts innerhalb einer Session zu
+ *  EINER Strecke zusammen — eine Reinigungspause zerlegt eine durchgehende Tragezeit nicht mehr in
+ *  mehrere „Nutzungen". Die Stunden bleiben unberührt (die Pause steckt in keinem Segment). */
+function collectSessions(byDevice: Map<string, DeviceAgg>, sessions: Session[], categoryOf: (s: Session) => string | null, cutoffMs: number): void {
+  for (const session of sessions) {
+    const category = categoryOf(session);
+    // Die unzugeordneten Segmente EINER Session gehören derselben Ära → EINMAL klassifizieren (am
+    // frühesten unassigned-Start) und in beiden Schleifen denselben Topf nutzen. Sonst könnte eine
+    // Session, die den Stichtag überspannt, ihre Segmente auf beide A-09-Töpfe verteilen — und ein
+    // Segment im „falschen" Topf fände in Schleife 2 keine Row (still verworfen).
+    let unassignedStartMs = Infinity;
+    for (const seg of session.segments) if (isUnassignedDevice(seg.deviceEffective)) unassignedStartMs = Math.min(unassignedStartMs, seg.start.getTime());
+    const keyOf = (d: DeviceRef, fallbackMs: number) => aggKey(d, isUnassignedDevice(d) ? unassignedStartMs : fallbackMs, cutoffMs);
+    for (const [, w] of segmentsByDevice(session.segments)) {
+      const key = keyOf(w.device, w.start.getTime());
+      const row = byDevice.get(key) ?? { device: w.device, category, durations: [], lastWorn: w.start, maxSegmentMs: 0, lastSegStart: new Date(0), lastWornEnd: null, wornNow: false };
+      row.durations.push(w.durationMs);
+      if (w.start > row.lastWorn) row.lastWorn = w.start;
       byDevice.set(key, row);
     }
+    // A-15: längstes EINZELNES, ununterbrochenes Segment je Gerät — feiner als segmentsByDevice, das
+    // die Segmente eines Geräts innerhalb der Session zu einer (über Pausen hinweg summierten) Strecke
+    // zusammenfasst. Die Row existiert hier garantiert (jedes Segment steckt in segmentsByDevice oben).
+    // Nur ABGESCHLOSSENE Segmente (`end !== null`) zählen für die Bestmarke — ein laufendes, noch
+    // wachsendes Segment ist keine fertige Marke; für K-20 (lastWornUntil/isWornNow) zählt es aber sehr
+    // wohl, deshalb kein `continue` mehr, sondern die Marke unter die abgeschlossenen gefiltert.
+    for (const seg of session.segments) {
+      const row = byDevice.get(keyOf(seg.deviceEffective, seg.start.getTime()));
+      if (!row) continue;
+      if (seg.end !== null && seg.durationMs > row.maxSegmentMs) row.maxSegmentMs = seg.durationMs;
+      // K-20: das zuletzt BEGONNENE Segment bestimmt lastWornUntil (dessen Ende) und isWornNow (offen?).
+      if (seg.start >= row.lastSegStart) { row.lastSegStart = seg.start; row.lastWornEnd = seg.end; row.wornNow = seg.end === null; }
+    }
   }
+}
 
-  const rows = [...byDevice.values()]
-    .map((r) => {
-      const total = r.durations.reduce((a, b) => a + b, 0);
-      return {
-        deviceId: r.id,
-        deviceName: deviceDisplayName({ id: r.id, name: r.name }),
-        segmentCount: r.durations.length,
-        totalHours: msToHours(total),
-        avgHours: msToHours(total / r.durations.length),
-        medianHours: msToHours(median(r.durations)),
-        minHours: msToHours(Math.min(...r.durations)),
-        maxHours: msToHours(Math.max(...r.durations)),
-        lastWornAt: iso(r.lastWorn),
-      };
-    })
-    .sort((a, b) => b.totalHours - a.totalHours);
+/**
+ * Pro Gerät total/avg/median/min/max + längste Strecke + zuletzt getragen.
+ *
+ * Über ALLE Kategorien, nicht nur KG. Das ist der Kern eines gemeldeten Bugs (14.07.2026): ein Plug
+ * mit sauber geloggtem WEAR_BEGIN→WEAR_END-Zyklus tauchte hier überhaupt nicht auf — weder unter
+ * seinem Namen noch im „ohne Gerät"-Topf. Grund war nicht die Zuordnung in den Rohdaten (die stimmt),
+ * sondern dass `buildSessions` ausschliesslich KG-Paare (VERSCHLUSS/OEFFNEN) kennt. Nicht-KG-Geräte
+ * bilden WEAR-Paare, und die wurden nie gepaart.
+ *
+ * Zwei Pfade, weil KG und WEAR verschiedene Dinge SIND: eine KG-Session zerfällt an Reinigungspausen
+ * in Segmente und kennt Bild-gegen-Deklaration-Konflikte — beides hat WEAR nicht. Beide liefern
+ * dieselbe `Session`-Form: KG über `buildSessions`, WEAR über `buildWearSessions` (dort steht auch,
+ * warum WEAR je GERÄT und nicht je Kategorie gepaart wird). Genau dieselben Sessions zeigt
+ * `get_session` — die Statistik zählt sie nur zusammen.
+ */
+export async function deviceStats(username: string, ctx?: TrackingContext): Promise<DeviceStatsResult> {
+  const { userId, entries, reinigung, devices, now, timezone } = await ctxOf(username, ctx);
+  const iso = makeIso(timezone);
+  // Stichtag für A-09: das früheste Geräte-`createdAt`. Strecken davor konnten kein Gerät haben
+  // (Projektgeschichte), Strecken danach ohne Gerät sind eine Erfassungslücke. Ohne Geräte im
+  // Inventar gab es nie etwas zu deklarieren → Stichtag = Infinity, alles ist Projektgeschichte.
+  const [{ nameById, kgName }, firstDevice] = await Promise.all([
+    loadCategoryNames(userId),
+    prisma.device.findFirst({ where: { userId }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }),
+  ]);
+  const cutoffMs = firstDevice ? firstDevice.createdAt.getTime() : Infinity;
 
-  return { schemaVersion: 2, user: username, devices: rows };
+  const byDevice = new Map<string, DeviceAgg>();
+
+  // ── KG: Reinigungspausen sind bereits abgezogen, das massgebliche Gerät aufgelöst ──
+  // orphaned ausschliessen (siehe records()): eine verwaiste Session läuft bis `now` weiter und
+  // würde sonst Phantom-Stunden in die Geräte-Summe schreiben (buildWearSessions filtert das
+  // bereits selbst, siehe sessionModel.ts).
+  collectSessions(byDevice, buildSessions(entries, reinigung, now, devices).filter((s) => !s.orphaned), () => kgName, cutoffMs);
+
+  // ── Nicht-KG: dieselben Trage-Sessions, die auch `get_session` zeigt ──
+  collectSessions(byDevice, buildWearSessions(entries, now),
+    (s) => (s.categoryId ? nameById.get(s.categoryId) ?? null : null), cutoffMs);
+
+  const toRow = (r: DeviceAgg): DeviceStatRow => {
+    const m = summarizeDurations(r.durations);
+    return {
+      deviceId: r.device.id,
+      deviceName: deviceDisplayName(r.device),
+      category: r.category,
+      sessionCount: m.count,
+      totalHours: msToHours(m.totalMs),
+      avgHours: msToHours(m.avgMs),
+      medianHours: msToHours(m.medianMs),
+      minHours: msToHours(m.minMs),
+      maxHours: msToHours(m.maxMs),
+      maxUnbrokenSegmentHours: msToHours(r.maxSegmentMs),
+      lastWornAt: iso(r.lastWorn),
+      lastWornUntil: r.wornNow ? null : iso(r.lastWornEnd),
+      isWornNow: r.wornNow,
+    };
+  };
+
+  // Sammel-Posten ohne Gerät sind kein Gerät — eigenes Feld statt gleichberechtigter Pseudo-Zeilen
+  // zwischen den echten Geräten. Getrennt wird an der QUELLE (weder id noch Name), nicht am
+  // Anzeigenamen: Legacy-Strecken mit Namen aber ohne Geräte-id sind echte (Name-only-)Geräte und
+  // bleiben in `devices`. Die beiden A-09-Töpfe stehen unter festen Schlüsseln (siehe aggKey).
+  const unassignedRow = (key: string, reason: UnassignedReason): UnassignedStatRow[] => {
+    const agg = byDevice.get(key);
+    return agg ? [{ ...toRow(agg), reason }] : [];
+  };
+  return {
+    schemaVersion: 5,
+    user: username,
+    ...buildEnvelope(now, iso, timezone),
+    devices: [...byDevice.values()].filter((r) => !isUnassignedDevice(r.device)).map(toRow).sort((a, b) => b.totalHours - a.totalHours),
+    unassigned: [
+      ...unassignedRow("unassigned:pre_device_tracking", "pre_device_tracking"),
+      ...unassignedRow("unassigned:not_declared", "not_declared"),
+    ],
+  };
 }
 
 // ── records ──────────────────────────────────────────────────────────────────
 
-export interface RecordsResult {
+export interface RecordsResult extends Envelope {
   schemaVersion: 2;
   user: string;
-  /** Längster Lauf (interruption-bereinigte Session-Dauer). */
+  /** Längster Lauf (interruption-bereinigte Session-DAUER, geräteübergreifend summiert). Eine
+   *  Session mit mehreren Reinigungspausen und Gerätewechseln stellt eine lückenlose Ein-Geräte-
+   *  Strecke hier ARITHMETISCH über eine echte hinüber (A-14, MCP-Befundliste 2026-07-17) — für die
+   *  ehrliche Dauertrage-Marke `longestUnbrokenSegmentHours` nutzen. */
   longestRunHours: number;
   longestRunEndedAt: string | null;
   /** Aktuell laufende Session (offen), falls vorhanden. */
@@ -98,6 +219,15 @@ export interface RecordsResult {
   /** Stunden seit dem letzten Orgasmus (aktuelle Entsagungs-Strecke). */
   orgasmFreeHours: number | null;
   longestOrgasmFreeHours: number | null;
+  /** Die ehrliche Dauertrage-Marke (A-14): das längste EINZELNE, abgeschlossene Segment — durchgehend,
+   *  EIN Gerät, keine Reinigungspause darin. Anders als `longestRunHours` NICHT geräteübergreifend
+   *  summiert. null-Felder, wenn es noch kein abgeschlossenes Segment gibt. */
+  longestUnbrokenSegmentHours: number | null;
+  longestUnbrokenSegmentEndedAt: string | null;
+  longestUnbrokenSegmentDeviceName: string | null;
+  /** Das GERADE laufende Segment (letztes Segment einer offenen Session), falls vorhanden. */
+  currentUnbrokenSegmentHours: number | null;
+  currentUnbrokenVsBestPct: number | null;
 }
 
 function orgasmTimes(entries: TrackingEntry[]): Date[] {
@@ -118,10 +248,26 @@ export async function records(username: string, ctx?: TrackingContext, presessio
   // Vorgebaute Sessions (vom Dashboard) wiederverwenden, statt buildSessions doppelt zu rechnen.
   const sessions = presessions ?? buildSessions(entries, reinigung, now, devices);
 
-  const open = sessions.find((s) => s.isOpen) ?? null;
-  const closed = sessions.filter((s) => !s.isOpen);
+  // orphaned ausschliessen (weder "offen" noch "geschlossen" im echten Sinn — eine verwaiste,
+  // niemals real beendete Session soll weder als aktueller Lauf noch als Bestmarken-Kandidat zählen).
+  const open = sessions.find(isLiveOpenSession) ?? null;
+  const closed = sessions.filter((s) => !isLiveOpenSession(s) && !s.orphaned);
   const pb = closed.reduce<Session | null>((best, s) => (!best || s.durationMs > best.durationMs ? s : best), null);
   const pbMs = pb?.durationMs ?? 0;
+
+  // A-14: die ehrliche Dauertrage-Marke ist ein SEGMENT (durchgehend, ein Gerät), nicht eine Session
+  // (kann mehrere Geräte über Reinigungspausen hinweg summieren, siehe longestRunHours-Kommentar).
+  // Nur ABGESCHLOSSENE Segmente (end !== null) zählen für die Bestmarke — ein offenes wächst noch.
+  // Ohne flatMap-Zwischenarray: bei vielen Sessions/Segmenten sonst eine unnötige Extra-Allokation.
+  let bestSegment: Segment | null = null;
+  for (const s of sessions) {
+    for (const seg of s.segments) {
+      if (seg.end !== null && (!bestSegment || seg.durationMs > bestSegment.durationMs)) bestSegment = seg;
+    }
+  }
+  // Das offene Segment ist immer das LETZTE der offenen Session (segmentsOfPair) — kein Scan nötig.
+  const currentSegment = open?.segments.at(-1) ?? null;
+  const bestSegmentMs = bestSegment?.durationMs ?? 0;
 
   const times = orgasmTimes(entries);
   const lastOrgasm = times.at(-1) ?? null;
@@ -130,6 +276,7 @@ export async function records(username: string, ctx?: TrackingContext, presessio
   return {
     schemaVersion: 2,
     user: username,
+    ...buildEnvelope(now, iso, timezone),
     longestRunHours: msToHours(pbMs),
     longestRunEndedAt: iso(pb?.end ?? null),
     currentRunHours: open ? msToHours(open.durationMs) : null,
@@ -137,6 +284,11 @@ export async function records(username: string, ctx?: TrackingContext, presessio
     daysSinceRecord: pb?.end ? Math.floor((now.getTime() - pb.end.getTime()) / DAY) : null,
     orgasmFreeHours: lastOrgasm ? msToHours(now.getTime() - lastOrgasm.getTime()) : null,
     longestOrgasmFreeHours: gap == null ? null : msToHours(gap),
+    longestUnbrokenSegmentHours: bestSegment ? msToHours(bestSegment.durationMs) : null,
+    longestUnbrokenSegmentEndedAt: iso(bestSegment?.end ?? null),
+    longestUnbrokenSegmentDeviceName: bestSegment?.deviceEffective.name ?? null,
+    currentUnbrokenSegmentHours: currentSegment ? msToHours(currentSegment.durationMs) : null,
+    currentUnbrokenVsBestPct: currentSegment && bestSegmentMs > 0 ? pct(currentSegment.durationMs, bestSegmentMs) : null,
   };
 }
 
@@ -148,15 +300,33 @@ export interface OrgasmHistoryRow {
   deviceContext: string | null;
 }
 
-export interface DenialTrendResult {
-  schemaVersion: 2;
+export interface DenialTrendResult extends Envelope {
+  /** v3: `trendRising` vergleicht jetzt MEDIAN (jüngstes Fenster vs. der Rest) statt MITTELWERT
+   *  und liefert erst ab `recentWindowN`+Rest ≥ 8 Intervallen überhaupt einen Wert (A-10,
+   *  MCP-Befundliste 2026-07-17: vorher kippte ein einzelner Ausreisser im 3-Punkte-Mittel das
+   *  Ergebnis — z.B. Intervalle 515.5→180.1→116.6, klar fallend, meldeten trotzdem `true`, weil
+   *  der eine Ausreisser (515.5) den "recent"-Mittelwert hochzog). `avgIntervalH`/
+   *  `recentAvgIntervalH` bleiben unverändert Mittelwerte (informativ) — nur `trendRising` selbst
+   *  rechnet jetzt robuster. Grenzen dieser Robustheit: der Median eines 3er-Fensters toleriert
+   *  GENAU EINEN Ausreisser (Breakdown Point 1/3) — bei ZWEI auffälligen Werten im selben Fenster
+   *  kippt er wieder. Und "Rest" wächst mit der Historie: bei langer Nutzung wird der Vergleich
+   *  eher "jüngst vs. Lebenszeit-Basislinie" als ein echter Kurzfrist-Trend. */
+  schemaVersion: 3;
   user: string;
   currentStreakH: number | null;
   longestDenialH: number | null;
   avgIntervalH: number | null;
-  /** Trend der Intervalle: steigt die Entsagung? (Schnitt der jüngsten vs. aller Intervalle). */
+  /** Trend der Intervalle: steigt die Entsagung? MEDIAN-Vergleich (jüngstes Fenster vs. die
+   *  restlichen Intervalle), robust gegen einen einzelnen Ausreisser. `null` bei weniger als 8
+   *  Intervallen insgesamt — zu wenig Datenlage für eine Aussage, statt eine vorzutäuschen. */
   trendRising: boolean | null;
   recentAvgIntervalH: number | null;
+  /** Wie viele Intervalle in `recentAvgIntervalH`/den MEDIAN-Vergleich für `trendRising` eingehen.
+   *  null bei keinen Intervallen. */
+  recentWindowN: number | null;
+  /** Grobe Einschätzung der Datenlage hinter `trendRising`: "low" (< 8 Intervalle, `trendRising`
+   *  ist null), "medium" (8–14), "high" (≥ 15). */
+  trendConfidence: "low" | "medium" | "high" | null;
   orgasmHistory: OrgasmHistoryRow[];
 }
 
@@ -184,32 +354,68 @@ function deviceContextAt(segs: FlatSegment[], t: number): string | null {
 export async function denialTrend(username: string, opts: { limit?: number } = {}, ctx?: TrackingContext): Promise<DenialTrendResult> {
   const { entries, reinigung, devices, now, timezone } = await ctxOf(username, ctx);
   const iso = makeIso(timezone);
-  const sessions = buildSessions(entries, reinigung, now, devices);
+  // orphaned ausschliessen: eine verwaiste Session endet (Segment-seitig) nie und würde die
+  // "überlappungsfrei & sortiert"-Annahme von flattenSegments/deviceContextAt verletzen, sobald
+  // gleichzeitig eine echte offene Session existiert (beide enden dann bei `now`).
+  const sessions = buildSessions(entries, reinigung, now, devices).filter((s) => !s.orphaned);
   const segs = flattenSegments(sessions, now);
   const times = orgasmTimes(entries);
 
   const intervalsH: number[] = [];
   const history: OrgasmHistoryRow[] = times.map((t, i) => {
     const prev = i > 0 ? times[i - 1] : null;
-    const intervalH = prev ? round1((t.getTime() - prev.getTime()) / HOUR) : null;
+    const intervalH = prev ? msToHours(t.getTime() - prev.getTime()) : null;
     if (intervalH != null) intervalsH.push(intervalH);
     return { at: iso(t)!, intervalSincePrevH: intervalH, deviceContext: deviceContextAt(segs, t.getTime()) };
   });
 
   const avg = (xs: number[]) => (xs.length ? round1(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
   const avgAll = avg(intervalsH);
-  const recentAvg = avg(intervalsH.slice(-3));
+  // 3 = Bestand aus der Vor-A-10-Fassung (recentAvgIntervalH), hier unverändert übernommen. Für den
+  // MEDIAN-Vergleich unten bedeutet das einen Breakdown Point von 1/3 (ein einzelner Ausreisser im
+  // Fenster kippt das Ergebnis nicht, zwei schon) — ein grösseres Fenster wäre robuster, kostet aber
+  // Aktualität. Nicht weiter austariert; A-10 behebt den gemeldeten Ein-Ausreisser-Fall, mehr nicht.
+  const RECENT_WINDOW = 3;
+  const recentIntervals = intervalsH.slice(-RECENT_WINDOW);
+  const recentAvg = avg(recentIntervals);
+  const recentWindowN = recentIntervals.length || null;
   const lastOrgasm = times.at(-1) ?? null;
   const gap = longestOrgasmGapMs(times, now);
 
+  // A-10: trendRising vergleicht MEDIAN des jüngsten Fensters gegen den MEDIAN der übrigen
+  // (älteren) Intervalle — robust gegen einen einzelnen Ausreisser, anders als der bisherige
+  // Mittelwert-Vergleich. "übrig" statt "alle": das Fenster selbst fliesst sonst in beide Seiten
+  // ein und verwässert den Kontrast. Erst ab MIN_N Intervallen überhaupt ein Wert (sonst null statt
+  // einer Zahl, die Sicherheit vortäuscht).
+  // MIN_N_FOR_TREND > RECENT_WINDOW ist ein Invariant, kein Laufzeit-Check: sobald die erste
+  // Bedingung unten zutrifft, hat olderIntervals zwangsläufig mindestens MIN_N_FOR_TREND-RECENT_WINDOW
+  // Einträge — ein zusätzliches `olderIntervals.length > 0` wäre nie erreichbar.
+  const MIN_N_FOR_TREND = 8;
+  const olderIntervals = intervalsH.slice(0, Math.max(0, intervalsH.length - RECENT_WINDOW));
+  const trendRising = intervalsH.length >= MIN_N_FOR_TREND
+    ? median(recentIntervals) >= median(olderIntervals)
+    : null;
+  // Grobe, bewusst nicht statistisch hergeleitete Stufen (kein Signifikanztest o.ä.) — sie sollen
+  // dem Konsumenten nur grob sagen "wenig/etwas/viel Historie hinter trendRising", nicht mehr.
+  // < MIN_N_FOR_TREND = "low" (trendRising ist dort ohnehin null); ab 15 "high", weil dann auch das
+  // ältere Vergleichsfenster (n − RECENT_WINDOW) selbst zweistellig ist.
+  const trendConfidence: DenialTrendResult["trendConfidence"] =
+    intervalsH.length === 0 ? null
+    : intervalsH.length < MIN_N_FOR_TREND ? "low"
+    : intervalsH.length < 15 ? "medium"
+    : "high";
+
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     user: username,
+    ...buildEnvelope(now, iso, timezone),
     currentStreakH: lastOrgasm ? msToHours(now.getTime() - lastOrgasm.getTime()) : null,
     longestDenialH: gap == null ? null : msToHours(gap),
     avgIntervalH: avgAll,
-    trendRising: recentAvg != null && avgAll != null ? recentAvg >= avgAll : null,
+    trendRising,
     recentAvgIntervalH: recentAvg,
+    recentWindowN,
+    trendConfidence,
     orgasmHistory: opts.limit ? history.slice(-opts.limit) : history,
   };
 }
@@ -222,7 +428,7 @@ export interface PeriodGoal {
   todayPct: number | null; weekPct: number | null; monthPct: number | null; yearPct: number | null;
 }
 
-export interface PeriodSummaryResult {
+export interface PeriodSummaryResult extends Envelope {
   schemaVersion: 2;
   user: string;
   kg: PeriodGoal;
@@ -241,13 +447,14 @@ const periodGoal = (
 /** Tag/Woche/Monat für KG und je Kategorie inkl. Ziel-Erfüllung. KG nutzt die geteilte
  *  Tracker-Berechnung; Kategorien die geteilte buildCategoryWearGoals. */
 export async function periodSummary(username: string, ctx?: TrackingContext): Promise<PeriodSummaryResult> {
-  const { userId, entries, reinigung, now } = await ctxOf(username, ctx);
+  const { userId, entries, reinigung, now, timezone } = await ctxOf(username, ctx);
+  const iso = makeIso(timezone);
 
   const [kgVorgabe, categoryGoals] = await Promise.all([
     getActiveVorgabe(userId, now),
     buildCategoryWearGoals(userId, now, entries),
   ]);
-  const kg = calculateWearingHoursByRange(entries, now, reinigung);
+  const kg = calculateWearingHoursByRange(entries, now);
 
   // KG-Ziele prorata: startet/endet die aktive Vorgabe mitten in einer Periode, wird das Ziel
   // anteilig auf die Überschneidung mit der Periode heruntergerechnet (Nenner der %-Erfüllung).
@@ -256,6 +463,7 @@ export async function periodSummary(username: string, ctx?: TrackingContext): Pr
   return {
     schemaVersion: 2,
     user: username,
+    ...buildEnvelope(now, iso, timezone),
     kg: periodGoal(
       kg.tagH, kg.wocheH, kg.monatH, kg.jahrH,
       kgGoal.minProTagH, kgGoal.minProWocheH, kgGoal.minProMonatH, kgGoal.minProJahrH,

@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
-import { sendKontrolleNotification, deriveSealCode, getLatestKgEntry, hasActiveKontrolle } from "@/lib/kontrolleService";
-import { sendVerschlussAnforderungNotifications } from "@/lib/verschlussAnforderungService";
+import { LOCK_ENDED_REASON } from "@/lib/constants";
+import { sendKontrolleNotification, deriveSealCode, hasActiveKontrolle } from "@/lib/kontrolleService";
+import { getLatestKgEntry, getIsLocked, getActiveSperrzeit } from "@/lib/queries";
+import { sendVerschlussAnforderungNotifications, checkLockEnd } from "@/lib/verschlussAnforderungService";
 import { ensureDailyAutoKontrollen, deleteWithdrawnAutoKontrollen } from "@/lib/autoKontrolleService";
 import { sendInspectionReminder, autoMarkInspectionRemoved, notifyInspectionAutoMarked } from "@/lib/inspectionEscalationService";
 import { maybeRunHealthChecks } from "@/lib/healthCheck";
@@ -39,12 +41,16 @@ async function processDue(): Promise<void> {
         withdrawnAt: null,
         entryId: null,
       },
-      include: { user: { select: { id: true, email: true, username: true, locale: true } } },
+      include: { user: { select: { id: true, email: true, username: true, locale: true, autoKontrolleNurBeiSperre: true } } },
       // Chronologisch: werden mehrere Kontrollen desselben Users im selben Tick fällig, überlebt die
       // früheste (wird zuerst zugestellt), die späteren verwirft der Überschneidungs-Schutz unten.
       orderBy: { wirksamAb: "asc" },
       take: 50,
     });
+
+    // Eine fällige Zeile lautlos zurückziehen (kein Nachholen) — die Auslösung ist sinnlos geworden.
+    const withdrawKa = (id: string) =>
+      prisma.kontrollAnforderung.update({ where: { id }, data: { withdrawnAt: new Date() } });
 
     for (const ka of due) {
       try {
@@ -52,14 +58,22 @@ async function processDue(): Promise<void> {
         const latest = await getLatestKgEntry(ka.userId);
         // Auto-Kontrolle bei offenem KG ist sinnlos → bei Fälligkeit zurückziehen statt senden.
         if (ka.auto && latest?.type !== "VERSCHLUSS") {
-          await prisma.kontrollAnforderung.update({ where: { id: ka.id }, data: { withdrawnAt: new Date() } });
+          await withdrawKa(ka.id);
+          continue;
+        }
+        // Opt-in „nur bei Sperrzeit": eine bei Fälligkeit ohne aktive Sperrzeit angetroffene
+        // Auto-Kontrolle zurückziehen (kein Nachholen — dieselbe Behandlung wie offener KG). Die
+        // Sperrzeit-Abfrage läuft nur, wenn der Sub schon verschlossen ist (obiger Check bestanden)
+        // und der Schalter gesetzt ist.
+        if (ka.auto && ka.user.autoKontrolleNurBeiSperre && !(await getActiveSperrzeit(ka.userId))) {
+          await withdrawKa(ka.id);
           continue;
         }
         // Überschneidungs-Schutz: eine andere Kontrolle ist schon aktiv (Keyholder, KI, oder eine
         // andere Auto-Kontrolle) → diese hier verwerfen statt ausliefern (User-Entscheidung: kein
         // Nachholen, gilt für ALLE Quellen, nicht nur Auto).
         if (await hasActiveKontrolle(ka.userId, now, { excludeId: ka.id })) {
-          await prisma.kontrollAnforderung.update({ where: { id: ka.id }, data: { withdrawnAt: new Date() } });
+          await withdrawKa(ka.id);
           continue;
         }
         // Aktive Siegel-Nummer mitgeben: ≠ Code → Mail verlangt das Siegel zusätzlich auf dem
@@ -163,8 +177,9 @@ async function processInspectionEscalation(now: Date): Promise<void> {
 /**
  * Verschickt fällige, zeitversetzte VerschlussAnforderungen (wirksamAb erreicht, noch nicht
  * benachrichtigt). Sanity-Check analog Auto-Kontrolle: passt der aktuelle Lock-Zustand nicht
- * mehr zur Art (ANFORDERUNG bei bereits verschlossenem User, SPERRZEIT bei offenem User), wird
- * statt gesendet zurückgezogen. Fehler → benachrichtigtAt bleibt null (Retry nächster Tick).
+ * mehr zur Art (ANFORDERUNG bei bereits verschlossenem User, SPERRZEIT bei offenem User) ODER ist
+ * das Sperr-Ende schon vorbei, wird statt gesendet zurückgezogen. Fehler → benachrichtigtAt bleibt
+ * null (Retry nächster Tick).
  */
 async function processDueVerschlussAnforderungen(now: Date): Promise<void> {
   const due = await prisma.verschlussAnforderung.findMany({
@@ -180,17 +195,22 @@ async function processDueVerschlussAnforderungen(now: Date): Promise<void> {
 
   for (const va of due) {
     try {
-      const latest = await prisma.entry.findFirst({
-        where: { userId: va.userId, type: { in: ["VERSCHLUSS", "OEFFNEN"] } },
-        orderBy: { startTime: "desc" },
-        select: { type: true },
-      });
-      const isLocked = latest?.type === "VERSCHLUSS";
+      const isLocked = await getIsLocked(va.userId);
       const art = va.art as "ANFORDERUNG" | "SPERRZEIT";
 
-      // Auslösung sinnlos geworden → zurückziehen statt senden.
-      if ((art === "ANFORDERUNG" && isLocked) || (art === "SPERRZEIT" && !isLocked)) {
-        await prisma.verschlussAnforderung.update({ where: { id: va.id }, data: { withdrawnAt: new Date() } });
+      // Auslösung sinnlos geworden → zurückziehen statt senden. Ein bereits abgelaufenes Sperr-Ende
+      // (dieselbe Regel wie im Service, siehe checkLockEnd) gehört in dieselbe Klasse: die Sperre
+      // wäre im Moment ihrer Auslösung schon vorbei, und die Mail meldete dem Sub „Gesperrt bis
+      // <Vergangenheit>". Defense in depth — der Service lässt solche Zeilen seit v4.50.30 weder
+      // anlegen noch ändern, ältere können aber noch in der DB liegen.
+      const obsolete = art === "ANFORDERUNG"
+        ? isLocked
+        : !isLocked || checkLockEnd(va.endetAt, va.wirksamAb, now) !== null;
+      if (obsolete) {
+        await prisma.verschlussAnforderung.update({
+          where: { id: va.id },
+          data: { withdrawnAt: new Date(), endedReason: LOCK_ENDED_REASON.obsolete },
+        });
         continue;
       }
 
@@ -201,6 +221,7 @@ async function processDueVerschlussAnforderungen(now: Date): Promise<void> {
         nachricht: va.nachricht,
         endetAtDate: va.endetAt,
         dauerH: va.dauerH,
+        sperrEndetAtDate: va.sperrEndetAt,
       });
       await prisma.verschlussAnforderung.update({ where: { id: va.id }, data: { benachrichtigtAt: new Date() } });
     } catch (e) {

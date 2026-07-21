@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
-import Card from "@/app/components/Card";
+import EntryFormShell from "@/app/components/EntryFormShell";
 import DateTimePicker from "@/app/components/DateTimePicker";
 import Select from "@/app/components/Select";
 import Textarea from "@/app/components/Textarea";
@@ -19,7 +19,9 @@ import { usePhotoUpload } from "@/app/hooks/usePhotoUpload";
 import { toDatetimeLocal, fromDatetimeLocal, toDateLocale, formatDuration } from "@/lib/utils";
 import { categoryStyle } from "@/lib/categoryConstants";
 import CategoryIconRender from "@/app/components/CategoryIcon";
-import type { WearBeginPayload, WearEndPayload, SubmitResult } from "@/app/entries/types";
+import type { WearBeginPayload, WearEndPayload } from "@/app/entries/types";
+import { entryRequest, postAdminEntry, parseApiErrorCode } from "@/lib/apiClient";
+import { useApiError } from "@/app/hooks/useApiError";
 
 interface Category {
   id: string;
@@ -76,12 +78,14 @@ interface Props {
 export default function WearForm({ kind, category, devices, activeSession, adminUserId, redirectTo, initial, minTime, maxTime, tz, nowDefault }: Props) {
   const t = useTranslations("wearForm");
   const tCommon = useTranslations("common");
+  const apiError = useApiError();
   const tDash = useTranslations("dashboard");
   const dl = toDateLocale(useLocale());
   const router = useRouter();
   const toast = useToast();
   const { offlineFetch } = useOfflineQueue();
   const isEdit = !!initial;
+  const target = redirectTo ?? "/dashboard";
 
   const [startTime, setStartTime] = useState(
     toDatetimeLocal(initial?.startTime, tz) || nowDefault,
@@ -120,8 +124,6 @@ export default function WearForm({ kind, category, devices, activeSession, admin
     setSaving(true);
     setError("");
 
-    const target = redirectTo ?? "/dashboard";
-
     // Edit-mode: PATCH with the editable subset (startTime + note + photo, plus deviceId for WEAR_BEGIN).
     if (isEdit && initial) {
       const patchBody: Record<string, unknown> = {
@@ -131,14 +133,9 @@ export default function WearForm({ kind, category, devices, activeSession, admin
         imageExifTime: imageExifTime || null,
       };
       if (kind === "begin") patchBody.deviceId = deviceId;
-      const res = await fetch(`/api/entries/${initial.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patchBody),
-      });
+      const res = await fetch(...entryRequest(initial.id, patchBody));
       if (!res.ok) {
-        const data: { error?: string } = await res.json().catch(() => ({}));
-        setError(data?.error || tCommon("savingError"));
+        setError(apiError(await parseApiErrorCode(res)));
         setSaving(false);
         return;
       }
@@ -157,17 +154,10 @@ export default function WearForm({ kind, category, devices, activeSession, admin
       note: note.trim() || null,
     };
 
-    const targetUrl = adminUserId ? "/api/admin/entries" : "/api/entries";
-    const body = adminUserId ? { userId: adminUserId, ...payload } : payload;
-    const init: RequestInit = {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    };
     // Admin uses direct fetch (no offline queue — action is admin-driven, not field-use)
     const res = adminUserId
-      ? await fetch(targetUrl, init)
-      : await offlineFetch(targetUrl, init);
+      ? await postAdminEntry(adminUserId, payload)
+      : await offlineFetch(...entryRequest(undefined, payload));
     if (res === null) {
       // queued offline (user-mode only)
       toast.success(tDash("entrySaved"));
@@ -175,8 +165,7 @@ export default function WearForm({ kind, category, devices, activeSession, admin
       return;
     }
     if (!res.ok) {
-      const data: SubmitResult | { error?: string } = await res.json().catch(() => ({}));
-      setError(("error" in data && data.error) || tCommon("savingError"));
+      setError(apiError(await parseApiErrorCode(res)));
       setSaving(false);
       return;
     }
@@ -187,8 +176,16 @@ export default function WearForm({ kind, category, devices, activeSession, admin
   const style = categoryStyle(category.color);
 
   return (
-    <Card>
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-4">
+    <EntryFormShell
+      onSubmit={handleSubmit}
+      onCancel={() => router.push(target)}
+      cancelLabel={tCommon("cancel")}
+      actions={
+        <Button type="submit" variant="primary" fullWidth loading={saving}>
+          {tCommon("save")}
+        </Button>
+      }
+    >
         {/* Category header */}
         <div className="flex items-center gap-3">
           <div
@@ -279,16 +276,6 @@ export default function WearForm({ kind, category, devices, activeSession, admin
         <RequiredHint />
 
         {error && <FormError message={error} />}
-
-        <div className="flex gap-3 pt-2">
-          <Button type="button" variant="secondary" fullWidth onClick={() => router.push("/dashboard")} disabled={saving}>
-            {tCommon("cancel")}
-          </Button>
-          <Button type="submit" variant="primary" fullWidth loading={saving}>
-            {tCommon("save")}
-          </Button>
-        </div>
-      </form>
-    </Card>
+    </EntryFormShell>
   );
 }

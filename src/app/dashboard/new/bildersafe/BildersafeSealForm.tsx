@@ -7,7 +7,9 @@ import { usePhotoUpload } from "@/app/hooks/usePhotoUpload";
 import PhotoCapture from "@/app/components/PhotoCapture";
 import Card from "@/app/components/Card";
 import Button from "@/app/components/Button";
+import EntryFormShell from "@/app/components/EntryFormShell";
 import useToast from "@/app/hooks/useToast";
+import { parseApiError } from "@/lib/apiClient";
 
 /**
  * Standalone-Aufnahme eines versiegelten Schlüsselbox-Code-Fotos (Bildersafe), die das Foto an den
@@ -63,13 +65,19 @@ export default function BildersafeSealForm({ mobileDesktopMode }: { mobileDeskto
       toast.success(tn("bildersafeSealed"));
       window.location.href = "/dashboard";
     } else {
-      const d = await res.json().catch(() => ({}));
-      setError(d.error || tc("savingError"));
+      setError(await parseApiError(res, tc("savingError")));
     }
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <EntryFormShell
+      actions={
+        // Versiegeln blockiert nur bei explizit unlesbar (KI an). Ohne KI (readable=null) erlaubt.
+        <Button variant="primary" fullWidth loading={saving || code.uploading || checking} disabled={!codeUrl || readable === false} onClick={submit} icon={<KeyRound size={16} />}>
+          {tn("bildersafeSubmit")}
+        </Button>
+      }
+    >
       {codeUrl ? (
         // Ganze Fläche = neu aufnehmen.
         <button type="button" onClick={code.clearPhoto} className="text-left w-full">
@@ -95,11 +103,6 @@ export default function BildersafeSealForm({ mobileDesktopMode }: { mobileDeskto
       )}
 
       {error && <p className="text-xs text-warn">{error}</p>}
-
-      {/* Versiegeln blockiert nur bei explizit unlesbar (KI an). Ohne KI (readable=null) erlaubt. */}
-      <Button variant="primary" fullWidth loading={saving || code.uploading || checking} disabled={!codeUrl || readable === false} onClick={submit} icon={<KeyRound size={16} />}>
-        {tn("bildersafeSubmit")}
-      </Button>
-    </div>
+    </EntryFormShell>
   );
 }

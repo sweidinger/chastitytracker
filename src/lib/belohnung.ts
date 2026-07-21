@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
+import { buildWearSessions, wearHourPairsByCategory } from "@/lib/sessionModel";
 import type { ServiceResult } from "@/lib/serviceResult";
-import { getUserTimezone } from "@/lib/queries";
+import { getUserTimezone, SESSION_ENTRY_SELECT } from "@/lib/queries";
 import { isKgVorgabe } from "@/lib/vorgaben";
 import { proratedVorgabeTargets, type GoalPeriod } from "@/lib/goalFulfillment";
 import { createOrgasmusAnforderung } from "@/lib/orgasmusAnforderungService";
@@ -18,7 +19,7 @@ export const REWARD_GUIDANCE_TEXT = [
   "- `deny_orgasm` (Guthaben −1) und `delay_orgasm` (Fenster verschieben) sind STRAFEN auf der Belohnungsseite — nur bei Vergehen.",
 ].join("\n");
 import {
-  buildWearPairs, wearingHoursFromPairs, WEAR_PAIR,
+  buildKgWearPairs, wearingHoursFromPairs,
   getMidnightToday, getWeekStart, getMonthStart, getYearStart, tzDateParts,
 } from "@/lib/utils";
 
@@ -118,10 +119,14 @@ export async function computeBelohnbar(userId: string, now: Date = new Date()): 
     prisma.entry.findMany({
       where: { userId, type: { in: ["VERSCHLUSS", "OEFFNEN", "WEAR_BEGIN", "WEAR_END"] } },
       orderBy: { startTime: "asc" },
-      select: { type: true, startTime: true, device: { select: { categoryId: true } } },
+      select: SESSION_ENTRY_SELECT,
     }),
     prisma.orgasmusBelohnungGutschrift.findMany({ where: { userId } }),
   ]);
+
+  // Einmal bauen, nicht je Vorgabe — buildWearSessions ist nicht billig.
+  const kgPairs = buildKgWearPairs(entries, now);
+  const wearPairsByCategory = wearHourPairsByCategory(buildWearSessions(entries, now), now);
 
   const already = new Set(gutschriften.map((g) => dedupeKey(g.categoryId, g.periodType, g.periodKey)));
   const seen = new Set<string>();
@@ -131,7 +136,10 @@ export async function computeBelohnbar(userId: string, now: Date = new Date()): 
     const kg = isKgVorgabe(v);
     const categoryId = kg ? null : v.categoryId;
     const categoryName = kg ? "KG" : v.category?.name ?? "?";
-    const pairs = kg ? buildWearPairs(entries, now) : buildWearPairs(entries, now, { types: WEAR_PAIR, categoryId: v.categoryId! });
+    // Upstream hat den generischen Paar-Bauer entfernt: fuer Trage-Kategorien koennen zwei Geraete
+    // gleichzeitig laufen, ein zweiter Beginn haette das erste Paar bei `now` geschlossen statt beim
+    // Beginn. Kategorien gehen deshalb ueber wearHourPairsByCategory (paart je GERAET).
+    const pairs = kg ? kgPairs : wearPairsByCategory.get(v.categoryId!) ?? [];
     const targets = proratedVorgabeTargets(v, now, tz);
     for (const cfg of PERIOD_CONFIG) {
       const sollH = targets[cfg.soll];
@@ -160,7 +168,7 @@ export async function grantGutschrift(
   const match = belohnbar.find(
     (b) => (b.categoryId ?? null) === (categoryId ?? null) && b.periodType === periodType && b.periodKey === periodKey,
   );
-  if (!match) return { ok: false, status: 400, error: "Ziel nicht (mehr) belohnbar oder bereits gutgeschrieben" };
+  if (!match) return { ok: false, status: 400, error: "REWARD_GOAL_NOT_ELIGIBLE" };
   try {
     const [, user] = await prisma.$transaction([
       prisma.orgasmusBelohnungGutschrift.create({ data: { userId, categoryId, periodType, periodKey } }),
@@ -174,7 +182,7 @@ export async function grantGutschrift(
     });
     return { ok: true, data: { available: user.verdienteOrgasmen } };
   } catch {
-    return { ok: false, status: 409, error: "Bereits gutgeschrieben" };
+    return { ok: false, status: 409, error: "REWARD_ALREADY_CREDITED" };
   }
 }
 
@@ -229,10 +237,10 @@ export async function grantBelohnung(
 ): Promise<ServiceResult<{ id: string; available: number }>> {
   const now = new Date();
   const existing = await activeRewardWindow(userId, now);
-  if (existing) return { ok: false, status: 400, error: "Es läuft bereits ein Belohnungs-Fenster." };
+  if (existing) return { ok: false, status: 400, error: "REWARD_WINDOW_ACTIVE" };
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { verdienteOrgasmen: true } });
-  if (!user) return { ok: false, status: 404, error: "User nicht gefunden" };
-  if (user.verdienteOrgasmen < 1) return { ok: false, status: 400, error: "Kein Guthaben verfügbar." };
+  if (!user) return { ok: false, status: 404, error: "USER_NOT_FOUND" };
+  if (user.verdienteOrgasmen < 1) return { ok: false, status: 400, error: "REWARD_NO_CREDIT" };
 
   const windowH = windowHours && windowHours > 0 ? windowHours : DEFAULT_WINDOW_H;
   const beginntAt = opts?.beginntAt ?? now;
@@ -254,8 +262,8 @@ export async function grantBelohnung(
 /** Entzug (Strafe): Guthaben −1. Bei Stand 0 nicht möglich. */
 export async function denyReward(userId: string): Promise<ServiceResult<{ available: number }>> {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { verdienteOrgasmen: true } });
-  if (!user) return { ok: false, status: 404, error: "User nicht gefunden" };
-  if (user.verdienteOrgasmen < 1) return { ok: false, status: 400, error: "Kein Guthaben zum Entziehen (Stand 0)." };
+  if (!user) return { ok: false, status: 404, error: "USER_NOT_FOUND" };
+  if (user.verdienteOrgasmen < 1) return { ok: false, status: 400, error: "REWARD_NO_CREDIT_TO_REVOKE" };
   const updated = await prisma.user.update({
     where: { id: userId }, data: { verdienteOrgasmen: { decrement: 1 } }, select: { verdienteOrgasmen: true },
   });
@@ -270,10 +278,10 @@ export async function denyReward(userId: string): Promise<ServiceResult<{ availa
 
 /** Verzug (Strafe): aktives Belohnungs-Fenster um `hours` Stunden nach hinten schieben. */
 export async function delayReward(userId: string, hours: number): Promise<ServiceResult<{ endetAt: Date }>> {
-  if (!Number.isFinite(hours) || hours <= 0) return { ok: false, status: 400, error: "Stunden (> 0) erforderlich" };
+  if (!Number.isFinite(hours) || hours <= 0) return { ok: false, status: 400, error: "REWARD_HOURS_REQUIRED" };
   const now = new Date();
   const win = await activeRewardWindow(userId, now);
-  if (!win) return { ok: false, status: 400, error: "Kein aktives Belohnungs-Fenster zum Verschieben." };
+  if (!win) return { ok: false, status: 400, error: "REWARD_NO_WINDOW_TO_DELAY" };
   const neu = new Date(win.endetAt.getTime() + hours * 60 * 60 * 1000);
   await prisma.orgasmusAnforderung.update({ where: { id: win.id }, data: { endetAt: neu } });
   await logBelohnungEvent(userId, "VERSCHOBEN", 0, await currentBalance(userId), `Strafe: Fenster um ${hours} h verschoben`);

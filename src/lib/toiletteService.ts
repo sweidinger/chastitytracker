@@ -76,7 +76,7 @@ export async function setToiletteSettings(userId: string, params: SetToilettePar
   if (params.maxMinuten !== undefined) data.toiletteMaxMinuten = clamp(params.maxMinuten, MAX_MINUTEN_RANGE);
   if (params.maxProTag !== undefined) data.toiletteMaxProTag = clamp(params.maxProTag, MAX_PRO_TAG_RANGE);
 
-  if (Object.keys(data).length === 0) return { ok: false, status: 400, error: "Keine Felder zum Aktualisieren" };
+  if (Object.keys(data).length === 0) return { ok: false, status: 400, error: "noFieldsToUpdate" };
 
   await prisma.user.update({ where: { id: userId }, data });
   return { ok: true, data: null };
