@@ -18,6 +18,7 @@ import { getActiveHealthHold } from "@/lib/healthHoldService";
 import { buildTagesformView, type TagesformView } from "@/lib/tagesformService";
 import { collectDetectedOffenses, computeSeverities, OFFENSE_SEVERITY, type OffenseSeverity } from "@/lib/strafurteilService";
 import { pct, isoWithOffset } from "@/lib/mcp/format";
+import { relativeTimeLabel } from "@/lib/relativeTime";
 import { round1, msToHours } from "@/lib/utils";
 
 /** Zeitformat der MCP-Ausgabe: V1-Tools nutzen das Instanz-lokale Human-Format (bewusster V1-
@@ -26,8 +27,14 @@ import { round1, msToHours } from "@/lib/utils";
  *  Vertrag versioniert wird — dann entfällt dieser Interim-Schalter im V1-Aggregat. */
 /** Formatiert in der ZEITZONE des Ziel-Subs: ISO-8601 mit Offset (iso:true, für V2-Composer) oder
  *  das Instanz-lokale Human-Format (V1-Vertrag). Ohne tz greift APP_TZ (byte-identisch für Bestands-User). */
-const pickFmt = (iso?: boolean, tz: string = APP_TZ) =>
-  iso ? (d: Date) => isoWithOffset(d, tz)! : (d: Date) => formatDateTime(d, undefined, tz);
+const pickFmt = (iso?: boolean, tz: string = APP_TZ, now: Date = new Date()) =>
+  iso
+    ? (d: Date) => isoWithOffset(d, tz)!
+    // Menschliches Format MIT fertiger Spanne in Klammern. Einziger Leser dieses Aggregats ist der
+    // Prompt der KI-Keyholderin — und die verrechnet blanke Datumsangaben nachweislich falsch
+    // (hielt einen Eintrag von HEUTE fuer "gestern"). Die Klammer nimmt ihr das Rechnen ab; die
+    // ISO-Variante bleibt unberuehrt, damit maschinelle Leser exakt bleiben.
+    : (d: Date) => `${formatDateTime(d, undefined, tz)} (${relativeTimeLabel(d, now, tz)})`;
 export interface McpFormatOptions { iso?: boolean }
 
 /** Read-only overview snapshot for the MCP `get_overview` tool.
@@ -190,7 +197,7 @@ async function loadUserContext(username: string) {
 export async function buildOverview(username: string, opts: McpFormatOptions = {}): Promise<TrackerOverview> {
   const { userId, timezone, reinigung, reinigungUser, toiletteUser, plugUser, orgasmusArtenConfig, keyholderInstructions, autoKontrolle } = await loadUserContext(username);
   const now = new Date();
-  const fmt = pickFmt(opts.iso, timezone);
+  const fmt = pickFmt(opts.iso, timezone, now);
   const minutesUntil = (d: Date) => Math.round((d.getTime() - now.getTime()) / 60_000);
 
   const [entries, openKontrolle, activeVorgabe, activeSperrzeit, openAnf, activeWear, punishedCount, recentNotes, openOrgasmusAnf, cleaningUsedToday, toiletteUsedToday, openSessionAnfs] = await Promise.all([
@@ -258,7 +265,7 @@ export async function buildOverview(username: string, opts: McpFormatOptions = {
   return {
     schemaVersion: 1 as const,
     user: username,
-    generatedAt: fmt(now),
+    generatedAt: formatDateTime(now, undefined, timezone), // Bezugspunkt selbst — ohne Spanne
     timezone,
     keyholderInstructions,
     lock: {
@@ -694,7 +701,7 @@ export interface StrafbuchOverview {
 export async function mcpStrafbuch(username: string, opts: McpFormatOptions = {}): Promise<StrafbuchOverview> {
   const { userId, timezone } = await loadUserContext(username);
   const now = new Date();
-  const fmt = pickFmt(opts.iso, timezone);
+  const fmt = pickFmt(opts.iso, timezone, now);
   const sb = await buildStrafbuch(userId, now);
 
   // Urteil pro Vergehen (per refId aufgelöst).
@@ -762,7 +769,7 @@ export async function mcpStrafbuch(username: string, opts: McpFormatOptions = {}
   return {
     schemaVersion: 1 as const,
     user: username,
-    generatedAt: fmt(now),
+    generatedAt: formatDateTime(now, undefined, timezone), // Bezugspunkt selbst — ohne Spanne
     timezone,
     detectedOffenseCount: detected.length,
     openOffenseCount,
