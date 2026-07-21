@@ -1,5 +1,23 @@
 [
   {
+    "version": "4.100.1",
+    "date": "2026-07-21",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Die KI-Keyholderin verwechselt keine Tage mehr: Jede Zeitangabe im Prompt trägt jetzt die fertige Spanne dahinter — „(HEUTE)“, „vor 2 Tagen“, „in 16 Stunden“. Sie hielt bisher die heutige Tagesform für die von gestern und erklärte das mit einem angeblichen Sync-Verzug."
+      },
+      {
+        "type": "fix",
+        "text": "Neue Kalenderzeile im Prompt nennt Wochentag sowie das heutige und gestrige Datum ausgeschrieben — in allen vier Prompt-Pfaden (Chat, autonomer Lauf, Reaktion auf Ereignisse, Aufgaben-Abschluss)."
+      },
+      {
+        "type": "fix",
+        "text": "Ist für heute noch keine Tagesform erfasst, sagt der Prompt das ausdrücklich — nur dann darf die Keyholderin danach fragen."
+      }
+    ]
+  },
+  {
     "version": "4.100.0",
     "date": "2026-07-21",
     "changes": [
