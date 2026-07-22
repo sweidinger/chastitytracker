@@ -862,6 +862,11 @@ model AiKeyholderConfig {
   mediaProvider        String   @default("comfyui")
   mediaApiKeyEnc       String?
   mediaModelName       String?
+  // Dediziertes LLM NUR zum Schreiben der Bild-Prompts (getrennt vom Chat-LLM). "inherit" =
+  // wie llmProvider; "ollama" = lokales, unzensiertes Modell (schreibt NSFW-Prompts ungefiltert).
+  mediaLlmProvider     String   @default("inherit") // "inherit" | "anthropic" | "ollama"
+  mediaLlmBaseUrl      String?  // Ollama-Endpoint fuer Media-Prompts (Fallback: ollamaBaseUrl)
+  mediaLlmModel        String?  // Modellname fuer Media-Prompts (Fallback: ollamaModel)
   // Autonomous action schedule — random interval
   cronExpression       String?  // legacy / display only; actual scheduling uses randomInterval fields
   lastRunAt            DateTime?

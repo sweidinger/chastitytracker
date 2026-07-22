@@ -64,6 +64,10 @@ export async function PATCH(
     mediaProvider?: string;
     /** Novita checkpoint filename (model_name), e.g. "sd_xl_base_1.0.safetensors". */
     mediaModelName?: string | null;
+    /** Dedicated media-prompt LLM: "inherit" | "anthropic" | "ollama". */
+    mediaLlmProvider?: string;
+    mediaLlmBaseUrl?: string | null;
+    mediaLlmModel?: string | null;
     /** Plain-text media (Novita) API key; empty string = clear stored key. */
     mediaApiKey?: string;
     /** Plain-text Anthropic API key; empty string = clear stored key */
@@ -103,6 +107,14 @@ export async function PATCH(
     data.mediaProvider = body.mediaProvider;
   }
   if ("mediaModelName" in body) data.mediaModelName = body.mediaModelName ?? null;
+  if (body.mediaLlmProvider !== undefined) {
+    if (!["inherit", "anthropic", "ollama"].includes(body.mediaLlmProvider)) {
+      return NextResponse.json({ error: "mediaLlmProvider must be 'inherit', 'anthropic' or 'ollama'" }, { status: 400 });
+    }
+    data.mediaLlmProvider = body.mediaLlmProvider;
+  }
+  if ("mediaLlmBaseUrl" in body) data.mediaLlmBaseUrl = body.mediaLlmBaseUrl ?? null;
+  if ("mediaLlmModel" in body) data.mediaLlmModel = body.mediaLlmModel ?? null;
   if ("personaId" in body) data.currentPersonaId = body.personaId ?? null;
 
   // Encrypt Anthropic API key if provided; empty string clears the stored value

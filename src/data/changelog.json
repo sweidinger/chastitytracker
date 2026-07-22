@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.107.0",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Bild-Prompts koennen jetzt von einem eigenen, lokalen LLM geschrieben werden (getrennt vom Chat-LLM). So bleibt die Keyholderin im Chat auf Claude, waehrend ein lokales, unzensiertes Modell (Ollama) die Bild-Prompts ohne Abschwaechung formuliert. Einstellbar im Admin unter Medien: \"LLM fuer Bild-Prompts\"."
+      }
+    ]
+  },
+  {
     "version": "4.106.0",
     "date": "2026-07-22",
     "changes": [

@@ -44,6 +44,28 @@ interface MediaTheme {
 }
 
 /**
+ * Build the LlmConfig for MEDIA prompt writing. A dedicated media LLM
+ * (mediaLlmProvider != "inherit") lets the image prompt be written by a separate, local,
+ * uncensored model while the chat keyholder stays on Claude. Falls back to the chat LLM
+ * plus the chat Ollama endpoint/model.
+ */
+function mediaLlmConfig(cfg: {
+  llmProvider?: string | null;
+  ollamaBaseUrl?: string | null;
+  ollamaModel?: string | null;
+  mediaLlmProvider?: string | null;
+  mediaLlmBaseUrl?: string | null;
+  mediaLlmModel?: string | null;
+} | null) {
+  const override = cfg?.mediaLlmProvider && cfg.mediaLlmProvider !== "inherit" ? cfg.mediaLlmProvider : null;
+  return {
+    provider: (override ?? cfg?.llmProvider ?? "anthropic") as "anthropic" | "ollama",
+    ollamaBaseUrl: cfg?.mediaLlmBaseUrl ?? cfg?.ollamaBaseUrl ?? undefined,
+    ollamaModel: cfg?.mediaLlmModel ?? cfg?.ollamaModel ?? undefined,
+  };
+}
+
+/**
  * Pick a random theme (weighted) and ask the LLM to write an image prompt for it.
  * Falls back to a default prompt on any error.
  */
@@ -69,11 +91,7 @@ export async function generateMediaPrompt(userId: string): Promise<{ prompt: str
   // Use LLM to write a Stable Diffusion prompt
   try {
     const text = await llmChat(
-      {
-        provider: (cfg?.llmProvider ?? "anthropic") as "anthropic" | "ollama",
-        ollamaBaseUrl: cfg?.ollamaBaseUrl ?? undefined,
-        ollamaModel: cfg?.ollamaModel ?? undefined,
-      },
+      mediaLlmConfig(cfg),
       [
         {
           role: "user",
@@ -130,11 +148,7 @@ async function rewriteWishToPrompt(userId: string, wish: string): Promise<string
   const fallback = `${wish}, professional photography, dramatic lighting, high quality`;
   try {
     const text = await llmChat(
-      {
-        provider: (cfg?.llmProvider ?? "anthropic") as "anthropic" | "ollama",
-        ollamaBaseUrl: cfg?.ollamaBaseUrl ?? undefined,
-        ollamaModel: cfg?.ollamaModel ?? undefined,
-      },
+      mediaLlmConfig(cfg),
       [
         {
           role: "user",
