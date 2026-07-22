@@ -10,6 +10,7 @@ import type { SessionEventData } from "./SessionEventRow";
 import SessionTimeline from "./SessionTimeline";
 import LiveTrainingGoals from "./LiveTrainingGoals";
 import SperrzeitRemaining from "@/app/components/SperrzeitRemaining";
+import type { PauseQuotaEntry } from "@/lib/pauseService";
 import type { SessionEvent } from "@/lib/sessionHelpers";
 
 interface Props {
@@ -39,6 +40,9 @@ interface Props {
   sperrzeitUnbefristet?: boolean;
   sperrzeitNachricht?: string | null;
   tz?: string;
+  /** Heutiges Rest-Kontingent der Plug-Pausen (Reinigung/Toilette). Nur erlaubte Arten; Plug-Toilette
+   *  ist immer dabei (unbegrenzt). Leer/weglassen = keine Zeile. */
+  pauseQuota?: PauseQuotaEntry[];
 }
 
 /** Große Session-Karte für die aktive PLUG-Session — analog zur KG-Karte (LaufendeSessionCard),
@@ -62,6 +66,7 @@ export default async function LaufendePlugSessionCard({
   sperrzeitUnbefristet = false,
   sperrzeitNachricht,
   tz = APP_TZ,
+  pauseQuota = [],
 }: Props) {
   const t = await getTranslations("dashboard");
   const ta = await getTranslations("admin");
@@ -106,6 +111,23 @@ export default async function LaufendePlugSessionCard({
             />
           </div>
         </div>
+
+        {/* Rest-Kontingent der Plug-Pausen (Reinigung/Toilette) für heute */}
+        {pauseQuota.length > 0 && (
+          <div className="mt-3">
+            <p className="text-xs font-semibold uppercase tracking-widest opacity-60 mb-0.5">{t("pauseQuotaLabel")}</p>
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs opacity-80">
+              {pauseQuota.map((q) => (
+                <span key={q.grund}>
+                  <span className="opacity-70">{t(q.grund === "REINIGUNG" ? "pauseGrundReinigung" : "pauseGrundToilette")}:</span>{" "}
+                  {q.remaining === null
+                    ? t("pauseQuotaUnlimited")
+                    : t("pauseQuotaRemaining", { remaining: q.remaining, max: q.max })}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Ziel-Fortschritt – live-updating client component (identisch zur KG-Karte) */}
         {hasVorgabe && (

@@ -18,7 +18,7 @@ import { getActiveVorgabe, getActiveSperrzeit, getActiveWearSessions, getNonKgTr
 import { getActiveSessionsAllCategories, getAllActiveSessionAnforderungen } from "@/lib/sessionService";
 import { plugCategoryId } from "@/lib/deviceCategories";
 import { deviceCategoriesEnabled, heimdallEnabled } from "@/lib/constants";
-import { getActivePause, pauseBeginCountsToday, buildCagePauseQuota } from "@/lib/pauseService";
+import { getActivePause, pauseBeginCountsToday, buildCagePauseQuota, buildPlugPauseQuota } from "@/lib/pauseService";
 import { buildReinigungView, reinigungVerbrauchtHeute, nextReinigungsFenster } from "@/lib/reinigungService";
 import { effectiveOrgasmusArten, resolveReasonLabel, resolveOrgasmusArtDisplay } from "@/lib/reasonsService";
 import { getTranslations, getLocale } from "next-intl/server";
@@ -80,7 +80,7 @@ export default async function DashboardPage() {
   // ── Parallel data fetch ──
   const flagOn = deviceCategoriesEnabled();
   const plugCatId = plugCategoryId(userId);
-  const [entries, alleAnforderungen, activeVorgabe, offeneVerschlussAnf, activeSperrzeit, userSettings, wearSessions, allNonKgCategories, allSessionCategories, activeSessionSessions, deviceCount, offeneOrgasmusAnf, offenePlugAnf, activePlugSperrzeit, activeCagePause, activePlugPause, cagePauseCounts] = await Promise.all([
+  const [entries, alleAnforderungen, activeVorgabe, offeneVerschlussAnf, activeSperrzeit, userSettings, wearSessions, allNonKgCategories, allSessionCategories, activeSessionSessions, deviceCount, offeneOrgasmusAnf, offenePlugAnf, activePlugSperrzeit, activeCagePause, activePlugPause, cagePauseCounts, plugPauseCounts] = await Promise.all([
     prisma.entry.findMany({
       where: { userId },
       orderBy: { startTime: "desc" },
@@ -96,7 +96,7 @@ export default async function DashboardPage() {
       include: { device: { select: { name: true } } },
     }),
     getActiveSperrzeit(userId),
-    prisma.user.findUnique({ where: { id: userId }, select: { reinigungErlaubt: true, reinigungMaxMinuten: true, reinigungMaxProTag: true, reinigungsFenster: true, toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true, orgasmusArtenConfig: true, oeffnenGruendeConfig: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { reinigungErlaubt: true, reinigungMaxMinuten: true, reinigungMaxProTag: true, reinigungsFenster: true, toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true, plugReinigungErlaubt: true, plugReinigungMaxMinuten: true, plugReinigungMaxProTag: true, plugToiletteMaxMinuten: true, orgasmusArtenConfig: true, oeffnenGruendeConfig: true } }),
     flagOn ? getActiveWearSessions(userId) : Promise.resolve([]),
     flagOn ? getNonKgTrackingCategories(userId) : Promise.resolve([]),
     flagOn ? getSessionCategories(userId) : Promise.resolve([]),
@@ -108,6 +108,7 @@ export default async function DashboardPage() {
     getActivePause(userId, "CAGE"),
     flagOn ? getActivePause(userId, "PLUG") : Promise.resolve(null),
     pauseBeginCountsToday(userId, "CAGE", now, tz),
+    flagOn ? pauseBeginCountsToday(userId, "PLUG", now, tz) : Promise.resolve({ REINIGUNG: 0, TOILETTE: 0 }),
   ]);
   const userHasDevices = deviceCount > 0;
 
@@ -119,6 +120,8 @@ export default async function DashboardPage() {
   // Heutiges Rest-Kontingent der Cage-Pausen (Reinigung/Toilette) für die laufende Session-Karte.
   // Nur erlaubte Arten; spiegelt die Tageslimit-Durchsetzung in api/entries (PAUSE_BEGIN je Grund).
   const cagePauseQuota = userSettings ? buildCagePauseQuota(userSettings, cagePauseCounts) : [];
+  // Analog für die Plug-Session (Plug-Toilette immer/unbegrenzt, Plug-Reinigung nur wenn aktiviert).
+  const plugPauseQuota = userSettings ? buildPlugPauseQuota(userSettings, plugPauseCounts) : [];
 
   // Reinigungs-Regeln für die Box-Karte: einmal je Seitenaufbau, nicht im 5s-Poll. Dieselbe Quelle
   // wie `get_context.cleaning` im MCP — der Sub sah die Fenster bisher nirgends. `blockedBy` kommt
@@ -416,6 +419,7 @@ export default async function DashboardPage() {
             sperrzeitUnbefristet={!!activePlugSperrzeit && activePlugSperrzeit.endetAt === null}
             sperrzeitNachricht={activePlugSperrzeit?.nachricht ?? null}
             tz={tz}
+            pauseQuota={plugPauseQuota}
           />
         </div>
       )}
