@@ -231,7 +231,9 @@
     "reason": "Reason",
     "from": "from",
     "start": "Start",
-    "end": "End"
+    "end": "End",
+    "showToKeyholder": "Show the keyholder",
+    "showToKeyholderMsg": "I'm showing you this entry."
   },
   "adminNav": {
     "overview": "Overview",

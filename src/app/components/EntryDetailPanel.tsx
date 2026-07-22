@@ -3,6 +3,7 @@
 import { formatDateTime, APP_TZ } from "@/lib/utils";
 import { GRUND_I18N_KEYS } from "@/lib/constants";
 import { useTranslations } from "next-intl";
+import ShowToKeyholderButton from "./ShowToKeyholderButton";
 
 interface Props {
   startTime: Date;
@@ -19,11 +20,13 @@ interface Props {
   kontrollCode?: string | null;
   verifikationStatus?: string | null;
   note?: string | null;
+  /** Wenn gesetzt (nur Sub-Dashboard): zeigt „Der Keyholderin zeigen" an. */
+  entryId?: string;
 }
 
 export default function EntryDetailPanel({
   startTime, locale, tz = APP_TZ, imageExifTime, oeffnenGrund, orgasmusArt,
-  openingLabel, orgasmusLabel, kontrollCode, verifikationStatus, note,
+  openingLabel, orgasmusLabel, kontrollCode, verifikationStatus, note, entryId,
 }: Props) {
   const tc = useTranslations("common");
   const tOpen = useTranslations("openForm");
@@ -85,6 +88,12 @@ export default function EntryDetailPanel({
         <div>
           <p className="text-xs text-foreground-faint uppercase tracking-wider font-semibold mb-0.5">{tc("note")}</p>
           <p className="text-sm text-foreground-muted italic">„{note}"</p>
+        </div>
+      )}
+
+      {entryId && (
+        <div className="pt-1">
+          <ShowToKeyholderButton entryId={entryId} />
         </div>
       )}
     </div>

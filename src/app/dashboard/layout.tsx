@@ -12,6 +12,7 @@ import { deviceCategoriesEnabled, bildersafeEnabled } from "@/lib/constants";
 import { getThemeInitScript } from "@/lib/themeScript";
 import pkg from "../../../package.json";
 import type { NewEntryCategoryRow } from "@/app/components/NewEntrySheet";
+import { KeyholderEnabledProvider } from "@/app/components/KeyholderEnabledContext";
 
 // SECURITY: user-spezifisch (auth() → Rolle/Avatar/Daten). Nie statisch/geteilt cachen — erzwingt
 // per-Request-Rendering inkl. der RSC-Navigations-Payloads. Härtet gegen einen fehlkonfigurierten
@@ -74,7 +75,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <div className="w-full max-w-2xl mx-auto px-4">
           <OfflineIndicator />
         </div>
-        {children}
+        <KeyholderEnabledProvider enabled={aiKeyholderEnabled}>
+          {children}
+        </KeyholderEnabledProvider>
         <BottomNavSpacer />
       </div>
 
