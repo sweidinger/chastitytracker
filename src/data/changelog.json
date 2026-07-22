@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.101.7",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "perf",
+        "text": "Die KI-Keyholderin bekommt Foto-Einträge (Käfig o.ä.) nur noch einmal mitgeschickt — beim ersten Mal nach ihrer letzten Antwort statt bei jeder Nachricht erneut. Spart Tokens und Kosten. Straf-Nachweise, die eine Entscheidung brauchen, bleiben wie bisher angehängt."
+      }
+    ]
+  },
+  {
     "version": "4.101.6",
     "date": "2026-07-22",
     "changes": [

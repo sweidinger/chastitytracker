@@ -43,7 +43,13 @@ export interface KeyholderPhoto {
 }
 
 /** Sammelt die aktuell relevanten Fotos des Subs (Nachweise zuerst, dann neueste Einträge). */
-export async function collectKeyholderPhotos(userId: string): Promise<KeyholderPhoto[]> {
+/**
+ * @param entriesSince Nur Eintrags-Fotos (Kaefig etc.) NEUER als dieser Zeitpunkt anhaengen — i.d.R.
+ *   die letzte Antwort der Keyholderin, damit sie ein Foto genau EINMAL sieht statt bei jeder
+ *   Nachricht erneut (Token-Ersparnis). Straf-NACHWEISE sind davon ausgenommen: sie verlangen eine
+ *   Entscheidung und bleiben angehaengt, bis sie beurteilt sind.
+ */
+export async function collectKeyholderPhotos(userId: string, entriesSince?: Date | null): Promise<KeyholderPhoto[]> {
   const since = new Date(Date.now() - MAX_AGE_H * 60 * 60 * 1000);
 
   const [proofs, entries] = await Promise.all([
@@ -55,7 +61,9 @@ export async function collectKeyholderPhotos(userId: string): Promise<KeyholderP
       select: { refId: true, reason: true, notiz: true, gemeldetAt: true, nachweisUrl: true, erledigungNotiz: true },
     }),
     prisma.entry.findMany({
-      where: { userId, imageUrl: { not: null }, startTime: { gte: since } },
+      // gte: since (72h-Obergrenze) UND – falls gesetzt – gt: entriesSince (nur seit der letzten
+      // Keyholder-Antwort). Das jeweils strengere Limit gilt.
+      where: { userId, imageUrl: { not: null }, startTime: { gte: since, ...(entriesSince ? { gt: entriesSince } : {}) } },
       orderBy: { startTime: "desc" },
       take: MAX_IMAGES,
       select: { type: true, startTime: true, imageUrl: true, note: true, orgasmusArt: true },
