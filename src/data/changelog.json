@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.104.1",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Build-Fix zur proaktiven KI-Keyholderin (v4.104.0): im AI-Keyholderin-Formular fehlte die Uebergabe des neuen Check-in-Feldes, wodurch der Produktions-Build fehlschlug. Ergaenzt."
+      }
+    ]
+  },
+  {
     "version": "4.104.0",
     "date": "2026-07-22",
     "changes": [
