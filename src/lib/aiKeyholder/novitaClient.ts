@@ -27,14 +27,18 @@ export interface NovitaTxt2ImgOptions {
 
 /** Submit a txt2img job and return the Novita task_id. */
 export async function submitNovitaTxt2Img(apiKey: string, opts: NovitaTxt2ImgOptions): Promise<string> {
+  // Novita rejects prompts outside 1..1024 chars (VALIDATOR error) — clamp defensively.
+  const prompt = (opts.positivePrompt || "").trim().slice(0, 1024);
+  if (!prompt) throw new Error("Novita txt2img: empty prompt");
+  const negativePrompt = (opts.negativePrompt ?? "child, underage, blurry, low quality, watermark, text").slice(0, 1024);
   const res = await fetch(`${NOVITA_BASE}/v3/async/txt2img`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       request: {
         model_name: opts.modelName,
-        prompt: opts.positivePrompt,
-        negative_prompt: opts.negativePrompt ?? "child, underage, blurry, low quality, watermark, text",
+        prompt,
+        negative_prompt: negativePrompt,
         width: opts.width ?? 832,
         height: opts.height ?? 1216,
         image_num: 1,

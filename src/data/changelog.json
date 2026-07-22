@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.105.1",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Novita-Mediengenerierung robuster: ein leerer oder zu langer (>1024 Zeichen) KI-Prompt fuehrte gelegentlich zu einem 400-VALIDATOR-Fehler beim gehosteten Anbieter. Der Prompt wird jetzt garantiert nicht-leer (Fallback) und auf 1024 Zeichen begrenzt."
+      }
+    ]
+  },
+  {
     "version": "4.105.0",
     "date": "2026-07-22",
     "changes": [
