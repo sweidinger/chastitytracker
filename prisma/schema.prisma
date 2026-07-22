@@ -883,6 +883,9 @@ model AiKeyholderMessage {
   // Optional: message references a piece of generated media (e.g. "hier ist dein Bild")
   mediaId   String?
   media     GeneratedMedia? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  // Optional: vom Sub vorgelegtes/hochgeladenes Bild dieser Nachricht (Vision) — Dateiname unter
+  // data/uploads. Damit bleibt ein gezeigtes Foto im Chat-Verlauf sichtbar UND fuer die KI ladbar.
+  imageUrl  String?
   createdAt DateTime @default(now())
 
   // Composite index covers the most common query: messages by user + role filter + time order

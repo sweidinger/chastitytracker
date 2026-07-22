@@ -1724,7 +1724,10 @@
     "eventVorgabe": "Trainingsvorgabe geändert",
     "eventWearAnforderung": "Trage-Anweisung",
     "eventSessionAnforderung": "Session-Anforderung",
-    "taskWearTitle": "Trage-Anweisung deiner Keyholderin"
+    "taskWearTitle": "Trage-Anweisung deiner Keyholderin",
+    "imageAttached": "Foto angehängt",
+    "imageRemove": "Foto entfernen",
+    "imageUploadLabel": "Foto hochladen"
   },
   "sessionForm": {
     "titleBegin": "Session starten",

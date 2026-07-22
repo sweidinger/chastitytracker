@@ -1,5 +1,19 @@
 [
   {
+    "version": "4.102.0",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Im Keyholder-Chat kannst du jetzt Fotos hochladen und der KI-Keyholderin direkt zeigen — nützlich, wenn sie ein Bild aus dem Verlauf nicht mehr präsent hat oder du ihr gezielt etwas vorlegen möchtest."
+      },
+      {
+        "type": "feat",
+        "text": "Vorgelegte Fotos bleiben im Chatverlauf sichtbar; die jüngsten werden der KI erneut als Bild mitgegeben, ältere nur noch als Hinweis (spart Tokens)."
+      }
+    ]
+  },
+  {
     "version": "4.101.7",
     "date": "2026-07-22",
     "changes": [

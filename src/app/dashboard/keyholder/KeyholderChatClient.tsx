@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { Send, Lock, CheckCircle, Clock, AlertTriangle, ShieldAlert, KeyRound, Timer, MessageCircle, Target, Zap, PlayCircle, ArrowRight } from "lucide-react";
+import { Send, Lock, CheckCircle, Clock, AlertTriangle, ShieldAlert, KeyRound, Timer, MessageCircle, Target, Zap, PlayCircle, ArrowRight, ImagePlus, X } from "lucide-react";
 
 /** Actionable AI-Anweisungen → Start-/Erfüllungs-Seite im Tracker (CTA-Button unter der Status-Pill).
  *  Nur Aktionen, die der Sub aktiv erfüllt; reine Keyholder-Aktionen (Sperrzeit/Strafe/Vorgabe) haben keinen Button. */
@@ -42,6 +43,8 @@ interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   mediaId?: string;
+  /** Vom Sub vorgelegtes/hochgeladenes Bild (Pfad unter /api/uploads). */
+  imageUrl?: string;
   createdAt: string;
   streaming?: boolean;
   actionPills?: ActionPill[];
@@ -238,6 +241,13 @@ function ChatBubble({ message, t }: { message: ChatMessage; t: ReturnType<typeof
             : "bg-surface border border-border text-foreground rounded-bl-sm",
         ].join(" ")}
       >
+        {message.imageUrl && (
+          <img
+            src={message.imageUrl}
+            alt="Vorgelegtes Foto"
+            className="mb-2 max-h-64 w-auto rounded-lg border border-border object-contain"
+          />
+        )}
         {message.streaming ? (
           <span>
             {renderMarkdown(message.content)}
@@ -401,6 +411,11 @@ export default function KeyholderChatClient({ enabled, initialMessages, initialT
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingImage, setPendingImage] = useState<string | null>(null); // hochgeladen, noch nicht gesendet
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const searchParams = useSearchParams();
+  const router = useRouter();
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -409,17 +424,24 @@ export default function KeyholderChatClient({ enabled, initialMessages, initialT
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const sendMessage = useCallback(async () => {
+  const sendMessage = useCallback(async (opts?: { entryId?: string; entryLabel?: string }) => {
     const text = input.trim();
-    if (!text || streaming) return;
+    const image = pendingImage;
+    const { entryId, entryLabel } = opts ?? {};
+    // Senden erlaubt, sobald es Text, ein hochgeladenes Bild oder einen zu zeigenden Eintrag gibt.
+    if ((!text && !image && !entryId) || streaming) return;
 
     setInput("");
+    setPendingImage(null);
     setError(null);
 
+    const shownText = text || entryLabel || (image ? "Ich zeige dir dieses Foto." : "");
     const userMsg: ChatMessage = {
       id: uid(),
       role: "user",
-      content: text,
+      content: shownText,
+      // Bei entryId loest der Server das Bild auf — die Bubble zeigt es nach dem Verlaufs-Reload.
+      imageUrl: image ?? undefined,
       createdAt: new Date().toISOString(),
     };
     const streamingMsg: ChatMessage = {
@@ -437,7 +459,7 @@ export default function KeyholderChatClient({ enabled, initialMessages, initialT
       const res = await fetch("/api/ai-keyholder/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify(entryId ? { message: text, entryId } : { message: text, imageUrl: image ?? undefined }),
       });
 
       if (!res.ok || !res.body) {
@@ -510,7 +532,7 @@ export default function KeyholderChatClient({ enabled, initialMessages, initialT
       setStreaming(false);
       inputRef.current?.focus();
     }
-  }, [input, streaming]);
+  }, [input, streaming, pendingImage]);
 
   const completeTask = useCallback(async (taskId: string, responseText: string) => {
     const res = await fetch("/api/ai-keyholder/tasks", {
@@ -535,6 +557,37 @@ export default function KeyholderChatClient({ enabled, initialMessages, initialT
       },
     ]);
   }, []);
+
+  // Foto hochladen -> /api/upload -> als pendingImage vormerken (wird beim naechsten Senden angehaengt).
+  const handleUpload = useCallback(async (file: File) => {
+    setUploading(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.url) throw new Error(data.error ?? "Upload fehlgeschlagen");
+      setPendingImage(data.url as string);
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
+  // „Der Keyholderin zeigen": kommt der Sub mit ?showEntry=<id>, wird der Eintrag einmalig vorgelegt.
+  const shownEntryRef = useRef<string | null>(null);
+  useEffect(() => {
+    const entryId = searchParams.get("showEntry");
+    if (!entryId || shownEntryRef.current === entryId || streaming) return;
+    shownEntryRef.current = entryId;
+    const label = searchParams.get("label") ?? "Ich zeige dir diesen Eintrag.";
+    void sendMessage({ entryId, entryLabel: label });
+    // Param entfernen, damit ein Reload den Eintrag nicht erneut sendet.
+    router.replace("/dashboard/keyholder");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   if (!enabled) {
     return (
@@ -588,7 +641,32 @@ export default function KeyholderChatClient({ enabled, initialMessages, initialT
 
       {/* Input */}
       <div className="shrink-0 pb-4 pt-2 border-t border-border">
+        {pendingImage && (
+          <div className="mb-2 flex items-center gap-2">
+            <img src={pendingImage} alt="Vorschau" className="h-16 w-16 rounded-lg border border-border object-cover" />
+            <span className="text-xs text-foreground-muted">{t("imageAttached")}</span>
+            <button type="button" onClick={() => setPendingImage(null)} aria-label={t("imageRemove")}
+              className="text-foreground-muted hover:text-foreground transition">
+              <X size={16} />
+            </button>
+          </div>
+        )}
         <div className="flex gap-2 items-end">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleUpload(f); e.target.value = ""; }}
+          />
+          <Button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={streaming || uploading}
+            variant="secondary"
+            size="default"
+            icon={uploading ? <Spinner size="sm" /> : <ImagePlus size={16} />}
+            aria-label={t("imageUploadLabel")}
+          />
           <textarea
             ref={inputRef}
             value={input}
@@ -606,8 +684,8 @@ export default function KeyholderChatClient({ enabled, initialMessages, initialT
             style={{ fieldSizing: "content" } as React.CSSProperties}
           />
           <Button
-            onClick={sendMessage}
-            disabled={!input.trim() || streaming}
+            onClick={() => sendMessage()}
+            disabled={(!input.trim() && !pendingImage) || streaming}
             size="default"
             icon={streaming ? <Spinner size="sm" /> : <Send size={16} />}
             aria-label={t("sendLabel")}

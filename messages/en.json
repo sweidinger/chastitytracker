@@ -1724,7 +1724,10 @@
     "eventVorgabe": "Training goal updated",
     "eventWearAnforderung": "Wear instruction",
     "eventSessionAnforderung": "Session request",
-    "taskWearTitle": "Wear instruction from your keyholder"
+    "taskWearTitle": "Wear instruction from your keyholder",
+    "imageAttached": "Photo attached",
+    "imageRemove": "Remove photo",
+    "imageUploadLabel": "Upload photo"
   },
   "sessionForm": {
     "titleBegin": "Start session",

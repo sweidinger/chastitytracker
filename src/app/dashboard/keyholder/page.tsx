@@ -29,7 +29,7 @@ export default async function KeyholderPage() {
       // am Gesprächsanfang ein und neue Nachrichten erschienen nach einem Reload nie.
       orderBy: { createdAt: "desc" },
       take: 60,
-      select: { id: true, role: true, content: true, mediaId: true, createdAt: true },
+      select: { id: true, role: true, content: true, mediaId: true, imageUrl: true, createdAt: true },
     }),
     prisma.keyholderTask.findMany({
       where: { userId, completedAt: null },
@@ -48,6 +48,7 @@ export default async function KeyholderPage() {
         role: m.role as "user" | "assistant" | "system",
         content: m.content,
         mediaId: m.mediaId ?? undefined,
+        imageUrl: m.imageUrl ?? undefined,
         createdAt: m.createdAt.toISOString(),
       }))}
       initialTasks={tasks.map((t) => ({
