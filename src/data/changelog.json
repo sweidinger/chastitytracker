@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.104.0",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Die AI-Keyholderin agiert jetzt proaktiver: Sie erkennt Erfolge (erreichte Ziele) und lobt, reagiert auf Ereignisse wie eine nahende Kontroll-Frist, einen gerade laufenden Pausen-Ueberzug oder ein spaet am Tag verpasstes Tagesziel (je nach Intensitaet von Nachfrage bis Strafe) und darf einen Tagesplan ankuendigen. Neu in den AI-Keyholderin-Einstellungen: Proaktive Check-ins (Aus / hoechstens 1x taeglich / alle 12 / 6 / 3 Std) drosselt die rein sozialen Nachrichten ohne Aktion. Die KI steuert weiterhin KEINE Reinigungs- und Toilettenpausen-Budgets."
+      }
+    ]
+  },
+  {
     "version": "4.103.2",
     "date": "2026-07-22",
     "changes": [

@@ -25,6 +25,7 @@ interface Config {
   ollamaModel: string | null;
   systemPrompt: string | null;
   intensity: number | null;
+  proactiveCheckinMinHours: number | null;
   visionEnabled: boolean;
   cronExpression: string | null;
   randomIntervalMinMin: number | null;
@@ -55,6 +56,7 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
   const [clearApiKey, setClearApiKey] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState(initial?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT);
   const [intensity, setIntensity] = useState(initial?.intensity ?? 3);
+  const [proactiveCheckinMinHours, setProactiveCheckinMinHours] = useState(initial?.proactiveCheckinMinHours ?? 24);
   const [visionEnabled, setVisionEnabled] = useState(initial?.visionEnabled ?? true);
   const [randomIntervalMinMin, setRandomIntervalMinMin] = useState(initial?.randomIntervalMinMin ?? 15);
   const [randomIntervalMinMax, setRandomIntervalMinMax] = useState(initial?.randomIntervalMinMax ?? 120);
@@ -106,6 +108,7 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
           ollamaModel: llmProvider === "ollama" ? (ollamaModel || null) : null,
           systemPrompt: systemPrompt || null,
           intensity,
+          proactiveCheckinMinHours,
           visionEnabled,
           randomIntervalMinMin: minMin,
           randomIntervalMinMax: minMax,
@@ -331,6 +334,23 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
               </div>
               <span className="text-foreground-muted text-sm mt-4">{t("aikhRandomIntervalUnit")}</span>
             </div>
+          </div>
+
+          {/* Proaktive Check-ins — reine Sozial-Nachrichten ohne Aktion; getrennt von der Lauf-Kadenz. */}
+          <div className="flex flex-col gap-1 border-t border-border-subtle pt-3">
+            <Select
+              label={t("aikhCheckinFreq")}
+              value={String(proactiveCheckinMinHours)}
+              onChange={(e) => setProactiveCheckinMinHours(Number(e.target.value))}
+              options={[
+                { value: "0", label: t("aikhCheckinOff") },
+                { value: "24", label: t("aikhCheckin24") },
+                { value: "12", label: t("aikhCheckin12") },
+                { value: "6", label: t("aikhCheckin6") },
+                { value: "3", label: t("aikhCheckin3") },
+              ]}
+            />
+            <p className="text-xs text-foreground-muted">{t("aikhCheckinFreqHint")}</p>
           </div>
 
           {nextRunAt && (

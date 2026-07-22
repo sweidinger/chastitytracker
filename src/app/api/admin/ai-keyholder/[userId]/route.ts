@@ -52,6 +52,7 @@ export async function PATCH(
     ollamaModel?: string | null;
     systemPrompt?: string | null;
     intensity?: number | null;
+    proactiveCheckinMinHours?: number | null;
     visionEnabled?: boolean;
     cronExpression?: string | null;
     randomIntervalMinMin?: number | null;
@@ -78,6 +79,10 @@ export async function PATCH(
   if ("ollamaModel" in body) data.ollamaModel = body.ollamaModel ?? null;
   if ("systemPrompt" in body) data.systemPrompt = body.systemPrompt ?? null;
   if (typeof body.intensity === "number") data.intensity = Math.max(1, Math.min(5, Math.round(body.intensity)));
+  // Nur die erlaubten Check-in-Stufen (0=aus / 3 / 6 / 12 / 24 Std) zulassen; sonst Standard 24.
+  if (typeof body.proactiveCheckinMinHours === "number") {
+    data.proactiveCheckinMinHours = [0, 3, 6, 12, 24].includes(body.proactiveCheckinMinHours) ? body.proactiveCheckinMinHours : 24;
+  }
   if (typeof body.visionEnabled === "boolean") data.visionEnabled = body.visionEnabled;
   if ("cronExpression" in body) data.cronExpression = body.cronExpression ?? null;
   if ("randomIntervalMinMin" in body) data.randomIntervalMinMin = body.randomIntervalMinMin ?? null;

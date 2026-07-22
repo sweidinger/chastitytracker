@@ -405,12 +405,7 @@
     "deviceLabelPlug": "Plug",
     "pauseRunning": "Pause active:",
     "pauseStart": "Start pause",
-    "pauseEnd": "End pause",
-    "pauseQuotaLabel": "Pauses today",
-    "pauseQuotaRemaining": "{remaining} of {max} left",
-    "pauseQuotaUnlimited": "unlimited",
-    "pauseGrundReinigung": "Cleaning",
-    "pauseGrundToilette": "Toilet"
+    "pauseEnd": "End pause"
   },
   "newEntry": {
     "title": "New entry",
@@ -1362,7 +1357,14 @@
     "aikhVision": "See photos (vision)",
     "aikhVisionHint": "The keyholder receives up to 3 current photos (pending penalty proofs first, then the newest entries of the last 72 h) as images and can judge them. Requires a vision-capable model — turn off for a text-only (local) model.",
     "strafbuchAutoEntferntDetail": "Inspection not answered — the system automatically recorded the lock as removed.",
-    "strafbuchReinigungNichtVerschlossen": "Not re-locked after cleaning"
+    "strafbuchReinigungNichtVerschlossen": "Not re-locked after cleaning",
+    "aikhCheckinFreq": "Proactive check-ins",
+    "aikhCheckinFreqHint": "How often the keyholder sends an unprompted message on her own (praise, a brief check-in) — independent of the run cadence. Actions like inspections or penalties are unaffected.",
+    "aikhCheckinOff": "Off",
+    "aikhCheckin24": "At most once a day",
+    "aikhCheckin12": "At most every 12h",
+    "aikhCheckin6": "At most every 6h",
+    "aikhCheckin3": "At most every 3h"
   },
   "forgotPassword": {
     "title": "Forgot password",

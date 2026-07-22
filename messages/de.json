@@ -405,12 +405,7 @@
     "deviceLabelPlug": "Plug",
     "pauseRunning": "Pause läuft:",
     "pauseStart": "Pause starten",
-    "pauseEnd": "Pause beenden",
-    "pauseQuotaLabel": "Pausen heute",
-    "pauseQuotaRemaining": "noch {remaining} von {max}",
-    "pauseQuotaUnlimited": "unbegrenzt",
-    "pauseGrundReinigung": "Reinigung",
-    "pauseGrundToilette": "Toilette"
+    "pauseEnd": "Pause beenden"
   },
   "newEntry": {
     "title": "Neu erfassen",
@@ -1362,7 +1357,14 @@
     "aikhVision": "Fotos sehen (Vision)",
     "aikhVisionHint": "Die Keyholderin bekommt bis zu 3 aktuelle Fotos (offene Straf-Nachweise zuerst, dann die neuesten Einträge der letzten 72 h) als Bild mitgeschickt und kann sie beurteilen. Setzt ein bildfähiges Modell voraus — bei einem reinen Text-Modell (lokal) abschalten.",
     "strafbuchAutoEntferntDetail": "Kontrolle nicht beantwortet — das System hat den Verschluss automatisch als abgelegt vermerkt.",
-    "strafbuchReinigungNichtVerschlossen": "Nach Reinigung nicht wieder verschlossen"
+    "strafbuchReinigungNichtVerschlossen": "Nach Reinigung nicht wieder verschlossen",
+    "aikhCheckinFreq": "Proaktive Check-ins",
+    "aikhCheckinFreqHint": "Wie oft die Keyholderin von sich aus eine reine Nachricht schreibt (Lob, kurze Nachfrage) — unabhängig von der Lauf-Kadenz. Aktionen wie Kontrollen oder Strafen sind davon nicht betroffen.",
+    "aikhCheckinOff": "Aus",
+    "aikhCheckin24": "Höchstens 1× täglich",
+    "aikhCheckin12": "Höchstens alle 12 Std",
+    "aikhCheckin6": "Höchstens alle 6 Std",
+    "aikhCheckin3": "Höchstens alle 3 Std"
   },
   "forgotPassword": {
     "title": "Passwort vergessen",
