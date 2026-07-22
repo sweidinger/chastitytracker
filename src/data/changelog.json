@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.101.4",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Die aktuelle Tagesform steht der KI-Keyholderin jetzt zusätzlich als prominente Statuszeile ganz oben zur Verfügung — sie behauptete trotz vorhandener Daten, die heutige Tagesform nicht zu sehen."
+      }
+    ]
+  },
+  {
     "version": "4.101.3",
     "date": "2026-07-22",
     "changes": [
