@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.101.5",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "ui",
+        "text": "Beim Einlösen einer Orgasmus-/Belohnungs-Gelegenheit ist die Art im Erfassungs-Formular jetzt fest auf die vorgegebene Art gesetzt (z.B. „Belohnung\") und nicht mehr aus Versehen änderbar. Über den normalen Weg bleibt die Art frei wählbar."
+      }
+    ]
+  },
+  {
     "version": "4.101.4",
     "date": "2026-07-22",
     "changes": [

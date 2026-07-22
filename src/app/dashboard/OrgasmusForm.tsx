@@ -20,9 +20,11 @@ interface Props {
   /** Offene Anforderung verlangt einen Foto-Nachweis. */
   fotoPflicht?: boolean;
   mobileDesktopMode?: boolean;
+  /** Festgesetzte Art (aus einer Anforderung) — dann ist das Art-Feld fix. */
+  lockedArt?: string;
 }
 
-export default function OrgasmusForm({ initial, artOptions, maxTime, tz, nowDefault, redirectTo, fotoPflicht, mobileDesktopMode }: Props) {
+export default function OrgasmusForm({ initial, artOptions, maxTime, tz, nowDefault, redirectTo, fotoPflicht, mobileDesktopMode, lockedArt }: Props) {
   const tCommon = useTranslations("common");
   const apiError = useApiError();
   const tDash = useTranslations("dashboard");
@@ -51,6 +53,7 @@ export default function OrgasmusForm({ initial, artOptions, maxTime, tz, nowDefa
       isEdit={!!initial}
       fotoPflicht={fotoPflicht}
       mobileDesktopMode={mobileDesktopMode}
+      lockedArt={lockedArt}
       submitFn={submitFn}
       onSuccess={() => router.push(target)}
       onCancel={() => router.push(target)}
