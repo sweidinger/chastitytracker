@@ -8,6 +8,7 @@ import type { SessionEventData } from "./SessionEventRow";
 import SessionTimeline from "./SessionTimeline";
 import LiveTrainingGoals from "./LiveTrainingGoals";
 import SperrzeitRemaining from "@/app/components/SperrzeitRemaining";
+import type { PauseQuotaEntry } from "@/lib/pauseService";
 
 import type { SessionEvent } from "@/lib/sessionHelpers";
 
@@ -40,6 +41,9 @@ interface Props {
   tz?: string;
   /** ISO-Zeitstempel einer aktiven Cage-Pause (PAUSE_BEGIN ohne PAUSE_END). */
   activeCagePauseSince?: string | null;
+  /** Heutiges Rest-Kontingent der Cage-Pausen (Reinigung/Toilette). Nur erlaubte Arten enthalten;
+   *  leer/weglassen = keine Zeile. Spiegelt die Tageslimit-Durchsetzung in api/entries. */
+  pauseQuota?: PauseQuotaEntry[];
   /** Name des getragenen KG-Geräts (null = keins gewählt → Unterzeile ausgeblendet). */
   deviceName?: string | null;
   /** Blendet die „Gerät"-Zeile im Kontroll-Detail ein (true, wenn der Nutzer Geräte hat). */
@@ -65,6 +69,7 @@ export default async function LaufendeSessionCard({
   activeCagePauseSince = null,
   deviceName = null,
   userHasDevices = false,
+  pauseQuota = [],
 }: Props) {
   const t = await getTranslations("dashboard");
   const tCommon = await getTranslations("common");
@@ -107,6 +112,23 @@ export default async function LaufendeSessionCard({
             />
           </div>
         </div>
+
+        {/* Rest-Kontingent der Cage-Pausen (Reinigung/Toilette) für heute */}
+        {pauseQuota.length > 0 && (
+          <div className="mt-3">
+            <p className="text-xs font-semibold uppercase tracking-widest opacity-60 mb-0.5">{t("pauseQuotaLabel")}</p>
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs opacity-80">
+              {pauseQuota.map((q) => (
+                <span key={q.grund}>
+                  <span className="opacity-70">{t(q.grund === "REINIGUNG" ? "pauseGrundReinigung" : "pauseGrundToilette")}:</span>{" "}
+                  {q.remaining === null
+                    ? t("pauseQuotaUnlimited")
+                    : t("pauseQuotaRemaining", { remaining: q.remaining, max: q.max })}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Trainingsvorgaben – live-updating client component */}
         {hasVorgabe && (

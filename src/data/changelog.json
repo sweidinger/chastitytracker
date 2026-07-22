@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.103.0",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "In der laufenden Session-Karte steht jetzt direkt unter dem Timer, wie viele Reinigungs- und Toilettenpausen für heute noch übrig sind (z. B. „Reinigung: noch 3 von 5“). Angezeigt werden nur freigeschaltete Pausen-Arten; ohne Tageslimit erscheint „unbegrenzt“. Die Zählung entspricht exakt der geltenden Tagesgrenze."
+      }
+    ]
+  },
+  {
     "version": "4.102.1",
     "date": "2026-07-22",
     "changes": [
