@@ -22,6 +22,7 @@ import { structuredLog } from "@/lib/serverLog";
 import { sendPushToUser } from "@/lib/push";
 import { getControllersOfUser } from "@/lib/keyholder";
 import { reactToSubEvent } from "@/lib/aiKeyholder/keyholderService";
+import { autoGrantReachedGoals } from "@/lib/belohnung";
 import { sendMailSafe, escHtml, appBaseUrl } from "@/lib/mail";
 import { formatDateTime, formatDuration, getMidnightToday, APP_TZ } from "@/lib/utils";
 import { getTranslations } from "next-intl/server";
@@ -708,6 +709,13 @@ export async function POST(req: NextRequest) {
   // WEAR_BEGIN/END bleiben aussen vor (Spam); Pausen sind für die Keyholderin relevant.
   if (["VERSCHLUSS", "OEFFNEN", "PRUEFUNG", "ORGASMUS", "PAUSE_BEGIN", "PAUSE_END"].includes(type)) {
     reactToSubEvent(session.user.id, session.user.name ?? session.user.id, type, note ?? null, imageUrl ?? null).catch(() => {});
+  }
+
+  // Fire-and-forget: erreicht dieser Eintrag ein Trainingsziel, entsteht das Belohnungs-Guthaben
+  // automatisch — die Keyholderin muss es danach nur noch gewähren. Nur trage-abschliessende Typen
+  // (OEFFNEN/WEAR_END) erhöhen die kumulierte Tragezeit; die übrigen können kein Ziel neu erfüllen.
+  if (["OEFFNEN", "WEAR_END"].includes(type)) {
+    autoGrantReachedGoals(session.user.id).catch(() => {});
   }
 
   return NextResponse.json(entry, { status: 201 });

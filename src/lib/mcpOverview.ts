@@ -13,7 +13,7 @@ import { autoKontrolleSettingsFromUser, type AutoKontrolleSettings } from "@/lib
 import { buildCategoryWearGoals, hasAnyGoal } from "@/lib/categoryGoals";
 import { proratedVorgabeTargets } from "@/lib/goalFulfillment";
 import { buildStrafbuch, type StrafbuchControlOffense } from "@/lib/strafbuch";
-import { getBelohnungState, computeBelohnbar } from "@/lib/belohnung";
+import { getBelohnungState, computeBelohnbar, autoGrantReachedGoals } from "@/lib/belohnung";
 import { getActiveHealthHold } from "@/lib/healthHoldService";
 import { buildTagesformView, type TagesformView } from "@/lib/tagesformService";
 import { collectDetectedOffenses, computeSeverities, OFFENSE_SEVERITY, type OffenseSeverity } from "@/lib/strafurteilService";
@@ -255,6 +255,10 @@ export async function buildOverview(username: string, opts: McpFormatOptions = {
   const { tagH, wocheH, monatH } = calculateWearingHoursByRange(entries, now);
 
   // ── Belohnungs-Ökonomie + Gesundheits-Stopp + Tagesform ──
+  // Erreichte Trainingsziele in Guthaben verbuchen, BEVOR der Belohnungs-Stand gelesen wird — so
+  // sieht die Keyholderin (und jeder, der ueber den Overview schaut) immer den aktuellen Zaehler,
+  // auch zwischen den Cron-Laeufen. Idempotent (Unique-Index), daher gefahrlos bei jedem Abruf.
+  await autoGrantReachedGoals(userId, now).catch(() => { /* non-fatal: Overview darf nicht kippen */ });
   const [belohnungState, belohnbar, healthHold, tagesform] = await Promise.all([
     getBelohnungState(userId, now),
     computeBelohnbar(userId, now),

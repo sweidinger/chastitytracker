@@ -122,11 +122,13 @@ function rewardStatusLine(b: { available: number; reserved: number; rewardableGo
     return `BELOHNUNGS-GUTHABEN: ${avail} verfügbar — du DARFST grant_reward nutzen (öffnet ein Belohnungs-Fenster).`;
   }
   const goalHint = goals > 0
-    ? ` Es gibt ${goals} erreichte, noch nicht gutgeschriebene Ziel(e): erst credit_reward buchen, DANN entsteht Guthaben.`
-    : " Es sind auch keine erreichten Ziele offen (rewardableGoals leer) — es gibt nichts gutzuschreiben.";
+    ? ` Es sind ${goals} erreichte Ziel(e) gelistet, aber noch nicht als Guthaben verbucht — ` +
+      `das geschieht automatisch beim nächsten Eintrag des Subs; du kannst mit credit_reward nachhelfen.`
+    : " Es sind auch keine erreichten Ziele offen (rewardableGoals leer).";
   return (
     `BELOHNUNGS-GUTHABEN: 0 — grant_reward ist NICHT möglich und wird vom Server abgelehnt. ` +
-    `Sage dem Sub KEINE Belohnung zu, die du nicht decken kannst.${goalHint}`
+    `Sage dem Sub KEINE Belohnung zu, die du nicht decken kannst. Guthaben entsteht AUTOMATISCH, ` +
+    `sobald der Sub ein Trainingsziel erreicht — du musst es dann nur noch gewähren.${goalHint}`
   );
 }
 

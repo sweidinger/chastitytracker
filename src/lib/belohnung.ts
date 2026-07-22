@@ -12,8 +12,8 @@ export const REWARD_GUIDANCE_TEXT = [
   "",
   "--- Belohnungs-Ökonomie (Orientierung) ---",
   "Der Sub verdient sich Belohnungen, indem er Trainingsziele erreicht. Der Status zeigt dir `belohnung`:",
-  "`available` = verfügbares Guthaben, `reserved` = bereits vorgemerkte (offene) Belohnungs-Fenster, `rewardableGoals` = erreichte, noch NICHT gutgeschriebene Ziele.",
-  "- Sind unter `rewardableGoals` erreichte Ziele gelistet, schreibe sie mit `credit_reward` gut (bestätigt den Erfolg des Subs). Standard: 1 pro Aufruf.",
+  "`available` = verfügbares Guthaben, `reserved` = bereits vorgemerkte (offene) Belohnungs-Fenster, `rewardableGoals` = erreichte Ziele, deren Gutschrift noch aussteht.",
+  "- Guthaben entsteht AUTOMATISCH, sobald der Sub ein Trainingsziel erreicht (gutgeschrieben beim nächsten Eintrag). Du musst dafür NICHTS tun. `credit_reward` ist nur ein manueller Nachtrag, falls doch mal ein erreichtes Ziel offen steht.",
   "- Bei available ≥ 1 kannst du mit `grant_reward` ein Belohnungs-Fenster öffnen (der Sub darf sich einen Orgasmus als Belohnung nehmen). Nutze das als positive Verstärkung, nicht zu inflationär.",
   "- Belohnungen sind das Gegenstück zu Strafen: setze sie bewusst ein, wenn der Sub Ziele erfüllt oder sich besonders bemüht.",
   "- `deny_orgasm` (Guthaben −1) und `delay_orgasm` (Fenster verschieben) sind STRAFEN auf der Belohnungsseite — nur bei Vergehen.",
@@ -184,6 +184,30 @@ export async function grantGutschrift(
   } catch {
     return { ok: false, status: 409, error: "REWARD_ALREADY_CREDITED" };
   }
+}
+
+/**
+ * Schreibt ALLE aktuell erreichten, noch nicht gutgeschriebenen Ziele automatisch gut.
+ * Aufgerufen fire-and-forget nach jedem trage-relevanten Eintrag: erreicht ein Sub ein
+ * Trainingsziel (Tag/Woche/Monat/Jahr, KG oder Kategorie), entsteht das Guthaben von selbst —
+ * die Keyholderin/der Admin muss es danach nur noch GEWÄHREN (grant_reward), nicht erst buchen.
+ *
+ * Idempotent: `grantGutschrift` prüft Erreichung + Offenheit und der Unique-Index
+ * (userId, categoryId, periodType, periodKey) schliesst eine Doppel-Gutschrift aus. Ein
+ * mehrfacher Aufruf (etwa zwei Einträge kurz nacheinander) bucht daher nie doppelt.
+ *
+ * Deckt den Fall „Ziel wird während einer noch laufenden Session erreicht" bewusst nicht in
+ * Echtzeit ab — dort greift die Gutschrift beim nächsten Eintrag. Für ein manuell gewährtes
+ * Guthaben genügt das.
+ */
+export async function autoGrantReachedGoals(userId: string, now: Date = new Date()): Promise<number> {
+  const offen = await computeBelohnbar(userId, now);
+  let credited = 0;
+  for (const z of offen) {
+    const r = await grantGutschrift(userId, z.categoryId, z.periodType, z.periodKey);
+    if (r.ok) credited++;
+  }
+  return credited;
 }
 
 /** Aktuelles offenes Belohnungs-Fenster (vorgemerkt, noch nicht abgelaufen). */
