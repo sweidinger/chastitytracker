@@ -1,5 +1,19 @@
 [
   {
+    "version": "4.101.0",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Belohnungs-Guthaben entsteht jetzt automatisch: Sobald ein Trainingsziel (Tag/Woche/Monat/Jahr, Käfig oder Kategorie) erreicht ist, erhöht sich der Zähler um 1 — die Keyholderin oder der Admin muss das Guthaben danach nur noch gewähren."
+      },
+      {
+        "type": "feat",
+        "text": "Ein neuer Cron-Endpunkt schreibt erreichte Ziele regelmäßig für alle Nutzer gut, auch ohne KI-Keyholderin; zusätzlich wird beim Öffnen/Session-Ende und bei jedem Keyholder-Statusabruf nachgezogen."
+      }
+    ]
+  },
+  {
     "version": "4.100.5",
     "date": "2026-07-21",
     "changes": [
