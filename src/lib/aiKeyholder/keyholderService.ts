@@ -252,7 +252,15 @@ async function buildMessageHistory(
   let photos: KeyholderPhoto[] = [];
   if (cfg.visionEnabled) {
     try {
-      photos = await collectKeyholderPhotos(userId);
+      // Kaefig-/Eintrags-Fotos nur ANHAENGEN, wenn sie seit der letzten Keyholder-Antwort neu sind —
+      // die aelteren stecken bereits im Gespraechsverlauf. Straf-Nachweise haengt collectKeyholderPhotos
+      // unabhaengig davon an. Ohne bisherige Antwort (erste Nachricht) werden alle 72h-Fotos gezeigt.
+      const lastAssistant = await prisma.aiKeyholderMessage.findFirst({
+        where: { userId, role: "assistant", content: { not: "" } },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      });
+      photos = await collectKeyholderPhotos(userId, lastAssistant?.createdAt ?? null);
     } catch { /* Fotos sind Beiwerk — nie den Chat kippen lassen */ }
   }
 
