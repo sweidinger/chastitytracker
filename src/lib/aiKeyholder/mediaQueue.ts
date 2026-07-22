@@ -3,9 +3,13 @@
  *
  * Flow:
  *   1. queueMediaGeneration()  → creates GeneratedMedia(status=queued)
- *   2. processQueuedJobs()     → submits queued jobs to ComfyUI, status→generating
- *   3. pollGeneratingJobs()    → polls ComfyUI, downloads file, status→ready
+ *   2. processQueuedJobs()     → submits queued jobs to the media backend, status→generating
+ *   3. pollGeneratingJobs()    → polls the backend, downloads file, status→ready
  *   4. assignMediaToTask()     → links a ready media to a KeyholderTask, status→assigned
+ *
+ * Backend is per-user configurable (AiKeyholderConfig.mediaProvider):
+ *   "comfyui" → self-hosted ComfyUI (comfyUiBaseUrl)
+ *   "novita"  → hosted Novita async txt2img API (mediaApiKeyEnc + mediaModelName)
  *
  * processQueuedJobs + pollGeneratingJobs are called by the /api/ai-keyholder/media-poll
  * cron endpoint (same secret as /api/ai-keyholder/run).
@@ -14,6 +18,7 @@
 import { join } from "path";
 import { writeFile, mkdir } from "fs/promises";
 import { prisma } from "@/lib/prisma";
+import { decrypt } from "@/lib/encrypt";
 import { llmChat } from "./llmClient";
 import { getKeyholderConfig } from "./keyholderService";
 import {
@@ -23,6 +28,12 @@ import {
   buildTxt2ImgWorkflow,
   mediaTypeFromFilename,
 } from "./comfyClient";
+import {
+  submitNovitaTxt2Img,
+  getNovitaTaskResult,
+  downloadNovitaImage,
+  novitaFilenameFromUrl,
+} from "./novitaClient";
 
 // ── Prompt generation ─────────────────────────────────────────────────────────
 
@@ -32,7 +43,7 @@ interface MediaTheme {
 }
 
 /**
- * Pick a random theme (weighted) and ask the LLM to write a ComfyUI prompt for it.
+ * Pick a random theme (weighted) and ask the LLM to write an image prompt for it.
  * Falls back to a default prompt on any error.
  */
 export async function generateMediaPrompt(userId: string): Promise<{ prompt: string; theme: string }> {
@@ -102,8 +113,9 @@ export async function queueMediaGeneration(userId: string): Promise<string> {
 }
 
 /**
- * Submit all queued jobs to ComfyUI (up to maxBatch at once).
- * Updates status to "generating" with the ComfyUI prompt_id.
+ * Submit all queued jobs to the configured backend (up to maxBatch at once).
+ * Updates status to "generating"; comfyPromptId holds the backend job id
+ * (ComfyUI prompt_id OR Novita task_id).
  */
 export async function processQueuedJobs(maxBatch = 3): Promise<number> {
   const queued = await prisma.generatedMedia.findMany({
@@ -117,36 +129,52 @@ export async function processQueuedJobs(maxBatch = 3): Promise<number> {
 
   for (const media of queued) {
     const cfg = media.user.aiKeyholderConfig;
-    if (!cfg?.comfyUiBaseUrl || !cfg.mediaEnabled) {
-      // Mark as failed if ComfyUI is not configured
-      await prisma.generatedMedia.update({
-        where: { id: media.id },
-        data: { status: "failed", failedReason: "ComfyUI not configured" },
-      });
+    const fail = (reason: string) =>
+      prisma.generatedMedia.update({ where: { id: media.id }, data: { status: "failed", failedReason: reason } });
+
+    if (!cfg?.mediaEnabled) {
+      await fail("Media generation not enabled");
       continue;
     }
+    const provider = cfg.mediaProvider ?? "comfyui";
 
     try {
-      const workflow = buildTxt2ImgWorkflow({
-        positivePrompt: media.prompt,
-        negativePrompt: media.negativePrompt ?? undefined,
-        width: media.width ?? undefined,
-        height: media.height ?? undefined,
-      });
+      let jobId: string;
 
-      const promptId = await submitWorkflow(cfg.comfyUiBaseUrl, workflow);
+      if (provider === "novita") {
+        if (!cfg.mediaApiKeyEnc || !cfg.mediaModelName) {
+          await fail("Novita not configured (API key and model required)");
+          continue;
+        }
+        const apiKey = decrypt(cfg.mediaApiKeyEnc);
+        jobId = await submitNovitaTxt2Img(apiKey, {
+          modelName: cfg.mediaModelName,
+          positivePrompt: media.prompt,
+          negativePrompt: media.negativePrompt ?? undefined,
+          width: media.width ?? undefined,
+          height: media.height ?? undefined,
+        });
+      } else {
+        if (!cfg.comfyUiBaseUrl) {
+          await fail("ComfyUI not configured");
+          continue;
+        }
+        const workflow = buildTxt2ImgWorkflow({
+          positivePrompt: media.prompt,
+          negativePrompt: media.negativePrompt ?? undefined,
+          width: media.width ?? undefined,
+          height: media.height ?? undefined,
+        });
+        jobId = await submitWorkflow(cfg.comfyUiBaseUrl, workflow);
+      }
 
       await prisma.generatedMedia.update({
         where: { id: media.id },
-        data: { status: "generating", comfyPromptId: promptId },
+        data: { status: "generating", comfyPromptId: jobId },
       });
-
       submitted++;
     } catch (e) {
-      await prisma.generatedMedia.update({
-        where: { id: media.id },
-        data: { status: "failed", failedReason: String(e) },
-      });
+      await fail(String(e));
     }
   }
 
@@ -177,26 +205,40 @@ export async function pollGeneratingJobs(): Promise<number> {
 
   for (const media of generating) {
     const cfg = media.user.aiKeyholderConfig;
-    if (!cfg?.comfyUiBaseUrl || !media.comfyPromptId) continue;
+    if (!cfg || !media.comfyPromptId) continue;
+    const provider = cfg.mediaProvider ?? "comfyui";
+    const fail = (reason: string) =>
+      prisma.generatedMedia.update({ where: { id: media.id }, data: { status: "failed", failedReason: reason } });
 
     try {
-      const { done, outputs } = await getJobOutputs(cfg.comfyUiBaseUrl, media.comfyPromptId);
-      if (!done) continue;
+      let fileBuffer: Buffer;
+      let sourceName: string; // filename used to derive the extension + media type
 
-      if (outputs.length === 0) {
-        await prisma.generatedMedia.update({
-          where: { id: media.id },
-          data: { status: "failed", failedReason: "ComfyUI returned no outputs" },
-        });
-        continue;
+      if (provider === "novita") {
+        if (!cfg.mediaApiKeyEnc) continue;
+        const apiKey = decrypt(cfg.mediaApiKeyEnc);
+        const result = await getNovitaTaskResult(apiKey, media.comfyPromptId);
+        if (!result.done) continue;
+        if (!result.succeeded || result.imageUrls.length === 0) {
+          await fail(result.failedReason ?? "Novita returned no images");
+          continue;
+        }
+        fileBuffer = await downloadNovitaImage(result.imageUrls[0]);
+        sourceName = novitaFilenameFromUrl(result.imageUrls[0]);
+      } else {
+        if (!cfg.comfyUiBaseUrl) continue;
+        const { done, outputs } = await getJobOutputs(cfg.comfyUiBaseUrl, media.comfyPromptId);
+        if (!done) continue;
+        if (outputs.length === 0) {
+          await fail("ComfyUI returned no outputs");
+          continue;
+        }
+        fileBuffer = await downloadOutput(cfg.comfyUiBaseUrl, outputs[0]);
+        sourceName = outputs[0].filename;
       }
 
-      // Use first output
-      const output = outputs[0];
-      const fileBuffer = await downloadOutput(cfg.comfyUiBaseUrl, output);
-
       // Save to data/uploads/ai-keyholder/<userId>/
-      const ext = output.filename.split(".").pop() ?? "png";
+      const ext = (sourceName.split(".").pop() || "png").toLowerCase();
       const filename = `keyholder-${media.id}.${ext}`;
       const subdir = join("ai-keyholder", media.userId);
       const uploadsBase = join(process.cwd(), "data", "uploads");
@@ -205,7 +247,7 @@ export async function pollGeneratingJobs(): Promise<number> {
       await writeFile(join(fullDir, filename), fileBuffer);
 
       const relativePath = `${subdir}/${filename}`.replace(/\\/g, "/");
-      const detectedType = mediaTypeFromFilename(output.filename);
+      const detectedType = mediaTypeFromFilename(sourceName);
 
       await prisma.generatedMedia.update({
         where: { id: media.id },
@@ -218,10 +260,7 @@ export async function pollGeneratingJobs(): Promise<number> {
 
       completed++;
     } catch (e) {
-      await prisma.generatedMedia.update({
-        where: { id: media.id },
-        data: { status: "failed", failedReason: String(e) },
-      });
+      await fail(String(e));
     }
   }
 

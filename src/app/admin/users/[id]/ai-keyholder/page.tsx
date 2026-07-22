@@ -54,6 +54,9 @@ export default async function AiKeyholderPage({ params }: { params: Promise<{ id
                 nextRunAt: config.nextRunAt?.toISOString() ?? null,
                 mediaEnabled: config.mediaEnabled,
                 comfyUiBaseUrl: config.comfyUiBaseUrl,
+                mediaProvider: config.mediaProvider,
+                mediaModelName: config.mediaModelName,
+                mediaApiKeySet: !!config.mediaApiKeyEnc,
                 mediaPromptTemplates: config.mediaPromptTemplates,
                 lastRunAt: config.lastRunAt?.toISOString() ?? null,
               }

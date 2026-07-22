@@ -1364,7 +1364,20 @@
     "aikhCheckin24": "Höchstens 1× täglich",
     "aikhCheckin12": "Höchstens alle 12 Std",
     "aikhCheckin6": "Höchstens alle 6 Std",
-    "aikhCheckin3": "Höchstens alle 3 Std"
+    "aikhCheckin3": "Höchstens alle 3 Std",
+    "aikhMediaProvider": "Medien-Anbieter",
+    "aikhMediaProviderComfy": "ComfyUI (lokal)",
+    "aikhMediaProviderNovita": "Novita (gehostet)",
+    "aikhMediaApiKey": "Novita API-Key",
+    "aikhMediaApiKeyPlaceholder": "API-Key eingeben",
+    "aikhMediaApiKeyHint": "Aus deinem Novita-Konto (Key Management). Wird verschlüsselt gespeichert.",
+    "aikhMediaModelName": "Modell (Checkpoint)",
+    "aikhMediaModelNameHint": "Exakter model_name aus Novitas Modell-Library, z. B. ein SDXL-Checkpoint.",
+    "aikhMediaTestGenerate": "Test-Bild generieren",
+    "aikhMediaRefresh": "Aktualisieren",
+    "aikhMediaTestHint": "Legt einen Generierungs-Auftrag an und schickt ihn sofort ab. Der Status aktualisiert sich nicht automatisch — mit „Aktualisieren“ nachladen (fertige Bilder dauern beim gehosteten Anbieter meist einige Sekunden).",
+    "aikhMediaTestQueued": "Auftrag erstellt — mit „Aktualisieren“ den Status prüfen.",
+    "aikhMediaOpen": "Öffnen"
   },
   "forgotPassword": {
     "title": "Passwort vergessen",

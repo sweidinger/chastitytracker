@@ -17,11 +17,11 @@ export async function GET(
   const { userId } = await params;
   const config = await prisma.aiKeyholderConfig.findUnique({ where: { userId } });
 
-  // Never return the encrypted key — expose only whether it is set
+  // Never return the encrypted keys — expose only whether they are set
   if (config) {
-    const { anthropicApiKeyEnc, ...safeConfig } = config;
+    const { anthropicApiKeyEnc, mediaApiKeyEnc, ...safeConfig } = config;
     return NextResponse.json({
-      config: { ...safeConfig, anthropicApiKeySet: !!anthropicApiKeyEnc },
+      config: { ...safeConfig, anthropicApiKeySet: !!anthropicApiKeyEnc, mediaApiKeySet: !!mediaApiKeyEnc },
     });
   }
   return NextResponse.json({ config: null });
@@ -60,6 +60,12 @@ export async function PATCH(
     mediaEnabled?: boolean;
     comfyUiBaseUrl?: string | null;
     mediaPromptTemplates?: string | null;
+    /** Media backend: "comfyui" (self-hosted) | "novita" (hosted API). */
+    mediaProvider?: string;
+    /** Novita checkpoint filename (model_name), e.g. "sd_xl_base_1.0.safetensors". */
+    mediaModelName?: string | null;
+    /** Plain-text media (Novita) API key; empty string = clear stored key. */
+    mediaApiKey?: string;
     /** Plain-text Anthropic API key; empty string = clear stored key */
     anthropicApiKey?: string;
     /** Persona ID to link; null = clear current persona assignment */
@@ -90,16 +96,24 @@ export async function PATCH(
   if (body.mediaEnabled !== undefined) data.mediaEnabled = body.mediaEnabled;
   if ("comfyUiBaseUrl" in body) data.comfyUiBaseUrl = body.comfyUiBaseUrl ?? null;
   if ("mediaPromptTemplates" in body) data.mediaPromptTemplates = body.mediaPromptTemplates ?? null;
+  if (body.mediaProvider !== undefined) {
+    if (!["comfyui", "novita"].includes(body.mediaProvider)) {
+      return NextResponse.json({ error: "mediaProvider must be 'comfyui' or 'novita'" }, { status: 400 });
+    }
+    data.mediaProvider = body.mediaProvider;
+  }
+  if ("mediaModelName" in body) data.mediaModelName = body.mediaModelName ?? null;
   if ("personaId" in body) data.currentPersonaId = body.personaId ?? null;
 
-  // Encrypt API key if provided; empty string clears the stored value
+  // Encrypt Anthropic API key if provided; empty string clears the stored value
   if ("anthropicApiKey" in body) {
     const raw = body.anthropicApiKey ?? "";
-    if (raw === "") {
-      data.anthropicApiKeyEnc = null;
-    } else {
-      data.anthropicApiKeyEnc = encrypt(raw);
-    }
+    data.anthropicApiKeyEnc = raw === "" ? null : encrypt(raw);
+  }
+  // Encrypt media (Novita) API key if provided; empty string clears the stored value
+  if ("mediaApiKey" in body) {
+    const raw = body.mediaApiKey ?? "";
+    data.mediaApiKeyEnc = raw === "" ? null : encrypt(raw);
   }
 
   const config = await prisma.aiKeyholderConfig.upsert({
@@ -108,9 +122,9 @@ export async function PATCH(
     update: data,
   });
 
-  // Never return the encrypted key
-  const { anthropicApiKeyEnc, ...safeConfig } = config;
+  // Never return the encrypted keys
+  const { anthropicApiKeyEnc, mediaApiKeyEnc, ...safeConfig } = config;
   return NextResponse.json({
-    config: { ...safeConfig, anthropicApiKeySet: !!anthropicApiKeyEnc },
+    config: { ...safeConfig, anthropicApiKeySet: !!anthropicApiKeyEnc, mediaApiKeySet: !!mediaApiKeyEnc },
   });
 }
