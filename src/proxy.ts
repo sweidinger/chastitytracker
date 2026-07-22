@@ -59,6 +59,12 @@ export default auth(async (req) => {
   // /api/mcp, /api/sse, /api/message: mcp-handler transport paths — all authenticated via withMcpAuth (bearer token), not session.
   const isAuthRoute = pathname.startsWith("/api/auth") || pathname === "/login" || pathname === "/api/version" || pathname === "/api/heartbeat" || pathname === "/api/upstream-changelog" || pathname === "/api/portal-login"
     || pathname === "/api/mcp" || pathname === "/api/sse" || pathname === "/api/message"
+    // Cron-/Token-Endpunkte: authentifizieren sich SELBST per Bearer-Secret (AI_KEYHOLDER_CRON_SECRET)
+    // bzw. Admin-Session im Handler. Ohne diese Ausnahme wies das Session-Gate den Cron-Request mit 401
+    // ab, BEVOR der Token geprüft wurde — der autonome KI-Keyholder und die Auto-Gutschrift liefen nie.
+    // Die session-basierten ai-keyholder-Routen (chat, tasks) sind bewusst NICHT hier — sie bleiben geschützt.
+    || pathname === "/api/ai-keyholder/run" || pathname === "/api/ai-keyholder/media-poll" || pathname === "/api/ai-keyholder/generate-media"
+    || pathname === "/api/rewards/reconcile"
     || pathname.startsWith("/api/integration/") // Heimdall-Box: Shared-Secret (requireBoxSync), keine Session
     || pathname.startsWith("/api/oauth/") || pathname.startsWith("/.well-known/") || pathname.startsWith("/oauth/");
   const isAdminRoute = pathname.startsWith("/admin") || pathname.startsWith("/api/admin");

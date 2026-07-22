@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.101.1",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Der autonome KI-Keyholder und die neue Auto-Gutschrift laufen jetzt wirklich: Ihre Cron-Aufrufe wurden vom Session-Schutz mit 401 abgewiesen, bevor der Zugangs-Token überhaupt geprüft wurde. Der autonome Lauf war dadurch seit Einführung inaktiv."
+      }
+    ]
+  },
+  {
     "version": "4.101.0",
     "date": "2026-07-22",
     "changes": [
