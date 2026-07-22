@@ -64,6 +64,8 @@ export interface DashboardProps {
     nachricht: string | null;
     windowLabel: string;
     overdue: boolean;
+    /** Vorgegebene Haupt-Art (Token) — fixiert das Art-Feld im Erfassungs-Formular. */
+    vorgegebeneArt: string | null;
   } | null;
 
   // Offene Session-Anforderungen (Admin/AI-Keyholderin) — je Kategorie ein Banner mit Start-Button.
@@ -159,7 +161,7 @@ export default function DashboardClient(props: DashboardProps) {
       nachricht={offeneOrgasmusAnf.nachricht}
       endetAtLabel={offeneOrgasmusAnf.windowLabel}
       overdue={offeneOrgasmusAnf.overdue}
-      action={{ label: t("orgasmRequestAction"), href: "/dashboard/new/orgasmus" }}
+      action={{ label: t("orgasmRequestAction"), href: offeneOrgasmusAnf.vorgegebeneArt ? `/dashboard/new/orgasmus?art=${encodeURIComponent(offeneOrgasmusAnf.vorgegebeneArt)}` : "/dashboard/new/orgasmus" }}
     />
   ) : null;
 

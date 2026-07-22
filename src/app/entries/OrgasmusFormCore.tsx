@@ -43,11 +43,14 @@ interface Props {
   /** Offene Anforderung verlangt einen Foto-Nachweis → Foto ist Pflicht (sonst freiwillig). */
   fotoPflicht?: boolean;
   mobileDesktopMode?: boolean;
+  /** Festgesetzte Haupt-Art (Haupt-Token). Gesetzt, wenn eine Anforderung sie vorgibt (z.B.
+   *  „Belohnung" beim Einloesen einer Belohnungs-Gelegenheit) — dann ist das Art-Feld fix. */
+  lockedArt?: string;
 }
 
 export default function OrgasmusFormCore({
   initial, artOptions, maxTime, tz, nowDefault, isEdit = false, submitFn, onSuccess, onCancel, submitVariant = "semantic", submitLabel,
-  fotoPflicht = false, mobileDesktopMode,
+  fotoPflicht = false, mobileDesktopMode, lockedArt,
 }: Props) {
   const t = useTranslations("orgasmForm");
   const tc = useTranslations("common");
@@ -64,7 +67,7 @@ export default function OrgasmusFormCore({
   const init = initFromStored(initial?.orgasmusArt, options);
 
   const [startTime, setStartTime] = useState(toDatetimeLocal(initial?.startTime, tz) || nowDefault);
-  const [art, setArt] = useState(init.main); // Haupt-Token
+  const [art, setArt] = useState(lockedArt ?? init.main); // Haupt-Token (fix, wenn lockedArt gesetzt)
   const [subCode, setSubCode] = useState(init.subCode); // voller Code der gewählten Unterart, "" = keine Angabe
   const [note, setNote] = useState(initial?.note ?? "");
   const { saving, error, submit } = useEntrySubmit<OrgasmusPayload>(submitFn, onSuccess);
@@ -138,6 +141,7 @@ export default function OrgasmusFormCore({
         value={art}
         onChange={(e) => { setArt(e.target.value); setSubCode(""); }}
         required
+        disabled={!!lockedArt}
         options={mainOptions}
       />
 

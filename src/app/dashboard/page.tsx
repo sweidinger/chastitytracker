@@ -294,6 +294,7 @@ export default async function DashboardPage() {
       nachricht: [orgasmusVorgabeLabel ? t("orgasmRequiredArt", { art: orgasmusVorgabeLabel }) : null, offeneOrgasmusAnf.nachricht].filter(Boolean).join(" · ") || null,
       windowLabel: t("orgasmWindowFromUntil", { from: formatDateTime(offeneOrgasmusAnf.beginntAt, dl, tz), until: formatDateTime(offeneOrgasmusAnf.endetAt, dl, tz) }),
       overdue: offeneOrgasmusAnf.endetAt < now,
+      vorgegebeneArt: offeneOrgasmusAnf.vorgegebeneArt ?? null,
     } : null,
 
     sessionAnforderungen: sessionAnforderungen.map((s) => ({
