@@ -147,6 +147,7 @@ export default function EntryRow({ entry: e, locale, tz = APP_TZ, orgasmusLabel,
               kontrollCode={e.kontrollCode}
               verifikationStatus={e.verifikationStatus}
               note={e.note}
+              entryId={e.id}
             />
           }
         />

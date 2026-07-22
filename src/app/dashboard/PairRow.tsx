@@ -45,6 +45,7 @@ function entryDetailPanel(entry: PairEntry, dl: string) {
       kontrollCode={entry.kontrollCode}
       verifikationStatus={entry.verifikationStatus}
       note={entry.note}
+      entryId={entry.id}
     />
   );
 }
