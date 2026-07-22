@@ -20,22 +20,34 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { message } = await req.json() as { message?: string };
-  if (!message?.trim()) {
-    return NextResponse.json({ error: "message required" }, { status: 400 });
-  }
-
+  const { message, imageUrl: rawImageUrl, entryId } = await req.json() as { message?: string; imageUrl?: string; entryId?: string };
   const userId = session.user.id;
   const username = session.user.name ?? session.user.email ?? userId;
+
+  // Bildquelle aufloesen: entweder ein bestehender Eintrag des Subs (entryId, Ownership-geprueft) oder
+  // ein frisch hochgeladener Dateiname (imageUrl). Ein blosser Dateiname ohne Pfad/Traversal.
+  let imageUrl: string | null = null;
+  if (entryId) {
+    const entry = await prisma.entry.findFirst({ where: { id: entryId, userId }, select: { imageUrl: true } });
+    imageUrl = entry?.imageUrl ?? null;
+  } else if (rawImageUrl) {
+    const name = rawImageUrl.split("/").pop() ?? "";
+    imageUrl = name && !name.includes("..") ? name : null;
+  }
+
+  if (!message?.trim() && !imageUrl) {
+    return NextResponse.json({ error: "message or image required" }, { status: 400 });
+  }
 
   const cfg = await getKeyholderConfig(userId);
   if (!cfg?.enabled) {
     return NextResponse.json({ error: "AI Keyholder nicht aktiviert" }, { status: 403 });
   }
 
-  // Persist user message immediately
+  // Persist user message immediately (mit optionalem Bild)
+  const userText = message?.trim() || (imageUrl ? "Ich zeige dir dieses Foto." : "");
   await prisma.aiKeyholderMessage.create({
-    data: { userId, role: "user", content: message.trim() },
+    data: { userId, role: "user", content: userText, imageUrl },
   });
 
   // Stream the response
@@ -44,7 +56,7 @@ export async function POST(req: Request) {
     async start(controller) {
       const textChunks: string[] = [];
       try {
-        for await (const item of streamChatResponse(userId, username, message.trim())) {
+        for await (const item of streamChatResponse(userId, username, userText)) {
           if (typeof item === "string") {
             textChunks.push(item);
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: item })}\n\n`));
@@ -102,7 +114,7 @@ export async function GET(req: Request) {
     where: { userId: session.user.id, role: { in: ["user", "assistant"] } },
     orderBy: { createdAt: "desc" },
     take: limit,
-    select: { id: true, role: true, content: true, mediaId: true, createdAt: true },
+    select: { id: true, role: true, content: true, mediaId: true, imageUrl: true, createdAt: true },
   });
 
   return NextResponse.json({ messages: messages.reverse() });

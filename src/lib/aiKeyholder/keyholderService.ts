@@ -359,20 +359,36 @@ async function buildMessageHistory(
     take: limit,
   });
 
-  const historyMessages: LlmMessage[] = history
-    .reverse()
-    .flatMap((m): LlmMessage[] => {
-      const content = m.content.trim();
-      if (!content) return [];
-      if (m.role === "system") {
-        // Inject action result as a user-turn system note so the LLM sees confirmation
-        return [{ role: "user", content: `[System-Bestätigung] ${content}` }];
-      }
-      if (m.role === "user" || m.role === "assistant") {
-        return [{ role: m.role, content }];
-      }
-      return [];
-    });
+  const chron = history.reverse();
+  // Nur die juengsten Bild-Nachrichten TATSAECHLICH mit Bild laden — aeltere als Text-Platzhalter,
+  // damit ein langer Verlauf nicht zig base64-Bilder mitschleppt (Vision ist teuer).
+  const MAX_INLINE_HISTORY_IMAGES = 3;
+  const imageMsgIds = chron.filter((m) => m.role === "user" && m.imageUrl).slice(-MAX_INLINE_HISTORY_IMAGES).map((m) => m.id);
+  const historyMessages: LlmMessage[] = (
+    await Promise.all(
+      chron.map(async (m): Promise<LlmMessage[]> => {
+        const content = m.content.trim();
+        if (m.role === "system") {
+          if (!content) return [];
+          return [{ role: "user", content: `[System-Bestätigung] ${content}` }];
+        }
+        if (m.role === "user" && m.imageUrl) {
+          const text = content || "(Foto vorgelegt)";
+          // Nur die juengsten Bilder inline; aeltere referenziert der Text, das Bild selbst entfaellt.
+          if (cfg.visionEnabled && imageMsgIds.includes(m.id)) {
+            const img = await loadUploadImage(m.imageUrl, { maxPx: 768, quality: 75 }).catch(() => null);
+            if (img) return [{ role: "user", content: [{ type: "image", mediaType: img.mediaType, base64: img.base64 }, { type: "text", text }] }];
+          }
+          return [{ role: "user", content: `${text} [Foto — nicht mehr angehängt]` }];
+        }
+        if (m.role === "user" || m.role === "assistant") {
+          if (!content) return [];
+          return [{ role: m.role, content }];
+        }
+        return [];
+      }),
+    )
+  ).flat();
 
   return attachPhotos([systemMessage, ...historyMessages], photos);
 }
