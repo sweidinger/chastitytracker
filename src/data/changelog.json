@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.101.6",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Wird ein aktives Belohnungs-Fenster bewusst zurückgezogen, wird das beim Gewähren abgebuchte Guthaben jetzt erstattet (mit Historien-Eintrag „Erstattet\"). Ein ungenutzt abgelaufenes Fenster bleibt wie bisher verfallen — der Unterschied zwischen Rückzug und Ablauf ist gewollt."
+      }
+    ]
+  },
+  {
     "version": "4.101.5",
     "date": "2026-07-22",
     "changes": [

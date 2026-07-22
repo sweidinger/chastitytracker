@@ -41,6 +41,7 @@ export type BelohnungEventType =
   | "GEWAEHRT"    // −1 — Belohnungs-Fenster geöffnet (Guthaben vorgemerkt)
   | "EINGELOEST"  //  0 — Orgasmus im Belohnungs-Fenster erfasst
   | "VERFALLEN"   //  0 — Fenster ungenutzt abgelaufen (netto −1 bleibt)
+  | "ERSTATTET"  // +1 — aktives Belohnungs-Fenster bewusst zurückgezogen, Guthaben zurück
   | "ENTZOGEN"    // −1 — Strafe: Guthaben entzogen
   | "VERSCHOBEN"; //  0 — Strafe: Fenster nach hinten geschoben
 

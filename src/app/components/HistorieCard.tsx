@@ -16,6 +16,7 @@ const EVENT_STYLE: Record<string, { color: string; Icon: typeof Gift }> = {
   GEWAEHRT:   { color: "var(--color-ok)",      Icon: Gift },
   EINGELOEST: { color: "var(--color-orgasm)",  Icon: Gift },
   VERFALLEN:  { color: "var(--color-inspect)", Icon: Hourglass },
+  ERSTATTET:  { color: "var(--color-ok)",      Icon: Award },
   ENTZOGEN:   { color: "var(--color-warn)",    Icon: Ban },
   VERSCHOBEN: { color: "var(--color-warn)",    Icon: Clock },
   PUNISHED:   { color: "var(--color-warn)",    Icon: Gavel },

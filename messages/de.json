@@ -775,7 +775,8 @@
     "histTypeENTZOGEN": "Belohnung entzogen",
     "histTypeVERSCHOBEN": "Belohnung verschoben",
     "histTypePUNISHED": "Strafe",
-    "histTypeDISMISSED": "Vergehen verworfen"
+    "histTypeDISMISSED": "Vergehen verworfen",
+    "histTypeERSTATTET": "Erstattet"
   },
   "admin": {
     "title": "Benutzerverwaltung",
