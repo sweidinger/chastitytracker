@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.108.0",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Charakter-Konsistenz & Avatar: Ein fester Persona-Anker (Aussehens-Beschreibung) wird jedem Bild-Prompt vorangestellt, dazu ein fester Seed \u2013 so erscheint durchgehend dieselbe Figur. Zusaetzlich kann im Admin ein Profilbild/Avatar der Keyholderin generiert werden, das im Sub-Chat neben ihren Nachrichten angezeigt wird."
+      }
+    ]
+  },
+  {
     "version": "4.107.1",
     "date": "2026-07-22",
     "changes": [

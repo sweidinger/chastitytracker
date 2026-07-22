@@ -135,6 +135,8 @@ export interface QueueMediaOptions {
   autoDeliver?: boolean;
   /** Caption for the auto-delivered chat task. */
   deliverMessage?: string | null;
+  /** true -> keyholder avatar; on ready, set config.avatarPath instead of a chat task. */
+  isAvatar?: boolean;
 }
 
 /** Negative prompt shared by all backends. Keeps hard child-safety terms; does NOT
@@ -164,6 +166,7 @@ async function rewriteWishToPrompt(userId: string, wish: string): Promise<string
 
 /** Create a new GeneratedMedia record in queued state. */
 export async function queueMediaGeneration(userId: string, opts?: QueueMediaOptions): Promise<string> {
+  const cfg = await getKeyholderConfig(userId);
   const wish = opts?.prompt?.trim();
   let prompt: string;
   if (wish && opts?.literal) {
@@ -176,6 +179,9 @@ export async function queueMediaGeneration(userId: string, opts?: QueueMediaOpti
   if (!prompt.trim()) {
     prompt = "elegant dominant woman, professional photography, dramatic lighting, high quality";
   }
+  // Character consistency: prepend the fixed persona anchor so the same figure recurs.
+  const anchor = cfg?.mediaPersonaAnchor?.trim();
+  if (anchor) prompt = `${anchor}, ${prompt}`.slice(0, MEDIA_PROMPT_MAX);
   const media = await prisma.generatedMedia.create({
     data: {
       userId,
@@ -185,6 +191,7 @@ export async function queueMediaGeneration(userId: string, opts?: QueueMediaOpti
       negativePrompt: MEDIA_NEGATIVE_PROMPT,
       autoDeliver: opts?.autoDeliver ?? false,
       deliverMessage: opts?.deliverMessage ?? null,
+      isAvatar: opts?.isAvatar ?? false,
     },
   });
   return media.id;
@@ -231,6 +238,7 @@ export async function processQueuedJobs(maxBatch = 3): Promise<number> {
           negativePrompt: media.negativePrompt ?? undefined,
           width: media.width ?? undefined,
           height: media.height ?? undefined,
+          seed: cfg.mediaSeed ?? undefined,
         });
       } else {
         if (!cfg.comfyUiBaseUrl) {
@@ -341,7 +349,17 @@ export async function pollGeneratingJobs(): Promise<number> {
       // On-demand delivery: a chat "generate_media" request marks the media autoDeliver.
       // Turn it into a VIEW_MEDIA chat task right away so the requested image shows up in
       // the chat without waiting for the next autonomous run.
-      if (media.autoDeliver) {
+      if (media.isAvatar) {
+        // Avatar image ready -> set it as the keyholder profile picture.
+        await prisma.aiKeyholderConfig.update({
+          where: { userId: media.userId },
+          data: { avatarPath: relativePath },
+        });
+        await prisma.generatedMedia.update({
+          where: { id: media.id },
+          data: { status: "assigned", assignedAt: new Date() },
+        });
+      } else if (media.autoDeliver) {
         const caption = media.deliverMessage?.trim() || "Ein Bild für dich.";
         await prisma.keyholderTask.create({
           data: {
