@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.101.2",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Belohnungs-Guthaben: Der gespeicherte Zeitraum-Schlüssel trug intern den falschen Monat (einen zu niedrig, z.B. „06\" für Juli). Behoben und bestehende Einträge per Migration korrigiert. Rein technisch — sichtbar war davon nichts, die Zuordnung war immer eindeutig."
+      }
+    ]
+  },
+  {
     "version": "4.101.1",
     "date": "2026-07-22",
     "changes": [

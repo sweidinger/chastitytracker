@@ -92,13 +92,17 @@ const PERIOD_CONFIG: { period: GoalPeriod; soll: keyof ReturnType<typeof prorate
 const pad = (n: number) => String(n).padStart(2, "0");
 
 /** Stabiler Perioden-Schlüssel in User-Zeitzone (aus dem Perioden-Start). */
-function periodKeyFor(period: GoalPeriod, now: Date, tz: string): string {
+export function periodKeyFor(period: GoalPeriod, now: Date, tz: string): string {
   const start = PERIOD_CONFIG.find((p) => p.period === period)!.start(now, tz);
   const { year, month, day } = tzDateParts(start, tz);
+  // tzDateParts liefert `month` 0-indexiert (JS-Konvention, fuer new Date()). Fuer den STRING-Key
+  // muss +1, sonst traegt der Key den Vormonat (Bug bis v4.101.1 — Migration
+  // 20260722_fix_reward_periodkey_month korrigiert die Altbestaende).
+  const mm = pad(month + 1);
   switch (period) {
-    case "day": return `${year}-${pad(month)}-${pad(day)}`;
-    case "week": return `W:${year}-${pad(month)}-${pad(day)}`;
-    case "month": return `${year}-${pad(month)}`;
+    case "day": return `${year}-${mm}-${pad(day)}`;
+    case "week": return `W:${year}-${mm}-${pad(day)}`;
+    case "month": return `${year}-${mm}`;
     case "year": return `${year}`;
   }
 }
