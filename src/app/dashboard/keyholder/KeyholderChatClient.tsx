@@ -235,7 +235,7 @@ function ChatBubble({ message, t, avatarPath }: { message: ChatMessage; t: Retur
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} gap-2 mb-3`}>
       {!isUser && avatarPath && (
-        <img src={`/api/uploads/${avatarPath}`} alt="" className="h-7 w-7 rounded-full object-cover mt-1 shrink-0 border border-border" />
+        <img src={`/api/uploads/${avatarPath}`} alt="" className="h-11 w-11 rounded-full object-cover mt-1 shrink-0 border border-border" />
       )}
       <div className={`flex flex-col ${isUser ? "items-end" : "items-start"} min-w-0 max-w-[85%]`}>
       <div

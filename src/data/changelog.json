@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.110.0",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Persona-Identitaet gebuendelt: Seed und Avatar (inkl. \"Avatar generieren\") liegen jetzt direkt in der Persona-Bearbeitung statt in der Medien-Konfiguration. Beim Uebernehmen einer Persona werden Aussehen, Seed und Avatar automatisch aktiv. Der Avatar im Chat wird ausserdem groesser dargestellt."
+      }
+    ]
+  },
+  {
     "version": "4.109.0",
     "date": "2026-07-22",
     "changes": [

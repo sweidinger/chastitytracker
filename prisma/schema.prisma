@@ -939,7 +939,9 @@ model GeneratedMedia {
   // (a requested "Wunschbild" appears in the chat without waiting for an autonomous run).
   autoDeliver      Boolean  @default(false)
   deliverMessage   String?  // caption shown with the auto-delivered chat task
-  isAvatar         Boolean  @default(false) // true -> on ready, set the keyholder avatarPath instead of a chat task
+  isAvatar         Boolean  @default(false) // true -> on ready, set an avatarPath instead of a chat task
+  seed             Int?     // per-job seed override (falls back to config.mediaSeed)
+  avatarPersonaId  String?  // when set + isAvatar: the ready avatar updates this persona (not the user config)
   createdAt        DateTime @default(now())
 
   messages         AiKeyholderMessage[]
@@ -984,6 +986,8 @@ model AiPersona {
   systemPrompt     String
   // Feste Aussehens-Beschreibung dieser Persona (Bild-Anker); beim Uebernehmen -> mediaPersonaAnchor.
   appearance       String?
+  seed             Int?     // fester Seed dieser Persona (Charakter-Konsistenz)
+  avatarPath       String?  // generiertes Profilbild dieser Persona (rel. Pfad unter uploads)
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
   keyholderConfigs AiKeyholderConfig[]

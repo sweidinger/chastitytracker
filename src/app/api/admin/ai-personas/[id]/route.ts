@@ -7,7 +7,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (err) return err;
 
   const { id } = await params;
-  const { name, description, systemPrompt, appearance } = await req.json();
+  const { name, description, systemPrompt, appearance, seed } = await req.json();
   if (!name?.trim() || !systemPrompt?.trim()) {
     return NextResponse.json({ error: "name and systemPrompt required" }, { status: 400 });
   }
@@ -22,7 +22,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const persona = await prisma.aiPersona.update({
     where: { id },
-    data: { name: name.trim(), description: description?.trim() || null, systemPrompt: systemPrompt.trim(), appearance: appearance?.trim() || null },
+    data: { name: name.trim(), description: description?.trim() || null, systemPrompt: systemPrompt.trim(), appearance: appearance?.trim() || null, seed: (typeof seed === "number" && Number.isFinite(seed)) ? Math.trunc(seed) : null },
   });
   return NextResponse.json(persona);
 }

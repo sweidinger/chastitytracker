@@ -88,8 +88,7 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
   const [mediaLlmModel, setMediaLlmModel] = useState(initial?.mediaLlmModel ?? "");
   const [mediaPersonaAnchor, setMediaPersonaAnchor] = useState(initial?.mediaPersonaAnchor ?? "");
   const [mediaSeed, setMediaSeed] = useState(initial?.mediaSeed != null ? String(initial.mediaSeed) : "");
-  const [avatarPath] = useState<string | null>(initial?.avatarPath ?? null);
-  const [generatingAvatar, setGeneratingAvatar] = useState(false);
+  const [avatarPath, setAvatarPath] = useState<string | null>(initial?.avatarPath ?? null);
   const [mediaApiKey, setMediaApiKey] = useState("");
   const [mediaApiKeySet, setMediaApiKeySet] = useState(initial?.mediaApiKeySet ?? false);
   const [clearMediaKey, setClearMediaKey] = useState(false);
@@ -154,6 +153,7 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
           mediaLlmModel: mediaEnabled && mediaLlmProvider === "ollama" ? (mediaLlmModel || null) : null,
           mediaPersonaAnchor: mediaEnabled ? (mediaPersonaAnchor || null) : null,
           mediaSeed: mediaEnabled && mediaSeed.trim() !== "" ? Number(mediaSeed) : null,
+          avatarPath,
           mediaPromptTemplates: mediaEnabled ? (mediaPromptTemplates || null) : null,
           ...(clearApiKey ? { anthropicApiKey: "" }
             : anthropicApiKey !== "" ? { anthropicApiKey }
@@ -240,28 +240,6 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
       setError(String(e));
     } finally {
       setGenerating(false);
-    }
-  }
-
-  async function handleGenerateAvatar() {
-    setError(null);
-    setSuccess(null);
-    setGeneratingAvatar(true);
-    try {
-      const res = await fetch("/api/ai-keyholder/generate-avatar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Fehler" }));
-        throw new Error(data.error ?? "Avatar-Generierung fehlgeschlagen");
-      }
-      setSuccess(t("aikhAvatarQueued"));
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setGeneratingAvatar(false);
     }
   }
 
@@ -394,7 +372,8 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
           />
           <div className="border-t border-border-subtle pt-3">
             <PersonaManager
-              onApply={(prompt, appearance) => { setSystemPrompt(prompt); if (appearance != null) setMediaPersonaAnchor(appearance); }}
+              userId={userId}
+              onApply={(p) => { setSystemPrompt(p.systemPrompt); if (p.appearance != null) setMediaPersonaAnchor(p.appearance); setMediaSeed(p.seed != null ? String(p.seed) : ""); setAvatarPath(p.avatarPath); }}
               currentPrompt={systemPrompt}
             />
           </div>
@@ -586,41 +565,6 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
                   />
                 </>
               )}
-
-              <Textarea
-                label={t("aikhPersonaAnchor")}
-                hint={t("aikhPersonaAnchorHint")}
-                value={mediaPersonaAnchor}
-                onChange={(e) => setMediaPersonaAnchor(e.target.value)}
-                rows={3}
-              />
-              <Input
-                label={t("aikhMediaSeed")}
-                hint={t("aikhMediaSeedHint")}
-                type="number"
-                placeholder="z. B. 12345"
-                value={mediaSeed}
-                onChange={(e) => setMediaSeed(e.target.value)}
-              />
-
-              {/* Avatar / Profilbild */}
-              <div className="border-t border-border-subtle pt-3 flex flex-col gap-2">
-                <p className="text-sm font-medium text-foreground">{t("aikhAvatar")}</p>
-                {avatarPath ? (
-                  <img src={`/api/uploads/${avatarPath}`} alt="Avatar" className="h-24 w-24 rounded-full border border-border object-cover" />
-                ) : (
-                  <p className="text-xs text-foreground-muted">{t("aikhAvatarNone")}</p>
-                )}
-                <button
-                  type="button"
-                  onClick={handleGenerateAvatar}
-                  disabled={generatingAvatar}
-                  className="self-start inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface disabled:opacity-50"
-                >
-                  {generatingAvatar ? t("aikhAvatarGenerating") : t("aikhAvatarGenerate")}
-                </button>
-                <p className="text-xs text-foreground-muted">{t("aikhAvatarHint")}</p>
-              </div>
 
               {/* Test-Generierung */}
               <div className="border-t border-border-subtle pt-3 flex flex-col gap-2">
