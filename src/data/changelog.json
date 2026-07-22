@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.109.0",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Das Aussehen fuer die Bild-Generierung haengt jetzt an der Persona: Jede Persona hat ein eigenes Feld \"Aussehen\". Beim Uebernehmen einer Persona wird dieses automatisch als Bild-Anker gesetzt \u2013 so passen Avatar und generierte Bilder zur gewaehlten Keyholderin-Persona."
+      }
+    ]
+  },
+  {
     "version": "4.108.0",
     "date": "2026-07-22",
     "changes": [

@@ -13,11 +13,12 @@ interface Persona {
   name: string;
   description: string | null;
   systemPrompt: string;
+  appearance: string | null;
 }
 
 interface Props {
   /** Called when the user clicks "Übernehmen" — copies the persona's prompt into the parent textarea. */
-  onApply: (prompt: string) => void;
+  onApply: (prompt: string, appearance: string | null) => void;
   /** The current system prompt in the parent (used to pre-fill "save as persona" form). */
   currentPrompt: string;
 }
@@ -35,6 +36,7 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
   const [createName, setCreateName] = useState("");
   const [createDesc, setCreateDesc] = useState("");
   const [createPrompt, setCreatePrompt] = useState("");
+  const [createAppearance, setCreateAppearance] = useState("");
   const [creating, setCreating] = useState(false);
 
   // Edit form
@@ -42,6 +44,7 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [editPrompt, setEditPrompt] = useState("");
+  const [editAppearance, setEditAppearance] = useState("");
   const [saving, setSaving] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +61,7 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
     setCreateName("");
     setCreateDesc("");
     setCreatePrompt(currentPrompt);
+    setCreateAppearance("");
     setError(null);
     setShowCreate(true);
     setExpanded(true);
@@ -68,6 +72,7 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
     setEditName(p.name);
     setEditDesc(p.description ?? "");
     setEditPrompt(p.systemPrompt);
+    setEditAppearance(p.appearance ?? "");
     setError(null);
   }
 
@@ -84,7 +89,7 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
       const res = await fetch("/api/admin/ai-personas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: createName, description: createDesc, systemPrompt: createPrompt }),
+        body: JSON.stringify({ name: createName, description: createDesc, systemPrompt: createPrompt, appearance: createAppearance }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -108,7 +113,7 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
       const res = await fetch(`/api/admin/ai-personas/${editingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: editName, description: editDesc, systemPrompt: editPrompt }),
+        body: JSON.stringify({ name: editName, description: editDesc, systemPrompt: editPrompt, appearance: editAppearance }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -158,7 +163,7 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
         <button
           type="button"
           disabled={!selectedPersona}
-          onClick={() => selectedPersona && onApply(selectedPersona.systemPrompt)}
+          onClick={() => selectedPersona && onApply(selectedPersona.systemPrompt, selectedPersona.appearance)}
           className="flex items-center gap-1 text-sm font-medium text-accent border border-accent/30 hover:border-accent/60 rounded-xl px-3 py-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Check size={13} />
@@ -212,6 +217,13 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
                 onChange={(e) => setCreatePrompt(e.target.value)}
                 rows={5}
               />
+              <Textarea
+                label={t("personaAppearance")}
+                value={createAppearance}
+                onChange={(e) => setCreateAppearance(e.target.value)}
+                placeholder={t("personaAppearancePlaceholder")}
+                rows={3}
+              />
               <div className="flex gap-2 justify-end">
                 <Button variant="ghost" size="sm" onClick={() => setShowCreate(false)}>{t("cancel")}</Button>
                 <Button size="sm" loading={creating} onClick={handleCreate}>{t("personaCreate")}</Button>
@@ -244,6 +256,13 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
                   onChange={(e) => setEditPrompt(e.target.value)}
                   rows={5}
                 />
+                <Textarea
+                  label={t("personaAppearance")}
+                  value={editAppearance}
+                  onChange={(e) => setEditAppearance(e.target.value)}
+                  placeholder={t("personaAppearancePlaceholder")}
+                  rows={3}
+                />
                 <div className="flex gap-2 justify-end">
                   <Button variant="ghost" size="sm" onClick={cancelEdit}>{t("cancel")}</Button>
                   <Button size="sm" loading={saving} onClick={handleSaveEdit}>{t("save")}</Button>
@@ -265,7 +284,7 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
                   <button
                     type="button"
                     title={t("personaApply")}
-                    onClick={() => onApply(p.systemPrompt)}
+                    onClick={() => onApply(p.systemPrompt, p.appearance)}
                     className="flex items-center gap-1 text-xs text-accent hover:text-accent/80 border border-accent/30 hover:border-accent/60 rounded-lg px-2 py-1 transition-colors"
                   >
                     <Check size={12} />

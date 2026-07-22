@@ -394,7 +394,7 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
           />
           <div className="border-t border-border-subtle pt-3">
             <PersonaManager
-              onApply={(prompt) => setSystemPrompt(prompt)}
+              onApply={(prompt, appearance) => { setSystemPrompt(prompt); if (appearance != null) setMediaPersonaAnchor(appearance); }}
               currentPrompt={systemPrompt}
             />
           </div>
