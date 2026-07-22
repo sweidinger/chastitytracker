@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.101.3",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "chore",
+        "text": "Deploy-Doku: optionaler Cron-Container fuer den autonomen KI-Keyholder und die automatische Belohnungs-Gutschrift dokumentiert (docs/cron.md)."
+      }
+    ]
+  },
+  {
     "version": "4.101.2",
     "date": "2026-07-22",
     "changes": [

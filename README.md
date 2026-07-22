@@ -186,6 +186,8 @@ MCP_TOKEN=<static-bearer-token>    # optional static bearer token (alternative t
 ENABLE_LEGACY_MCP=false            # optional: set false to hide the deprecated V1 read tools (default on)
 
 # Optional integrations
+AI_KEYHOLDER_CRON_SECRET=<secret>  # shared bearer for the optional background jobs (autonomous AI
+                                   # keyholder + automatic reward crediting); see docs/cron.md
 PORTAL_SHARED_SECRET=<secret>      # JWT secret for the self-service portal's login flow
 USE_ADMIN_RELATIONSHIPS=true       # enable n:m admin-user supervision
 DISABLE_FEEDBACK=true              # hide the in-app feedback button (disables upstream forwarding)
