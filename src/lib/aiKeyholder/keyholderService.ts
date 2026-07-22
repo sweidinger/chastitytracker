@@ -115,6 +115,14 @@ const TIME_GUIDANCE =
 /** Prominente Belohnungs-Zeile mit der HARTEN Regel. `grant_reward` scheitert bei available=0
  *  serverseitig (REWARD_NO_CREDIT) — die KI hat das aber nicht aus dem JSON gelesen und Belohnungen
  *  ohne Deckung ZUGESAGT, die der Server dann ablehnte. Hier steht die Bedingung als Anweisung. */
+function tagesformStatusLine(view: { heuteErfasst: boolean; eintraege: { relativ: string; erregung: number; koerper: number; headspace: number }[] } | undefined): string {
+  const heute = view?.eintraege.find((e) => e.relativ === "HEUTE");
+  if (heute) {
+    return `TAGESFORM HEUTE (bereits erfasst — NICHT danach fragen): Erregung ${heute.erregung}/5 · Koerper ${heute.koerper}/5 · Headspace ${heute.headspace}/5.`;
+  }
+  return "TAGESFORM HEUTE: noch nicht erfasst — hier darfst du danach fragen.";
+}
+
 function rewardStatusLine(b: { available: number; reserved: number; rewardableGoals: unknown[] } | undefined): string {
   const avail = b?.available ?? 0;
   const goals = b?.rewardableGoals?.length ?? 0;
@@ -188,8 +196,9 @@ async function buildMessageHistory(
       ? `⚠ GESUNDHEITS-STOPP AKTIV (seit ${overview.healthHold.since}): „${overview.healthHold.reason}". KEINE neuen Anforderungen, KEINE Strafen. Sei fürsorglich und frage nach dem Befinden.`
       : "GESUNDHEITS-STOPP: keiner aktiv.";
     const rewardLine = rewardStatusLine(overview.belohnung);
+    const tagesformLine = tagesformStatusLine(overview.tagesform);
     const timeLine = currentTimeLine(overview.generatedAt, overview.timezone);
-    overviewText = `\n\n--- Aktueller Status (Kurz) ---\n${timeLine}\n${holdLine}\n${wearLine}\n${lockLine}\n${sessLine}\n${rewardLine}\n\n--- Aktueller Status des Users (Details) ---\n${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
+    overviewText = `\n\n--- Aktueller Status (Kurz) ---\n${timeLine}\n${holdLine}\n${tagesformLine}\n${wearLine}\n${lockLine}\n${sessLine}\n${rewardLine}\n\n--- Aktueller Status des Users (Details) ---\n${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
   } catch {
     // non-fatal if overview fails
   }
@@ -771,7 +780,7 @@ export async function runAutonomousAction(
     const overview = await buildOverview(username);
     autoTagesform = overview.tagesform;
     autoTz = overview.timezone;
-    overviewText = `${currentTimeLine(overview.generatedAt, overview.timezone)}\n${rewardStatusLine(overview.belohnung)}\n\n${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
+    overviewText = `${currentTimeLine(overview.generatedAt, overview.timezone)}\n${tagesformStatusLine(overview.tagesform)}\n${rewardStatusLine(overview.belohnung)}\n\n${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
   } catch (e) {
     return { acted: false, summary: `overview error: ${e}` };
   }
@@ -1557,7 +1566,7 @@ export async function reactToSubEvent(
     let overviewText = "";
     try {
       const overview = await buildOverview(username);
-      overviewText = `${currentTimeLine(overview.generatedAt, overview.timezone)}\n${rewardStatusLine(overview.belohnung)}\n\n${JSON.stringify(overview, null, 2)}`;
+      overviewText = `${currentTimeLine(overview.generatedAt, overview.timezone)}\n${tagesformStatusLine(overview.tagesform)}\n${rewardStatusLine(overview.belohnung)}\n\n${JSON.stringify(overview, null, 2)}`;
     } catch { /* non-fatal */ }
 
     // Tagesform: auch die Sofort-Reaktion muss die Selbsteinschätzung kennen — sonst fordert sie
