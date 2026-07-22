@@ -147,6 +147,53 @@ function currentTimeLine(generatedAt: string, tz?: string): string {
   );
 }
 
+/** Tages-Trainingsziel (KG) als fertige Status-Zeile. `todayPct` bezieht sich auf das VOLLE Tagesziel;
+ *  die Uhrzeit steht separat im Kontext, sodass das Modell „für die Tageszeit zu wenig" beurteilen kann
+ *  ohne selbst zu rechnen. */
+function goalStatusLine(g: { minPerDayH: number | null; todayPct: number | null } | null | undefined): string {
+  if (!g || g.minPerDayH == null) return "TAGESZIEL HEUTE: keins gesetzt.";
+  const pct = Math.round(g.todayPct ?? 0);
+  if (pct >= 100) return `TAGESZIEL HEUTE: erfüllt (${pct}% von ${g.minPerDayH}h) — bei Gelegenheit kurz anerkennen/loben.`;
+  return `TAGESZIEL HEUTE: erst ${pct}% von ${g.minPerDayH}h erfüllt — je nach Tageszeit ggf. erinnern/nachfragen (nicht schon mitten am Tag mahnen).`;
+}
+
+/** Nahende Kontroll-Frist als Warnzeile — nur wenn eine Kontrolle offen, nicht überfällig und ≤45 Min
+ *  Restzeit ist. Sonst leer (die offene Kontrolle steht ohnehin im Overview-JSON). */
+function inspectionDeadlineLine(k: { overdue: boolean; remainingMinutes: number } | null | undefined): string {
+  if (!k || k.overdue) return "";
+  if (k.remainingMinutes >= 0 && k.remainingMinutes <= 45) {
+    return `⚠ KONTROLL-FRIST LÄUFT AUS: noch ${k.remainingMinutes} Min — der Sub sollte JETZT den Nachweis liefern; eine kurze Erinnerung ist angebracht.`;
+  }
+  return "";
+}
+
+/** Check-in-Drossel: ob JETZT ein rein proaktiver Sozial-Check-in (Lob/Nachfrage ohne konkreten Anlass)
+ *  erlaubt ist. Steuert nur diese reinen Nachrichten — Ereignis-Reaktionen und echte Aktionen bleiben
+ *  unbenommen. `proactiveCheckinMinHours` = Mindestabstand in Std (0 = deaktiviert). */
+function checkinStatusLine(cfg: { proactiveCheckinMinHours: number | null; lastCheckinAt: Date | null }, now: Date): string {
+  const minH = cfg.proactiveCheckinMinHours ?? 24;
+  if (minH <= 0) return "PROAKTIVER CHECK-IN: deaktiviert — schreibe KEINE reine Sozial-Nachricht ohne konkreten Anlass.";
+  const last = cfg.lastCheckinAt ? new Date(cfg.lastCheckinAt) : null;
+  const sinceH = last ? (now.getTime() - last.getTime()) / 3_600_000 : Infinity;
+  if (sinceH >= minH) {
+    const lastStr = last ? `letzter vor ${Math.floor(sinceH)} Std` : "noch keiner";
+    return `PROAKTIVER CHECK-IN: erlaubt (${lastStr}, Mindestabstand ${minH} Std) — ein kurzer Check-in/Lob ist ok, wenn es inhaltlich passt.`;
+  }
+  return `PROAKTIVER CHECK-IN: NICHT erlaubt (letzter vor ${Math.floor(sinceH)} Std, Mindestabstand ${minH} Std) — verzichte auf reine Sozial-Nachrichten; konkrete Ereignis-Reaktionen und Aktionen bleiben erlaubt.`;
+}
+
+/** Gemeinsame Proaktiv-Leitlinie für BEIDE Prompts (Chat + autonomer Lauf). Beschreibt, wie die
+ *  Keyholderin die Status-Signale nutzt — und grenzt explizit die Pausen-Budgets aus (keine Aktion dafür). */
+const PROACTIVE_GUIDANCE_TEXT =
+  "\n\n--- PROAKTIVES VERHALTEN ---\n" +
+  "Du agierst nicht nur reaktiv. Nutze die Status-Signale oben (TAGESZIEL, KONTROLL-FRIST, PAUSEN-ÜBERZUG) sowie Belohnungs-/Strafbuch:\n" +
+  "- Erfolge anerkennen: erreichte Ziele (rewardableGoals) bzw. ein erfülltes Tagesziel kurz loben.\n" +
+  "- Auf Ereignisse reagieren: nahende Kontroll-Frist → erinnern; laufender Pausen-Überzug → ansprechen; klar verpasstes Tagesziel (spät am Tag) → je nach Intensität nachfragen (sanft) bis handeln/strafen (streng).\n" +
+  "- Vorausschauen: du darfst einen Tages-/Abendplan ankündigen; ausgeführt wird er im richtigen Moment in einem späteren Lauf.\n" +
+  "- Reine Sozial-Check-ins (Lob/Nachfrage OHNE konkreten Anlass) nur, wenn oben 'PROAKTIVER CHECK-IN: erlaubt' steht.\n" +
+  "- WICHTIG: Du steuerst NICHT die Reinigungs-/Toilettenpausen-Budgets des Subs — dafür gibt es KEINE Aktion. Kündige nie an, diese Kontingente zu ändern.\n" +
+  "Die Intensität bestimmt, wie oft/hart du proaktiv wirst; Sicherheits-, Anatomie- und Gesundheits-Regeln haben immer Vorrang.";
+
 /** Intensitäts-Leitlinie (1–5): steuert Häufigkeit proaktiver Aktionen + Härte/Ton — NIE die Sicherheits-
  *  regeln oder anatomischen Grenzen. Fließt über buildSystemPrompt in alle AI-Kontexte. */
 function intensityGuidance(level: number): string {
@@ -198,7 +245,9 @@ async function buildMessageHistory(
     const rewardLine = rewardStatusLine(overview.belohnung);
     const tagesformLine = tagesformStatusLine(overview.tagesform);
     const timeLine = currentTimeLine(overview.generatedAt, overview.timezone);
-    overviewText = `\n\n--- Aktueller Status (Kurz) ---\n${timeLine}\n${holdLine}\n${tagesformLine}\n${wearLine}\n${lockLine}\n${sessLine}\n${rewardLine}\n\n--- Aktueller Status des Users (Details) ---\n${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
+    const goalLine = goalStatusLine(overview.trainingGoalKg);
+    const inspLine = inspectionDeadlineLine(overview.openKontrolle);
+    overviewText = `\n\n--- Aktueller Status (Kurz) ---\n${timeLine}\n${holdLine}\n${tagesformLine}\n${goalLine}\n${wearLine}\n${lockLine}\n${sessLine}\n${rewardLine}${inspLine ? `\n${inspLine}` : ""}\n\n--- Aktueller Status des Users (Details) ---\n${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
   } catch {
     // non-fatal if overview fails
   }
@@ -272,6 +321,7 @@ async function buildMessageHistory(
       photoPromptSection(photos) +
       sharedContextText +
       strafbuchText +
+      PROACTIVE_GUIDANCE_TEXT +
       "\n\n--- TECHNISCHE INTEGRATION: ECHTE BACKEND-AKTIONEN ---\n" +
       "Diese Konversation läuft über ein spezialisiertes Server-System (kg-tracker). " +
       "Das System parst deine Antworten maschinell und führt eingebettete Aktions-Tags serverseitig aus. " +
@@ -804,7 +854,8 @@ export async function runAutonomousAction(
     const overview = await buildOverview(username);
     autoTagesform = overview.tagesform;
     autoTz = overview.timezone;
-    overviewText = `${currentTimeLine(overview.generatedAt, overview.timezone)}\n${tagesformStatusLine(overview.tagesform)}\n${rewardStatusLine(overview.belohnung)}\n\n${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
+    const autoInsp = inspectionDeadlineLine(overview.openKontrolle);
+    overviewText = `${currentTimeLine(overview.generatedAt, overview.timezone)}\n${tagesformStatusLine(overview.tagesform)}\n${goalStatusLine(overview.trainingGoalKg)}\n${rewardStatusLine(overview.belohnung)}\n${checkinStatusLine(cfg, new Date())}${autoInsp ? `\n${autoInsp}` : ""}\n\n${JSON.stringify(overview, null, 2)}${REWARD_GUIDANCE_TEXT}`;
   } catch (e) {
     return { acted: false, summary: `overview error: ${e}` };
   }
@@ -953,7 +1004,8 @@ export async function runAutonomousAction(
         '- KÖRPERREGION-EXKLUSIVITÄT: Käfig = GENITAL; Anal-Plug UND Dildo-/Anal-Sessions = ANAL (dieselbe Öffnung). NIEMALS zwei Geräte derselben Region gleichzeitig fordern — kein Plug UND Anal-/Dildo-Session zusammen (körperlich unmöglich). Käfig + Anal-Session ist ok. Vor einer Anal-Session/Plug-Anforderung: prüfe activeWearSessions; wird schon ein Plug getragen, keine zweite Anal-Aufgabe stellen. CAGE (genital) und PLUG (anal) nie verwechseln.\n' +
         '- ERFÜLLUNG AM STATUS ABLESEN (activeWearSessions/Anforderungen), nicht am Chat-Text. Zeigt der Tracker das Gerät als getragen, erkenne es an; behauptet es der User ohne Tracker-Beleg, bitte ihn es in der App zu starten.\n' +
         '- GESUNDHEITS-STOPP: Ist healthHold aktiv (der Sub hat selbst eine Pause signalisiert), stelle KEINE neuen Anforderungen und verhänge KEINE Strafen. Erlaubt sind nur send_message (fürsorglich, frage nach dem Befinden) sowie credit_reward/grant_reward. Fordernde Aktionen werden serverseitig hart blockiert.\n' +
-        'Verstoss gegen diese Regeln erzeugt einen Fehler und keine Aktion wird ausgeführt.',
+        'Verstoss gegen diese Regeln erzeugt einen Fehler und keine Aktion wird ausgeführt.' +
+        PROACTIVE_GUIDANCE_TEXT,
     },
     {
       role: "user",
@@ -1459,7 +1511,12 @@ export async function runAutonomousAction(
 
     await prisma.aiKeyholderConfig.update({
       where: { userId },
-      data: { lastRunAt: new Date() },
+      data: {
+        lastRunAt: new Date(),
+        // Ein autonomer Lauf, der nur eine Nachricht schickt (keine zustandsändernde Aktion), zählt als
+        // proaktiver Check-in → Drossel-Uhr (lastCheckinAt) zurücksetzen. Echte Aktionen tun das nicht.
+        ...(decision.action === "send_message" ? { lastCheckinAt: new Date() } : {}),
+      },
     });
 
     return { acted: true, summary: decision.message };

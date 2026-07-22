@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { buildTagesformContext, tagesformPromptText, type TagesformView } from "@/lib/tagesformService";
+import { getActivePause, pauseReasonsForDevice, type PauseDevice } from "@/lib/pauseService";
 
 /** Cooldown zwischen zwei Kontrollen desselben Geräts (Minuten). Muss zur serverseitigen
  *  Durchsetzung in keyholderService passen — der Prompt-Text ist nur die Vorwarnung. */
@@ -84,6 +85,45 @@ async function buildKontrolleCooldownText(userId: string, now: Date = new Date()
   }
 }
 
+/** Aktuell LAUFENDER Pausen-Überzug (PAUSE_BEGIN ohne PAUSE_END, länger offen als die je Grund/Gerät
+ *  erlaubte Maximaldauer). Nicht im Overview enthalten — deshalb hier als eigenes Warn-Signal, damit die
+ *  Keyholderin einen überfälligen Ausschluss proaktiv ansprechen kann (die Strafbuch-Zeile erfasst nur
+ *  ABGESCHLOSSENE Überzüge). Non-fatal: schlägt eine Query fehl, fehlt nur dieser Block. */
+async function buildPauseOverrunText(userId: string, now: Date = new Date()): Promise<string> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        reinigungErlaubt: true, reinigungMaxMinuten: true, reinigungMaxProTag: true,
+        toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true,
+        plugReinigungErlaubt: true, plugReinigungMaxMinuten: true, plugReinigungMaxProTag: true,
+        plugToiletteMaxMinuten: true,
+      },
+    });
+    if (!user) return "";
+    const lines: string[] = [];
+    for (const device of ["CAGE", "PLUG"] as PauseDevice[]) {
+      const active = await getActivePause(userId, device);
+      if (!active) continue;
+      const entry = await prisma.entry.findUnique({ where: { id: active.id }, select: { oeffnenGrund: true } });
+      const grund = entry?.oeffnenGrund;
+      if (grund !== "REINIGUNG" && grund !== "TOILETTE") continue;
+      const reason = pauseReasonsForDevice(user, device).find((r) => r.grund === grund);
+      if (!reason || reason.maxMinuten <= 0) continue;
+      const elapsedMin = Math.floor((now.getTime() - active.startTime.getTime()) / 60_000);
+      if (elapsedMin > reason.maxMinuten) {
+        const grundLabel = grund === "REINIGUNG" ? "Reinigung" : "Toilette";
+        lines.push(`${device}/${grundLabel}: seit ${elapsedMin} Min offen (max ${reason.maxMinuten} Min) — ${elapsedMin - reason.maxMinuten} Min über der Grenze.`);
+      }
+    }
+    return lines.length > 0
+      ? `\n\n⚠ PAUSEN-ÜBERZUG (LÄUFT GERADE):\n${lines.join("\n")}\nDer Ausschluss ist überfällig — sprich den Sub darauf an.`
+      : "";
+  } catch {
+    return "";
+  }
+}
+
 /** Baut den gemeinsamen Kontext für alle Prompt-Pfade (Chat, autonomer Lauf, Reaktionen) als
  *  ein anhängbarer String — Geräte, Session-Kategorien, Kontrolle-Cooldown, Tagesform, in stabiler
  *  Reihenfolge. Jeder Baustein ist für sich non-fatal: schlägt eine Query fehl, fehlt nur dieser Block.
@@ -94,12 +134,13 @@ export async function buildSharedPromptContext(
   userId: string,
   tagesformView?: TagesformView,
 ): Promise<string> {
-  const [deviceListText, sessionCategoriesText, kontrolleCooldownText, tagesformText] = await Promise.all([
+  const [deviceListText, sessionCategoriesText, kontrolleCooldownText, tagesformText, pauseOverrunText] = await Promise.all([
     buildDeviceListText(userId),
     buildSessionCategoriesText(userId),
     buildKontrolleCooldownText(userId),
     tagesformView ? Promise.resolve(tagesformPromptText(tagesformView)) : buildTagesformContext(userId),
+    buildPauseOverrunText(userId),
   ]);
 
-  return deviceListText + sessionCategoriesText + kontrolleCooldownText + tagesformText;
+  return deviceListText + sessionCategoriesText + kontrolleCooldownText + tagesformText + pauseOverrunText;
 }

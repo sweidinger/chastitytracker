@@ -853,6 +853,11 @@ model AiKeyholderConfig {
   systemPrompt         String?  // dominant persona + rules for the AI keyholder
   currentPersonaId     String?  // FK to AiPersona (set when a persona template is applied; cleared on manual edit)
   currentPersona       AiPersona? @relation(fields: [currentPersonaId], references: [id], onDelete: SetNull)
+  // Proaktive Check-ins (reine Sozial-Nachrichten ohne Aktion): Mindestabstand in Stunden zwischen
+  // zwei Check-ins; 0 = deaktiviert. Getrennt von der Lauf-Kadenz (randomInterval*). Erlaubte Werte
+  // im Admin-Dropdown: 0/3/6/12/24. `lastCheckinAt` = Zeitstempel des letzten Check-ins (Drossel).
+  proactiveCheckinMinHours Int   @default(24)
+  lastCheckinAt        DateTime?
   // Autonomous action schedule — random interval
   cronExpression       String?  // legacy / display only; actual scheduling uses randomInterval fields
   lastRunAt            DateTime?
