@@ -63,7 +63,7 @@ export default auth(async (req) => {
     // bzw. Admin-Session im Handler. Ohne diese Ausnahme wies das Session-Gate den Cron-Request mit 401
     // ab, BEVOR der Token geprüft wurde — der autonome KI-Keyholder und die Auto-Gutschrift liefen nie.
     // Die session-basierten ai-keyholder-Routen (chat, tasks) sind bewusst NICHT hier — sie bleiben geschützt.
-    || pathname === "/api/ai-keyholder/run" || pathname === "/api/ai-keyholder/media-poll" || pathname === "/api/ai-keyholder/generate-media"
+    || pathname === "/api/ai-keyholder/run" || pathname === "/api/ai-keyholder/media-poll" || pathname === "/api/ai-keyholder/generate-media" || pathname === "/api/ai-keyholder/generate-avatar"
     || pathname === "/api/rewards/reconcile"
     || pathname.startsWith("/api/integration/") // Heimdall-Box: Shared-Secret (requireBoxSync), keine Session
     || pathname.startsWith("/api/oauth/") || pathname.startsWith("/.well-known/") || pathname.startsWith("/oauth/");

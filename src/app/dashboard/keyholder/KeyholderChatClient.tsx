@@ -63,6 +63,7 @@ interface Props {
   enabled: boolean;
   initialMessages: ChatMessage[];
   initialTasks: KeyholderTask[];
+  avatarPath: string | null;
 }
 
 // ── Simple Markdown renderer ──────────────────────────────────────────────────
@@ -222,7 +223,7 @@ function ActionPillBubble({ pill, t }: { pill: ActionPill; t: ReturnType<typeof 
   );
 }
 
-function ChatBubble({ message, t }: { message: ChatMessage; t: ReturnType<typeof useTranslations<"keyholderChat">> }) {
+function ChatBubble({ message, t, avatarPath }: { message: ChatMessage; t: ReturnType<typeof useTranslations<"keyholderChat">>; avatarPath: string | null }) {
   // System messages with event prefix → render as event card
   if (message.role === "system") {
     const hasEvent = EVENT_PATTERNS.some((p) => message.content.includes(p.prefix));
@@ -232,7 +233,11 @@ function ChatBubble({ message, t }: { message: ChatMessage; t: ReturnType<typeof
 
   const isUser = message.role === "user";
   return (
-    <div className={`flex flex-col ${isUser ? "items-end" : "items-start"} mb-3`}>
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"} gap-2 mb-3`}>
+      {!isUser && avatarPath && (
+        <img src={`/api/uploads/${avatarPath}`} alt="" className="h-7 w-7 rounded-full object-cover mt-1 shrink-0 border border-border" />
+      )}
+      <div className={`flex flex-col ${isUser ? "items-end" : "items-start"} min-w-0 max-w-[85%]`}>
       <div
         className={[
           "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
@@ -275,6 +280,7 @@ function ChatBubble({ message, t }: { message: ChatMessage; t: ReturnType<typeof
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -403,7 +409,7 @@ function TaskBanner({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function KeyholderChatClient({ enabled, initialMessages, initialTasks }: Props) {
+export default function KeyholderChatClient({ enabled, initialMessages, initialTasks, avatarPath }: Props) {
   const t = useTranslations("keyholderChat");
 
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
@@ -634,7 +640,7 @@ export default function KeyholderChatClient({ enabled, initialMessages, initialT
             description={t("emptyDesc")}
           />
         ) : (
-          messages.map((m) => <ChatBubble key={m.id} message={m} t={t} />)
+          messages.map((m) => <ChatBubble key={m.id} message={m} t={t} avatarPath={avatarPath} />)
         )}
         <div ref={bottomRef} />
       </div>

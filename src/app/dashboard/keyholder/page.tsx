@@ -43,6 +43,7 @@ export default async function KeyholderPage() {
   return (
     <KeyholderChatClient
       enabled={cfg?.enabled ?? false}
+      avatarPath={cfg?.avatarPath ?? null}
       initialMessages={[...messages].reverse().map((m) => ({
         id: m.id,
         role: m.role as "user" | "assistant" | "system",

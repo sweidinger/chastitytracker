@@ -867,6 +867,12 @@ model AiKeyholderConfig {
   mediaLlmProvider     String   @default("inherit") // "inherit" | "anthropic" | "ollama"
   mediaLlmBaseUrl      String?  // Ollama-Endpoint fuer Media-Prompts (Fallback: ollamaBaseUrl)
   mediaLlmModel        String?  // Modellname fuer Media-Prompts (Fallback: ollamaModel)
+  // Charakter-Konsistenz: fester Aussehens-Anker (jedem Bild-Prompt vorangestellt) + fester Seed.
+  // Gleicher Anker + gleicher Seed => wiedererkennbare Figur.
+  mediaPersonaAnchor   String?
+  mediaSeed            Int?
+  // Profilbild/Avatar der Keyholderin (relativer Pfad unter uploads); wird generiert.
+  avatarPath           String?
   // Autonomous action schedule — random interval
   cronExpression       String?  // legacy / display only; actual scheduling uses randomInterval fields
   lastRunAt            DateTime?
@@ -933,6 +939,7 @@ model GeneratedMedia {
   // (a requested "Wunschbild" appears in the chat without waiting for an autonomous run).
   autoDeliver      Boolean  @default(false)
   deliverMessage   String?  // caption shown with the auto-delivered chat task
+  isAvatar         Boolean  @default(false) // true -> on ready, set the keyholder avatarPath instead of a chat task
   createdAt        DateTime @default(now())
 
   messages         AiKeyholderMessage[]
