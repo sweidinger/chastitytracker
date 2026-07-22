@@ -15,6 +15,7 @@ import { buildSessionEvents } from "@/lib/sessionHelpers";
 import { getActiveVorgabe, getKeyholderSperrzeit, getKeyholderOrgasmusAnforderung, getActiveWearSessions, getNonKgTrackingCategories, keyholderVisibleKontrolleWhere } from "@/lib/queries";
 import { deviceCategoriesEnabled, orgasmusAnforderungArtLabel } from "@/lib/constants";
 import { effectiveOrgasmusArten, resolveOrgasmusArtDisplay } from "@/lib/reasonsService";
+import { pauseBeginCountsToday, buildCagePauseQuota } from "@/lib/pauseService";
 import { ANFORDERUNG_PILLS, VERIFIKATION_PILLS } from "@/lib/kontrollePills";
 import LaufendeSessionCard from "@/app/dashboard/LaufendeSessionCard";
 import StatusBanner from "@/app/dashboard/StatusBanner";
@@ -61,7 +62,7 @@ export default async function AdminUserOverview({ params }: { params: Promise<{ 
   const now = new Date();
 
   const flagOn = deviceCategoriesEnabled();
-  const [entries, alleAnforderungen, activeVorgabe, activeSperrzeit, offeneOrgasmusAnforderung, wearSessions, allNonKgCategories, deviceCount] = await Promise.all([
+  const [entries, alleAnforderungen, activeVorgabe, activeSperrzeit, offeneOrgasmusAnforderung, wearSessions, allNonKgCategories, deviceCount, cagePauseCounts] = await Promise.all([
     prisma.entry.findMany({ where: { userId: id }, orderBy: { startTime: "desc" }, include: { device: { select: { id: true, name: true, categoryId: true } } } }),
     prisma.kontrollAnforderung.findMany({ where: { userId: id, ...keyholderVisibleKontrolleWhere(now) }, orderBy: { createdAt: "desc" }, include: { entry: true } }),
     getActiveVorgabe(id, now),
@@ -70,8 +71,11 @@ export default async function AdminUserOverview({ params }: { params: Promise<{ 
     flagOn ? getActiveWearSessions(id) : Promise.resolve([]),
     flagOn ? getNonKgTrackingCategories(id) : Promise.resolve([]),
     prisma.device.count({ where: { userId: id, archivedAt: null } }),
+    pauseBeginCountsToday(id, "CAGE", now, tz),
   ]);
   const userHasDevices = deviceCount > 0;
+  // Heutiges Rest-Kontingent der Cage-Pausen des Subs — Keyholder sieht dieselbe Zeile wie der Sub.
+  const cagePauseQuota = buildCagePauseQuota(user, cagePauseCounts);
 
   // Belohnungs-Ökonomie + Gesundheits-Stopp.
   const [belohnungState, belohnbar, healthHold] = await Promise.all([
@@ -178,6 +182,7 @@ export default async function AdminUserOverview({ params }: { params: Promise<{ 
           jahrH={jahrH}
           tz={tz}
           userHasDevices={userHasDevices}
+          pauseQuota={cagePauseQuota}
         />
       ) : (
         <StatusBanner type={currentStatus?.type ?? null} since={currentStatus?.since ?? null} tz={tz} />

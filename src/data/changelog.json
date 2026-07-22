@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.103.1",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "ui",
+        "text": "Die Anzeige der heute noch verbleibenden Reinigungs- und Toilettenpausen in der laufenden Session-Karte erscheint jetzt auch in der Keyholder-Sicht (Benutzeruebersicht), nicht mehr nur beim Sub selbst."
+      }
+    ]
+  },
+  {
     "version": "4.103.0",
     "date": "2026-07-22",
     "changes": [
