@@ -982,6 +982,8 @@ model AiPersona {
   name             String              @unique
   description      String?
   systemPrompt     String
+  // Feste Aussehens-Beschreibung dieser Persona (Bild-Anker); beim Uebernehmen -> mediaPersonaAnchor.
+  appearance       String?
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
   keyholderConfigs AiKeyholderConfig[]

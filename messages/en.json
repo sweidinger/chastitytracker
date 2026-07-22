@@ -1391,6 +1391,8 @@
     "aikhAvatarGenerating": "Generating …",
     "aikhAvatarQueued": "Avatar job queued — appears shortly; reload the page to check.",
     "aikhAvatarHint": "Creates a portrait from the persona look + seed and sets it as the keyholder chat avatar. Set the persona look first.",
+    "personaAppearance": "Look (image generation)",
+    "personaAppearancePlaceholder": "e.g. woman, early 30s, jet-black hair, pale skin, green eyes, slim athletic build",
     "aikhMediaTestGenerate": "Generate test image",
     "aikhMediaRefresh": "Refresh",
     "aikhMediaTestHint": "Queues a generation job and submits it immediately. Status does not auto-update — use Refresh (hosted images usually take a few seconds).",

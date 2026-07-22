@@ -8,7 +8,7 @@ export async function GET() {
 
   const personas = await prisma.aiPersona.findMany({
     orderBy: { name: "asc" },
-    select: { id: true, name: true, description: true, systemPrompt: true },
+    select: { id: true, name: true, description: true, systemPrompt: true, appearance: true },
   });
   return NextResponse.json(personas);
 }
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   const err = await requireAdminApi();
   if (err) return err;
 
-  const { name, description, systemPrompt } = await req.json();
+  const { name, description, systemPrompt, appearance } = await req.json();
   if (!name?.trim() || !systemPrompt?.trim()) {
     return NextResponse.json({ error: "name and systemPrompt required" }, { status: 400 });
   }
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
   }
 
   const persona = await prisma.aiPersona.create({
-    data: { name: name.trim(), description: description?.trim() || null, systemPrompt: systemPrompt.trim() },
+    data: { name: name.trim(), description: description?.trim() || null, systemPrompt: systemPrompt.trim(), appearance: appearance?.trim() || null },
   });
   return NextResponse.json(persona, { status: 201 });
 }
