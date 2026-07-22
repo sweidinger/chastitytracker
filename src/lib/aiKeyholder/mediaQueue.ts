@@ -59,6 +59,12 @@ export async function generateMediaPrompt(userId: string): Promise<{ prompt: str
   // Weighted random theme pick
   const theme = pickWeightedTheme(themes) ?? "elegant dominance, leather, chains, soft lighting";
 
+  // Fallback prompt (never empty). Hosted providers (Novita) reject prompts outside 1..1024 chars,
+  // so we guarantee a non-empty prompt and cap the length here — an empty/overlong LLM answer must
+  // never reach the image backend.
+  const fallback = `elegant dominant woman, ${theme}, professional photography, dramatic lighting, high quality`;
+  const PROMPT_MAX = 1000;
+
   // Use LLM to write a Stable Diffusion prompt
   try {
     const text = await llmChat(
@@ -74,12 +80,10 @@ export async function generateMediaPrompt(userId: string): Promise<{ prompt: str
         },
       ],
     );
-    return { prompt: text.trim(), theme };
+    const prompt = (text.trim() || fallback).slice(0, PROMPT_MAX);
+    return { prompt, theme };
   } catch {
-    return {
-      prompt: `elegant dominant woman, ${theme}, professional photography, dramatic lighting, high quality`,
-      theme,
-    };
+    return { prompt: fallback.slice(0, PROMPT_MAX), theme };
   }
 }
 
