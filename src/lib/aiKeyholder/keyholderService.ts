@@ -913,8 +913,8 @@ export async function runAutonomousAction(
     take: 5,
   });
 
-  // Proactively queue new media if the ready pool is running low (< 2) and ComfyUI is configured
-  if (cfg.mediaEnabled && cfg.comfyUiBaseUrl && readyMedia.length < 2) {
+  // Proactively queue new media if the ready pool is running low (< 2) and a media backend is configured
+  if (cfg.mediaEnabled && readyMedia.length < 2 && (cfg.mediaProvider === "novita" ? (!!cfg.mediaApiKeyEnc && !!cfg.mediaModelName) : !!cfg.comfyUiBaseUrl)) {
     const pendingCount = await prisma.generatedMedia.count({
       where: { userId, status: { in: ["queued", "generating"] } },
     });
