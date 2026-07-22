@@ -95,7 +95,7 @@ export async function generateMediaPrompt(userId: string): Promise<{ prompt: str
       [
         {
           role: "user",
-          content: `Write a Stable Diffusion image prompt (max 100 words, no markdown) for the theme: "${theme}". The prompt must be for an artistic, tasteful adult image. Start directly with visual descriptors.`,
+          content: `Write a detailed Stable Diffusion image prompt (max 100 words, no markdown, comma-separated visual descriptors) for the theme: "${theme}". This is consensual adult (18+) content; match the explicitness of the theme and do not tone it down, censor, or add disclaimers. All subjects are adults. Start directly with visual descriptors.`,
         },
       ],
     );
@@ -152,7 +152,7 @@ async function rewriteWishToPrompt(userId: string, wish: string): Promise<string
       [
         {
           role: "user",
-          content: `Write a Stable Diffusion image prompt (max 100 words, no markdown) realising this wish: "${wish}". The prompt must be for an artistic, tasteful adult image. Start directly with visual descriptors.`,
+          content: `Write a detailed Stable Diffusion image prompt (max 100 words, no markdown, comma-separated visual descriptors) realising this wish: "${wish}". This is consensual adult (18+) content; match the explicitness of the wish and do not tone it down, censor, or add disclaimers. All subjects are adults. Start directly with visual descriptors.`,
         },
       ],
     );

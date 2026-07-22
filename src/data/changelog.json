@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.107.1",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Bild-Prompts werden nicht mehr kuenstlich abgeschwaecht: die feste Vorgabe \"tasteful\" in der Anweisung an das Prompt-LLM wurde entfernt. Der Prompt richtet sich jetzt nach der Explizitheit des Themas (einvernehmlicher Erwachsenen-Content, 18+). Die harten Kinderschutz-Filter im Negativ-Prompt bleiben unveraendert."
+      }
+    ]
+  },
+  {
     "version": "4.107.0",
     "date": "2026-07-22",
     "changes": [
