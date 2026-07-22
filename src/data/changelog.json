@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.103.2",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Die Anzeige der heute noch verbleibenden Reinigungs- und Toilettenpausen gibt es jetzt auch in der Plug-Session-Karte. Plug-Toilette ist dabei immer unbegrenzt, Plug-Reinigung erscheint nur, wenn sie freigeschaltet ist."
+      }
+    ]
+  },
+  {
     "version": "4.103.1",
     "date": "2026-07-22",
     "changes": [

@@ -113,6 +113,26 @@ export interface CagePauseUserFields {
   toiletteErlaubt: boolean; toiletteMaxMinuten: number; toiletteMaxProTag: number;
 }
 
+/** Nur die PLUG-relevanten Reinigungs-/Toiletten-Felder (Teilmenge von {@link PauseReasonUserFields}). */
+export interface PlugPauseUserFields {
+  plugReinigungErlaubt: boolean; plugReinigungMaxMinuten: number; plugReinigungMaxProTag: number;
+  plugToiletteMaxMinuten: number;
+}
+
+/** Kombiniert erlaubte Pause-Gründe mit den heute genutzten Zählern zur Rest-Kontingent-Liste.
+ *  `max = 0` bleibt „unbegrenzt" (remaining = null); begrenzte Arten liefern nie-negatives `remaining`. */
+function quotaFromReasons(reasons: PauseReasonOption[], counts: Record<PauseGrund, number>): PauseQuotaEntry[] {
+  return reasons.map((r) => {
+    const used = counts[r.grund] ?? 0;
+    return {
+      grund: r.grund,
+      used,
+      max: r.maxProTag,
+      remaining: r.maxProTag > 0 ? Math.max(0, r.maxProTag - used) : null,
+    };
+  });
+}
+
 /**
  * Heutige PAUSE_BEGIN-Anzahl je Grund (REINIGUNG/TOILETTE) für ein Gerät. Spiegelt EXAKT die
  * Tageslimit-Durchsetzung in `api/entries` (dieselben where-Bedingungen: type=PAUSE_BEGIN,
@@ -159,15 +179,23 @@ export function buildCagePauseQuota(
     { ...user, plugReinigungErlaubt: false, plugReinigungMaxMinuten: 0, plugReinigungMaxProTag: 0, plugToiletteMaxMinuten: 0 },
     "CAGE",
   );
-  return reasons.map((r) => {
-    const used = counts[r.grund] ?? 0;
-    return {
-      grund: r.grund,
-      used,
-      max: r.maxProTag,
-      remaining: r.maxProTag > 0 ? Math.max(0, r.maxProTag - used) : null,
-    };
-  });
+  return quotaFromReasons(reasons, counts);
+}
+
+/**
+ * Wie {@link buildCagePauseQuota}, aber für die PLUG-Session. Plug-Toilette ist immer erlaubt und
+ * unbegrenzt (erscheint als „unbegrenzt"), Plug-Reinigung nur wenn `plugReinigungErlaubt` — beides
+ * gemäss {@link pauseReasonsForDevice}. Cage-Felder sind für die PLUG-Ableitung irrelevant.
+ */
+export function buildPlugPauseQuota(
+  user: PlugPauseUserFields,
+  counts: Record<PauseGrund, number>,
+): PauseQuotaEntry[] {
+  const reasons = pauseReasonsForDevice(
+    { reinigungErlaubt: false, reinigungMaxMinuten: 0, reinigungMaxProTag: 0, toiletteErlaubt: false, toiletteMaxMinuten: 0, toiletteMaxProTag: 0, ...user },
+    "PLUG",
+  );
+  return quotaFromReasons(reasons, counts);
 }
 
 /** Aktiver Pause-Eintrag (PAUSE_BEGIN ohne passendes PAUSE_END), oder null. */
