@@ -70,6 +70,7 @@ export async function PATCH(
     mediaLlmModel?: string | null;
     mediaPersonaAnchor?: string | null;
     mediaSeed?: number | null;
+    avatarPath?: string | null;
     /** Plain-text media (Novita) API key; empty string = clear stored key. */
     mediaApiKey?: string;
     /** Plain-text Anthropic API key; empty string = clear stored key */
@@ -119,6 +120,7 @@ export async function PATCH(
   if ("mediaLlmModel" in body) data.mediaLlmModel = body.mediaLlmModel ?? null;
   if ("mediaPersonaAnchor" in body) data.mediaPersonaAnchor = body.mediaPersonaAnchor ?? null;
   if ("mediaSeed" in body) data.mediaSeed = (typeof body.mediaSeed === "number" && Number.isFinite(body.mediaSeed)) ? Math.trunc(body.mediaSeed) : null;
+  if ("avatarPath" in body) data.avatarPath = body.avatarPath ?? null;
   if ("personaId" in body) data.currentPersonaId = body.personaId ?? null;
 
   // Encrypt Anthropic API key if provided; empty string clears the stored value

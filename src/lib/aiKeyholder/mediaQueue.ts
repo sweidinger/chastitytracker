@@ -135,8 +135,14 @@ export interface QueueMediaOptions {
   autoDeliver?: boolean;
   /** Caption for the auto-delivered chat task. */
   deliverMessage?: string | null;
-  /** true -> keyholder avatar; on ready, set config.avatarPath instead of a chat task. */
+  /** true -> keyholder avatar; on ready, set an avatarPath instead of a chat task. */
   isAvatar?: boolean;
+  /** Fixed generation seed (character consistency). Overrides config.mediaSeed for this job. */
+  seed?: number;
+  /** When set, the ready avatar updates this persona (not the user config). */
+  avatarPersonaId?: string;
+  /** Explicit appearance anchor to prepend, overriding config.mediaPersonaAnchor (may be null/empty). */
+  anchorOverride?: string | null;
 }
 
 /** Negative prompt shared by all backends. Keeps hard child-safety terms; does NOT
@@ -179,8 +185,9 @@ export async function queueMediaGeneration(userId: string, opts?: QueueMediaOpti
   if (!prompt.trim()) {
     prompt = "elegant dominant woman, professional photography, dramatic lighting, high quality";
   }
-  // Character consistency: prepend the fixed persona anchor so the same figure recurs.
-  const anchor = cfg?.mediaPersonaAnchor?.trim();
+  // Character consistency: prepend the appearance anchor so the same figure recurs. anchorOverride
+  // (e.g. a persona's own appearance) takes precedence over the user's active config anchor.
+  const anchor = ((opts && "anchorOverride" in opts) ? opts.anchorOverride?.trim() : cfg?.mediaPersonaAnchor?.trim()) || "";
   if (anchor) prompt = `${anchor}, ${prompt}`.slice(0, MEDIA_PROMPT_MAX);
   const media = await prisma.generatedMedia.create({
     data: {
@@ -192,6 +199,8 @@ export async function queueMediaGeneration(userId: string, opts?: QueueMediaOpti
       autoDeliver: opts?.autoDeliver ?? false,
       deliverMessage: opts?.deliverMessage ?? null,
       isAvatar: opts?.isAvatar ?? false,
+      seed: opts?.seed ?? null,
+      avatarPersonaId: opts?.avatarPersonaId ?? null,
     },
   });
   return media.id;
@@ -238,7 +247,7 @@ export async function processQueuedJobs(maxBatch = 3): Promise<number> {
           negativePrompt: media.negativePrompt ?? undefined,
           width: media.width ?? undefined,
           height: media.height ?? undefined,
-          seed: cfg.mediaSeed ?? undefined,
+          seed: media.seed ?? cfg.mediaSeed ?? undefined,
         });
       } else {
         if (!cfg.comfyUiBaseUrl) {
@@ -350,11 +359,18 @@ export async function pollGeneratingJobs(): Promise<number> {
       // Turn it into a VIEW_MEDIA chat task right away so the requested image shows up in
       // the chat without waiting for the next autonomous run.
       if (media.isAvatar) {
-        // Avatar image ready -> set it as the keyholder profile picture.
-        await prisma.aiKeyholderConfig.update({
-          where: { userId: media.userId },
-          data: { avatarPath: relativePath },
-        });
+        // Avatar image ready -> update the persona avatar (if tied to one) else the user config.
+        if (media.avatarPersonaId) {
+          await prisma.aiPersona.update({
+            where: { id: media.avatarPersonaId },
+            data: { avatarPath: relativePath },
+          });
+        } else {
+          await prisma.aiKeyholderConfig.update({
+            where: { userId: media.userId },
+            data: { avatarPath: relativePath },
+          });
+        }
         await prisma.generatedMedia.update({
           where: { id: media.id },
           data: { status: "assigned", assignedAt: new Date() },

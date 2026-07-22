@@ -20,16 +20,29 @@ export async function POST(req: Request) {
     if (err) return err;
   }
 
-  const { userId } = await req.json() as { userId?: string };
+  const { userId, personaId } = await req.json() as { userId?: string; personaId?: string };
   if (!userId) return NextResponse.json({ error: "userId required" }, { status: 400 });
 
   const cfg = await prisma.aiKeyholderConfig.findUnique({ where: { userId } });
   if (!cfg?.mediaEnabled) return NextResponse.json({ error: "Media generation not enabled" }, { status: 400 });
 
-  // Portrait framing is used verbatim (literal); the persona anchor is prepended inside
-  // queueMediaGeneration, so the avatar face matches the generated images.
+  // Portrait framing is used verbatim (literal); the appearance anchor is prepended inside
+  // queueMediaGeneration so the avatar face matches the generated images.
   const portrait = "portrait, headshot, facing camera, upper body, neutral background, soft studio lighting, photorealistic, detailed face, sharp focus";
-  const mediaId = await queueMediaGeneration(userId, { prompt: portrait, literal: true, isAvatar: true });
+ 
+  let mediaId: string;
+  if (personaId) {
+    const persona = await prisma.aiPersona.findUnique({ where: { id: personaId } });
+    if (!persona) return NextResponse.json({ error: "Persona not found" }, { status: 404 });
+    mediaId = await queueMediaGeneration(userId, {
+      prompt: portrait, literal: true, isAvatar: true,
+      avatarPersonaId: personaId,
+      anchorOverride: persona.appearance,
+      seed: persona.seed ?? undefined,
+    });
+  } else {
+    mediaId = await queueMediaGeneration(userId, { prompt: portrait, literal: true, isAvatar: true });
+  }
   const submitted = await processQueuedJobs(1);
 
   return NextResponse.json({ ok: true, mediaId, submitted });

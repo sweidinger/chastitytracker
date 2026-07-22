@@ -14,16 +14,20 @@ interface Persona {
   description: string | null;
   systemPrompt: string;
   appearance: string | null;
+  seed: number | null;
+  avatarPath: string | null;
 }
 
 interface Props {
-  /** Called when the user clicks "Übernehmen" — copies the persona's prompt into the parent textarea. */
-  onApply: (prompt: string, appearance: string | null) => void;
+  /** Called when "Übernehmen" is clicked — applies the persona (prompt + look + seed + avatar). */
+  onApply: (p: Persona) => void;
   /** The current system prompt in the parent (used to pre-fill "save as persona" form). */
   currentPrompt: string;
+  /** The user whose media backend generates persona avatars. */
+  userId: string;
 }
 
-export default function PersonaManager({ onApply, currentPrompt }: Props) {
+export default function PersonaManager({ onApply, currentPrompt, userId }: Props) {
   const t = useTranslations("admin");
 
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -37,6 +41,7 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
   const [createDesc, setCreateDesc] = useState("");
   const [createPrompt, setCreatePrompt] = useState("");
   const [createAppearance, setCreateAppearance] = useState("");
+  const [createSeed, setCreateSeed] = useState("");
   const [creating, setCreating] = useState(false);
 
   // Edit form
@@ -45,10 +50,13 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
   const [editDesc, setEditDesc] = useState("");
   const [editPrompt, setEditPrompt] = useState("");
   const [editAppearance, setEditAppearance] = useState("");
+  const [editSeed, setEditSeed] = useState("");
   const [saving, setSaving] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [genAvatarId, setGenAvatarId] = useState<string | null>(null);
+  const [avatarMsg, setAvatarMsg] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/admin/ai-personas")
@@ -62,6 +70,7 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
     setCreateDesc("");
     setCreatePrompt(currentPrompt);
     setCreateAppearance("");
+    setCreateSeed("");
     setError(null);
     setShowCreate(true);
     setExpanded(true);
@@ -73,6 +82,7 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
     setEditDesc(p.description ?? "");
     setEditPrompt(p.systemPrompt);
     setEditAppearance(p.appearance ?? "");
+    setEditSeed(p.seed != null ? String(p.seed) : "");
     setError(null);
   }
 
@@ -89,7 +99,7 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
       const res = await fetch("/api/admin/ai-personas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: createName, description: createDesc, systemPrompt: createPrompt, appearance: createAppearance }),
+        body: JSON.stringify({ name: createName, description: createDesc, systemPrompt: createPrompt, appearance: createAppearance, seed: createSeed.trim() !== "" ? Number(createSeed) : null }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -113,7 +123,7 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
       const res = await fetch(`/api/admin/ai-personas/${editingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: editName, description: editDesc, systemPrompt: editPrompt, appearance: editAppearance }),
+        body: JSON.stringify({ name: editName, description: editDesc, systemPrompt: editPrompt, appearance: editAppearance, seed: editSeed.trim() !== "" ? Number(editSeed) : null }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -128,6 +138,28 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
       setError(t("personaSaveFailed"));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleGenerateAvatar(personaId: string) {
+    setError(null);
+    setAvatarMsg(null);
+    setGenAvatarId(personaId);
+    try {
+      const res = await fetch("/api/ai-keyholder/generate-avatar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, personaId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Fehler" }));
+        throw new Error(data.error ?? t("personaSaveFailed"));
+      }
+      setAvatarMsg(t("aikhAvatarQueued"));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setGenAvatarId(null);
     }
   }
 
@@ -163,7 +195,7 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
         <button
           type="button"
           disabled={!selectedPersona}
-          onClick={() => selectedPersona && onApply(selectedPersona.systemPrompt, selectedPersona.appearance)}
+          onClick={() => selectedPersona && onApply(selectedPersona)}
           className="flex items-center gap-1 text-sm font-medium text-accent border border-accent/30 hover:border-accent/60 rounded-xl px-3 py-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Check size={13} />
@@ -224,6 +256,14 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
                 placeholder={t("personaAppearancePlaceholder")}
                 rows={3}
               />
+              <Input
+                label={t("aikhMediaSeed")}
+                hint={t("aikhMediaSeedHint")}
+                type="number"
+                placeholder="z. B. 12345"
+                value={createSeed}
+                onChange={(e) => setCreateSeed(e.target.value)}
+              />
               <div className="flex gap-2 justify-end">
                 <Button variant="ghost" size="sm" onClick={() => setShowCreate(false)}>{t("cancel")}</Button>
                 <Button size="sm" loading={creating} onClick={handleCreate}>{t("personaCreate")}</Button>
@@ -263,6 +303,31 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
                   placeholder={t("personaAppearancePlaceholder")}
                   rows={3}
                 />
+                <Input
+                  label={t("aikhMediaSeed")}
+                  hint={t("aikhMediaSeedHint")}
+                  type="number"
+                  placeholder="z. B. 12345"
+                  value={editSeed}
+                  onChange={(e) => setEditSeed(e.target.value)}
+                />
+                <div className="flex flex-col gap-2 border-t border-border pt-2">
+                  <p className="text-xs font-semibold text-foreground">{t("aikhAvatar")}</p>
+                  {p.avatarPath ? (
+                    <img src={`/api/uploads/${p.avatarPath}`} alt="Avatar" className="h-24 w-24 rounded-full border border-border object-cover" />
+                  ) : (
+                    <p className="text-xs text-foreground-muted">{t("aikhAvatarNone")}</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateAvatar(p.id)}
+                    disabled={genAvatarId === p.id}
+                    className="self-start inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface disabled:opacity-50"
+                  >
+                    {genAvatarId === p.id ? t("aikhAvatarGenerating") : t("aikhAvatarGenerate")}
+                  </button>
+                  {avatarMsg && <p className="text-xs text-foreground-muted">{avatarMsg}</p>}
+                </div>
                 <div className="flex gap-2 justify-end">
                   <Button variant="ghost" size="sm" onClick={cancelEdit}>{t("cancel")}</Button>
                   <Button size="sm" loading={saving} onClick={handleSaveEdit}>{t("save")}</Button>
@@ -284,7 +349,7 @@ export default function PersonaManager({ onApply, currentPrompt }: Props) {
                   <button
                     type="button"
                     title={t("personaApply")}
-                    onClick={() => onApply(p.systemPrompt, p.appearance)}
+                    onClick={() => onApply(p)}
                     className="flex items-center gap-1 text-xs text-accent hover:text-accent/80 border border-accent/30 hover:border-accent/60 rounded-lg px-2 py-1 transition-colors"
                   >
                     <Check size={12} />
