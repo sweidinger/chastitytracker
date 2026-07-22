@@ -381,7 +381,9 @@ async function buildMessageHistory(
       "- deny_orgasm: {\"action\":\"deny_orgasm\"}\n" +
       "  → Strafe: Belohnungs-Guthaben −1 (nicht möglich bei Stand 0).\n" +
       "- delay_orgasm: {\"action\":\"delay_orgasm\",\"hours\":number}\n" +
-      "  → Strafe: aktives Belohnungs-Fenster um `hours` Stunden nach hinten schieben (Fehler, wenn keins aktiv).\n\n" +
+      "  → Strafe: aktives Belohnungs-Fenster um `hours` Stunden nach hinten schieben (Fehler, wenn keins aktiv).\n" +
+      "- generate_media: {\"action\":\"generate_media\",\"prompt\":null|string,\"literal\":true|false,\"message\":null|string}\n" +
+      "  → Erzeuge ein Bild und zeige es dem Sub direkt hier im Chat. prompt = gewünschtes Motiv (null = du wählst selbst ein Thema). literal=true: prompt wird WÖRTLICH als Bild-Prompt verwendet (kein Umschreiben, auch für explizite Motive); literal=false: dein Wunsch wird in einen ausgearbeiteten Bild-Prompt übersetzt. message = kurzer Begleittext, der beim Bild steht. Das Bild wird erzeugt und erscheint nach einigen Sekunden automatisch im Chat. NUR wenn Mediengenerierung aktiviert ist.\n\n" +
       "Bei normalen Gesprächen ohne Aktion: kein Tag.",
   };
 
@@ -827,6 +829,36 @@ export async function executeChatAction(
     if (!res.ok) return { ok: false, actionType: "delay_orgasm", label: "Orgasmus-Gelegenheit verschieben", error: res.error };
     await logEntry(`Belohnungs-Fenster um ${hours} h verschoben`);
     return { ok: true, actionType: "delay_orgasm", label: `Fenster +${hours} h` };
+  }
+
+  if (action.action === "generate_media") {
+    const cfg = await getKeyholderConfig(userId);
+    if (!cfg?.mediaEnabled) {
+      return { ok: false, actionType: "generate_media", label: "Bild-Erzeugung", error: "Mediengenerierung ist nicht aktiviert." };
+    }
+    const providerReady = cfg.mediaProvider === "novita"
+      ? (!!cfg.mediaApiKeyEnc && !!cfg.mediaModelName)
+      : !!cfg.comfyUiBaseUrl;
+    if (!providerReady) {
+      return { ok: false, actionType: "generate_media", label: "Bild-Erzeugung", error: "Kein Medien-Backend konfiguriert." };
+    }
+    const wish = typeof action.prompt === "string" ? action.prompt.trim() : "";
+    const literal = action.literal === true;
+    const caption = (typeof action.message === "string" && action.message.trim()) || "Ein Bild für dich.";
+    try {
+      await queueMediaGeneration(userId, {
+        prompt: wish || undefined,
+        literal,
+        autoDeliver: true,
+        deliverMessage: caption,
+      });
+      await processQueuedJobs(1);
+    } catch (e) {
+      await logEntry(`Bild-Erzeugung fehlgeschlagen: ${String(e)}`);
+      return { ok: false, actionType: "generate_media", label: "Bild-Erzeugung", error: "Bild konnte nicht erzeugt werden." };
+    }
+    await logEntry(`Bild-Erzeugung gestartet${wish ? ` (Wunsch: ${wish.slice(0, 60)})` : ""}. Erscheint nach kurzer Zeit automatisch im Chat.`);
+    return { ok: true, actionType: "generate_media", label: "Bild wird erzeugt" };
   }
 
   return { ok: false, actionType: action.action, label: action.action, error: "Unbekannte Aktion" };

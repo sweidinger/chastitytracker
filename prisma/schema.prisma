@@ -923,6 +923,11 @@ model GeneratedMedia {
   filePath         String?
   assignedAt       DateTime? // set when a KeyholderTask is created from this media
   failedReason     String?
+  // On-demand delivery: a chat generate_media request sets autoDeliver=true, so the
+  // media-poll cron turns this image into a VIEW_MEDIA chat task the moment it is ready
+  // (a requested "Wunschbild" appears in the chat without waiting for an autonomous run).
+  autoDeliver      Boolean  @default(false)
+  deliverMessage   String?  // caption shown with the auto-delivered chat task
   createdAt        DateTime @default(now())
 
   messages         AiKeyholderMessage[]

@@ -34,6 +34,7 @@ import {
   downloadNovitaImage,
   novitaFilenameFromUrl,
 } from "./novitaClient";
+import { sendPushToUser } from "@/lib/push";
 
 // ── Prompt generation ─────────────────────────────────────────────────────────
 
@@ -100,19 +101,78 @@ function pickWeightedTheme(themes: MediaTheme[]): string | null {
 
 // ── Queue management ──────────────────────────────────────────────────────────
 
+/**
+ * Options for an on-demand / customised generation (chat "generate_media" action).
+ * Without opts this behaves exactly as before: a random weighted theme, LLM-written
+ * prompt, no auto-delivery (the autonomous run decides when to assign it).
+ */
+export interface QueueMediaOptions {
+  /** Explicit wish/motif. Empty/undefined -> pick a random weighted theme as before. */
+  prompt?: string;
+  /** true -> use `prompt` VERBATIM as the image prompt (no LLM rewrite, e.g. explicit
+   *  motifs). false -> let the LLM turn the wish into a Stable-Diffusion prompt.
+   *  Ignored when `prompt` is empty. */
+  literal?: boolean;
+  /** true -> the media-poll cron creates a VIEW_MEDIA chat task as soon as this is ready. */
+  autoDeliver?: boolean;
+  /** Caption for the auto-delivered chat task. */
+  deliverMessage?: string | null;
+}
+
+/** Negative prompt shared by all backends. Keeps hard child-safety terms; does NOT
+ *  suppress NSFW (the app's media is consensual adult content). */
+const MEDIA_NEGATIVE_PROMPT = "child, underage, minor, blurry, low quality, watermark, text";
+const MEDIA_PROMPT_MAX = 1000;
+
+/** Turn a free-form wish into a Stable-Diffusion prompt via the configured LLM. */
+async function rewriteWishToPrompt(userId: string, wish: string): Promise<string> {
+  const cfg = await getKeyholderConfig(userId);
+  const fallback = `${wish}, professional photography, dramatic lighting, high quality`;
+  try {
+    const text = await llmChat(
+      {
+        provider: (cfg?.llmProvider ?? "anthropic") as "anthropic" | "ollama",
+        ollamaBaseUrl: cfg?.ollamaBaseUrl ?? undefined,
+        ollamaModel: cfg?.ollamaModel ?? undefined,
+      },
+      [
+        {
+          role: "user",
+          content: `Write a Stable Diffusion image prompt (max 100 words, no markdown) realising this wish: "${wish}". The prompt must be for an artistic, tasteful adult image. Start directly with visual descriptors.`,
+        },
+      ],
+    );
+    return (text.trim() || fallback).slice(0, MEDIA_PROMPT_MAX);
+  } catch {
+    return fallback.slice(0, MEDIA_PROMPT_MAX);
+  }
+}
+
 /** Create a new GeneratedMedia record in queued state. */
-export async function queueMediaGeneration(userId: string): Promise<string> {
-  const { prompt, theme } = await generateMediaPrompt(userId);
+export async function queueMediaGeneration(userId: string, opts?: QueueMediaOptions): Promise<string> {
+  const wish = opts?.prompt?.trim();
+  let prompt: string;
+  if (wish && opts?.literal) {
+    prompt = wish.slice(0, MEDIA_PROMPT_MAX);            // Thema woertlich / Wunschbild: verbatim
+  } else if (wish) {
+    prompt = await rewriteWishToPrompt(userId, wish);
+  } else {
+    prompt = (await generateMediaPrompt(userId)).prompt;
+  }
+  if (!prompt.trim()) {
+    prompt = "elegant dominant woman, professional photography, dramatic lighting, high quality";
+  }
   const media = await prisma.generatedMedia.create({
     data: {
       userId,
       mediaType: "image",
       status: "queued",
       prompt,
-      negativePrompt: "nsfw, child, underage, blurry, low quality, watermark, text",
+      negativePrompt: MEDIA_NEGATIVE_PROMPT,
+      autoDeliver: opts?.autoDeliver ?? false,
+      deliverMessage: opts?.deliverMessage ?? null,
     },
   });
-  void theme; // captured in prompt text
   return media.id;
 }
 
@@ -263,6 +323,32 @@ export async function pollGeneratingJobs(): Promise<number> {
       });
 
       completed++;
+
+      // On-demand delivery: a chat "generate_media" request marks the media autoDeliver.
+      // Turn it into a VIEW_MEDIA chat task right away so the requested image shows up in
+      // the chat without waiting for the next autonomous run.
+      if (media.autoDeliver) {
+        const caption = media.deliverMessage?.trim() || "Ein Bild für dich.";
+        await prisma.keyholderTask.create({
+          data: {
+            userId: media.userId,
+            type: "VIEW_MEDIA",
+            message: caption,
+            mediaId: media.id,
+            dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          },
+        });
+        await prisma.generatedMedia.update({
+          where: { id: media.id },
+          data: { status: "assigned", assignedAt: new Date() },
+        });
+        await sendPushToUser(
+          media.userId,
+          "Neues Bild von deiner Keyholderin",
+          caption.slice(0, 100),
+          "/dashboard/keyholder",
+        );
+      }
     } catch (e) {
       await fail(String(e));
     }
