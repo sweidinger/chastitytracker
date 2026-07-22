@@ -46,6 +46,7 @@ export default async function AiKeyholderPage({ params }: { params: Promise<{ id
                 ollamaModel: config.ollamaModel,
                 systemPrompt: config.systemPrompt,
                 intensity: config.intensity,
+                proactiveCheckinMinHours: config.proactiveCheckinMinHours,
                 visionEnabled: config.visionEnabled,
                 cronExpression: config.cronExpression,
                 randomIntervalMinMin: config.randomIntervalMinMin,
