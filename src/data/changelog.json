@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.110.1",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Der Avatar der Keyholderin im Sub-Chat wird deutlich groesser dargestellt (96px)."
+      }
+    ]
+  },
+  {
     "version": "4.110.0",
     "date": "2026-07-22",
     "changes": [
