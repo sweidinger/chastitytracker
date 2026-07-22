@@ -93,6 +93,83 @@ export function pauseReasonsForDevice(user: PauseReasonUserFields, device: Pause
   return out;
 }
 
+/** Grund einer Cage-Pause (die beiden zählbaren Öffnungsarten). */
+export type PauseGrund = "REINIGUNG" | "TOILETTE";
+
+/** Rest-Kontingent einer Pausen-Art für den heutigen Kalendertag. */
+export interface PauseQuotaEntry {
+  grund: PauseGrund;
+  /** Heute bereits genutzte Pausen dieser Art (PAUSE_BEGIN seit Mitternacht). */
+  used: number;
+  /** Tageslimit; 0 = unbegrenzt. */
+  max: number;
+  /** Verbleibende Pausen, oder null bei unbegrenztem Limit (max = 0). Nie negativ. */
+  remaining: number | null;
+}
+
+/** Nur die CAGE-relevanten Reinigungs-/Toiletten-Felder (Teilmenge von {@link PauseReasonUserFields}). */
+export interface CagePauseUserFields {
+  reinigungErlaubt: boolean; reinigungMaxMinuten: number; reinigungMaxProTag: number;
+  toiletteErlaubt: boolean; toiletteMaxMinuten: number; toiletteMaxProTag: number;
+}
+
+/**
+ * Heutige PAUSE_BEGIN-Anzahl je Grund (REINIGUNG/TOILETTE) für ein Gerät. Spiegelt EXAKT die
+ * Tageslimit-Durchsetzung in `api/entries` (dieselben where-Bedingungen: type=PAUSE_BEGIN,
+ * pauseDevice, oeffnenGrund, startTime ab lokaler Mitternacht), damit die Rest-Anzeige nie von der
+ * tatsächlich durchgesetzten Grenze abweicht.
+ */
+export async function pauseBeginCountsToday(
+  userId: string,
+  device: PauseDevice,
+  now: Date,
+  tz: string = APP_TZ,
+): Promise<Record<PauseGrund, number>> {
+  const midnight = getMidnightToday(now, tz);
+  const rows = await prisma.entry.groupBy({
+    by: ["oeffnenGrund"],
+    where: {
+      userId,
+      type: "PAUSE_BEGIN",
+      pauseDevice: device,
+      oeffnenGrund: { in: ["REINIGUNG", "TOILETTE"] },
+      startTime: { gte: midnight },
+    },
+    _count: { _all: true },
+  });
+  const out: Record<PauseGrund, number> = { REINIGUNG: 0, TOILETTE: 0 };
+  for (const r of rows) {
+    if (r.oeffnenGrund === "REINIGUNG" || r.oeffnenGrund === "TOILETTE") out[r.oeffnenGrund] = r._count._all;
+  }
+  return out;
+}
+
+/**
+ * Baut die Rest-Kontingent-Liste der Cage-Pausen für die laufende Session. Nutzt
+ * {@link pauseReasonsForDevice} als einzige Quelle dafür, WELCHE Arten erlaubt sind (deaktivierte
+ * fehlen), und kombiniert sie mit den heute genutzten Zählern. `max = 0` bleibt als „unbegrenzt"
+ * erhalten (remaining = null); begrenzte Arten liefern nie-negatives `remaining`.
+ */
+export function buildCagePauseQuota(
+  user: CagePauseUserFields,
+  counts: Record<PauseGrund, number>,
+): PauseQuotaEntry[] {
+  // Plug-Felder für die CAGE-Ableitung irrelevant → mit neutralen Defaults auffüllen (an EINER Stelle).
+  const reasons = pauseReasonsForDevice(
+    { ...user, plugReinigungErlaubt: false, plugReinigungMaxMinuten: 0, plugReinigungMaxProTag: 0, plugToiletteMaxMinuten: 0 },
+    "CAGE",
+  );
+  return reasons.map((r) => {
+    const used = counts[r.grund] ?? 0;
+    return {
+      grund: r.grund,
+      used,
+      max: r.maxProTag,
+      remaining: r.maxProTag > 0 ? Math.max(0, r.maxProTag - used) : null,
+    };
+  });
+}
+
 /** Aktiver Pause-Eintrag (PAUSE_BEGIN ohne passendes PAUSE_END), oder null. */
 export async function getActivePause(
   userId: string,
