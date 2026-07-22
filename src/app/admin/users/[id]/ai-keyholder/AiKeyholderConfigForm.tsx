@@ -10,7 +10,7 @@ import Select from "@/app/components/Select";
 import Textarea from "@/app/components/Textarea";
 import FormError from "@/app/components/FormError";
 import FormSuccess from "@/app/components/FormSuccess";
-import { Play } from "lucide-react";
+import { Play, ImagePlus, RefreshCw } from "lucide-react";
 import PersonaManager from "./PersonaManager";
 
 const DEFAULT_SYSTEM_PROMPT = `Du bist eine strenge, dominante Keyholderin. Du sprichst immer auf Deutsch.
@@ -33,15 +33,27 @@ interface Config {
   nextRunAt: string | null;
   mediaEnabled: boolean;
   comfyUiBaseUrl: string | null;
+  mediaProvider: string | null;
+  mediaModelName: string | null;
   mediaPromptTemplates: string | null;
   lastRunAt: string | null;
   /** Server returns only whether a key is stored, never the key itself */
   anthropicApiKeySet?: boolean;
+  mediaApiKeySet?: boolean;
 }
 
 interface Props {
   userId: string;
   initial: Config | null;
+}
+
+interface MediaItem {
+  id: string;
+  status: string;
+  prompt: string;
+  filePath: string | null;
+  failedReason: string | null;
+  createdAt: string;
 }
 
 export default function AiKeyholderConfigForm({ userId, initial }: Props) {
@@ -62,11 +74,19 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
   const [randomIntervalMinMax, setRandomIntervalMinMax] = useState(initial?.randomIntervalMinMax ?? 120);
   const [nextRunAt, setNextRunAt] = useState<string | null>(initial?.nextRunAt ?? null);
   const [mediaEnabled, setMediaEnabled] = useState(initial?.mediaEnabled ?? false);
+  const [mediaProvider, setMediaProvider] = useState(initial?.mediaProvider ?? "comfyui");
   const [comfyUiBaseUrl, setComfyUiBaseUrl] = useState(initial?.comfyUiBaseUrl ?? "");
+  const [mediaModelName, setMediaModelName] = useState(initial?.mediaModelName ?? "");
+  const [mediaApiKey, setMediaApiKey] = useState("");
+  const [mediaApiKeySet, setMediaApiKeySet] = useState(initial?.mediaApiKeySet ?? false);
+  const [clearMediaKey, setClearMediaKey] = useState(false);
   const [mediaPromptTemplates, setMediaPromptTemplates] = useState(
     initial?.mediaPromptTemplates ?? JSON.stringify([{ theme: "bondage", weight: 2 }, { theme: "teasing", weight: 1 }], null, 2),
   );
   const [lastRunAt, setLastRunAt] = useState<string | null>(initial?.lastRunAt ?? null);
+
+  const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const [generating, setGenerating] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
@@ -113,10 +133,15 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
           randomIntervalMinMin: minMin,
           randomIntervalMinMax: minMax,
           mediaEnabled,
-          comfyUiBaseUrl: mediaEnabled ? (comfyUiBaseUrl || null) : null,
+          mediaProvider,
+          comfyUiBaseUrl: mediaEnabled && mediaProvider === "comfyui" ? (comfyUiBaseUrl || null) : null,
+          mediaModelName: mediaEnabled && mediaProvider === "novita" ? (mediaModelName || null) : null,
           mediaPromptTemplates: mediaEnabled ? (mediaPromptTemplates || null) : null,
           ...(clearApiKey ? { anthropicApiKey: "" }
             : anthropicApiKey !== "" ? { anthropicApiKey }
+            : {}),
+          ...(clearMediaKey ? { mediaApiKey: "" }
+            : mediaApiKey !== "" ? { mediaApiKey }
             : {}),
           personaId: null,
         }),
@@ -125,10 +150,13 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
         const data = await res.json().catch(() => ({ error: "Fehler" }));
         throw new Error(data.error ?? "Speichern fehlgeschlagen");
       }
-      const saved = await res.json() as { config: { anthropicApiKeySet: boolean } };
+      const saved = await res.json() as { config: { anthropicApiKeySet: boolean; mediaApiKeySet: boolean } };
       setAnthropicApiKeySet(saved.config.anthropicApiKeySet ?? false);
+      setMediaApiKeySet(saved.config.mediaApiKeySet ?? false);
       setAnthropicApiKey("");
+      setMediaApiKey("");
       setClearApiKey(false);
+      setClearMediaKey(false);
       setSuccess(t("aikhSaved"));
     } catch (e) {
       setError(String(e));
@@ -160,6 +188,40 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
       setError(String(e));
     } finally {
       setRunning(false);
+    }
+  }
+
+  async function loadMedia() {
+    try {
+      const res = await fetch(`/api/ai-keyholder/generate-media?userId=${userId}`);
+      if (!res.ok) return;
+      const data = await res.json() as { media: MediaItem[] };
+      setMediaItems(data.media ?? []);
+    } catch {
+      // non-fatal
+    }
+  }
+
+  async function handleGenerateTest() {
+    setError(null);
+    setSuccess(null);
+    setGenerating(true);
+    try {
+      const res = await fetch("/api/ai-keyholder/generate-media", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Fehler" }));
+        throw new Error(data.error ?? "Generierung fehlgeschlagen");
+      }
+      setSuccess(t("aikhMediaTestQueued"));
+      await loadMedia();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setGenerating(false);
     }
   }
 
@@ -393,12 +455,60 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
           </div>
           {mediaEnabled && (
             <>
-              <Input
-                label={t("aikhComfyUrl")}
-                placeholder="http://192.168.1.10:8188"
-                value={comfyUiBaseUrl}
-                onChange={(e) => setComfyUiBaseUrl(e.target.value)}
+              <Select
+                label={t("aikhMediaProvider")}
+                value={mediaProvider}
+                onChange={(e) => setMediaProvider(e.target.value)}
+                options={[
+                  { value: "comfyui", label: t("aikhMediaProviderComfy") },
+                  { value: "novita", label: t("aikhMediaProviderNovita") },
+                ]}
               />
+
+              {mediaProvider === "comfyui" && (
+                <Input
+                  label={t("aikhComfyUrl")}
+                  placeholder="http://192.168.1.10:8188"
+                  value={comfyUiBaseUrl}
+                  onChange={(e) => setComfyUiBaseUrl(e.target.value)}
+                />
+              )}
+
+              {mediaProvider === "novita" && (
+                <>
+                  <div className="flex flex-col gap-2">
+                    <Input
+                      label={t("aikhMediaApiKey")}
+                      type="password"
+                      placeholder={mediaApiKeySet ? t("aikhAnthropicApiKeySet") : t("aikhMediaApiKeyPlaceholder")}
+                      hint={t("aikhMediaApiKeyHint")}
+                      value={mediaApiKey}
+                      onChange={(e) => setMediaApiKey(e.target.value)}
+                      autoComplete="off"
+                    />
+                    {mediaApiKeySet && !clearMediaKey && (
+                      <button
+                        type="button"
+                        className="text-xs text-warn self-start underline underline-offset-2"
+                        onClick={() => {
+                          setClearMediaKey(true);
+                          setMediaApiKeySet(false);
+                        }}
+                      >
+                        {t("aikhAnthropicApiKeyClear")}
+                      </button>
+                    )}
+                  </div>
+                  <Input
+                    label={t("aikhMediaModelName")}
+                    placeholder="sd_xl_base_1.0.safetensors"
+                    hint={t("aikhMediaModelNameHint")}
+                    value={mediaModelName}
+                    onChange={(e) => setMediaModelName(e.target.value)}
+                  />
+                </>
+              )}
+
               <Textarea
                 label={t("aikhMediaTemplates")}
                 hint={t("aikhMediaTemplatesHint")}
@@ -407,6 +517,50 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
                 rows={6}
                 className="font-mono text-xs"
               />
+
+              {/* Test-Generierung */}
+              <div className="border-t border-border-subtle pt-3 flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<ImagePlus size={14} />}
+                    onClick={handleGenerateTest}
+                    loading={generating}
+                  >
+                    {t("aikhMediaTestGenerate")}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<RefreshCw size={14} />}
+                    onClick={loadMedia}
+                  >
+                    {t("aikhMediaRefresh")}
+                  </Button>
+                </div>
+                <p className="text-xs text-foreground-muted">{t("aikhMediaTestHint")}</p>
+                {mediaItems.length > 0 && (
+                  <div className="flex flex-col gap-1.5 mt-1">
+                    {mediaItems.slice(0, 6).map((m) => (
+                      <div key={m.id} className="flex items-center gap-2 text-xs">
+                        <span className="font-mono uppercase text-foreground-faint w-20 shrink-0">{m.status}</span>
+                        {m.status === "ready" || m.status === "assigned" ? (
+                          m.filePath ? (
+                            <a href={`/api/uploads/${m.filePath}`} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2">
+                              {t("aikhMediaOpen")}
+                            </a>
+                          ) : null
+                        ) : m.status === "failed" ? (
+                          <span className="text-warn truncate">{m.failedReason ?? "?"}</span>
+                        ) : (
+                          <span className="text-foreground-muted truncate">{m.prompt.slice(0, 60)}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </>
           )}
         </div>

@@ -1364,7 +1364,20 @@
     "aikhCheckin24": "At most once a day",
     "aikhCheckin12": "At most every 12h",
     "aikhCheckin6": "At most every 6h",
-    "aikhCheckin3": "At most every 3h"
+    "aikhCheckin3": "At most every 3h",
+    "aikhMediaProvider": "Media provider",
+    "aikhMediaProviderComfy": "ComfyUI (local)",
+    "aikhMediaProviderNovita": "Novita (hosted)",
+    "aikhMediaApiKey": "Novita API key",
+    "aikhMediaApiKeyPlaceholder": "Enter API key",
+    "aikhMediaApiKeyHint": "From your Novita account (Key Management). Stored encrypted.",
+    "aikhMediaModelName": "Model (checkpoint)",
+    "aikhMediaModelNameHint": "Exact model_name from Novita's model library, e.g. an SDXL checkpoint.",
+    "aikhMediaTestGenerate": "Generate test image",
+    "aikhMediaRefresh": "Refresh",
+    "aikhMediaTestHint": "Queues a generation job and submits it immediately. Status does not auto-update — use Refresh (hosted images usually take a few seconds).",
+    "aikhMediaTestQueued": "Job queued — use Refresh to check the status.",
+    "aikhMediaOpen": "Open"
   },
   "forgotPassword": {
     "title": "Forgot password",

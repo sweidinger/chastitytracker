@@ -858,6 +858,10 @@ model AiKeyholderConfig {
   // im Admin-Dropdown: 0/3/6/12/24. `lastCheckinAt` = Zeitstempel des letzten Check-ins (Drossel).
   proactiveCheckinMinHours Int   @default(24)
   lastCheckinAt        DateTime?
+  // Medien-Backend: "comfyui" (self-hosted) | "novita" (gehostete API). API-Key verschluesselt (encrypt.ts).
+  mediaProvider        String   @default("comfyui")
+  mediaApiKeyEnc       String?
+  mediaModelName       String?
   // Autonomous action schedule — random interval
   cronExpression       String?  // legacy / display only; actual scheduling uses randomInterval fields
   lastRunAt            DateTime?

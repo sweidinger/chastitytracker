@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.105.0",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Mediengenerierung der KI-Keyholderin: neben dem lokalen ComfyUI laesst sich jetzt der gehostete Anbieter Novita waehlen. In den AI-Keyholderin-Einstellungen gibt es dazu einen Medien-Anbieter-Umschalter, ein verschluesseltes API-Key-Feld und ein Modell-Feld (Checkpoint-Name aus Novitas Library). Ein neuer Button erzeugt ein Test-Bild und zeigt dessen Status. Ausschliesslich legale Erwachseneninhalte."
+      }
+    ]
+  },
+  {
     "version": "4.104.1",
     "date": "2026-07-22",
     "changes": [
