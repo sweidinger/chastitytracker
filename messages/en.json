@@ -775,7 +775,8 @@
     "histTypeENTZOGEN": "Reward revoked",
     "histTypeVERSCHOBEN": "Reward delayed",
     "histTypePUNISHED": "Penalty",
-    "histTypeDISMISSED": "Offence dismissed"
+    "histTypeDISMISSED": "Offence dismissed",
+    "histTypeERSTATTET": "Refunded"
   },
   "admin": {
     "title": "User management",

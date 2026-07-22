@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import type { PrismaTx } from "@/lib/queries";
 import { sendMailSafe, escHtml, noticeBoxHtml, dashboardEmailHtml } from "@/lib/mail";
 import { formatDateTime } from "@/lib/utils";
 import { firePush } from "@/lib/push";
@@ -117,14 +118,38 @@ export function orgasmusWithdrawNotice(): NotifyContent {
 /** Withdraws the user's currently open orgasm directive(s) (not yet fulfilled/withdrawn).
  *  Used by the MCP `withdraw` tool (userId-scoped — "neuste offene"). */
 export async function withdrawOrgasmusAnforderung(userId: string): Promise<ServiceResult<{ count: number }>> {
-  const res = await prisma.orgasmusAnforderung.updateMany({
+  const now = new Date();
+  // Aktive Belohnungs-Fenster (noch nicht abgelaufen), die durch DIESEN Rueckzug fallen: dafuer wird
+  // das beim Gewaehren abgebuchte Guthaben erstattet. Bewusster Rueckzug != Ablauf (VERFALLEN behaelt
+  // netto -1). Abgelaufene Fenster bleiben dem VERFALLEN-Pfad (getBelohnungState) ueberlassen.
+  const offen = await prisma.orgasmusAnforderung.findMany({
     where: { userId, fulfilledAt: null, withdrawnAt: null },
-    data: { withdrawnAt: new Date() },
+    select: { istBelohnung: true, endetAt: true },
   });
-  if (res.count > 0) {
-    await notifyUser(userId, orgasmusWithdrawNotice());
+  if (offen.length === 0) return { ok: true, data: { count: 0 } };
+  const refund = offen.filter((o) => o.istBelohnung && o.endetAt >= now).length;
+  const count = await prisma.$transaction(async (tx) => {
+    const res = await tx.orgasmusAnforderung.updateMany({
+      where: { userId, fulfilledAt: null, withdrawnAt: null },
+      data: { withdrawnAt: now },
+    });
+    if (refund > 0) await refundReward(tx, userId, refund);
+    return res.count;
+  });
+  if (count > 0) await notifyUser(userId, orgasmusWithdrawNotice());
+  return { ok: true, data: { count } };
+}
+
+/** Erstattet `n` Belohnungs-Guthaben (User +n) und schreibt je ein ERSTATTET-Ereignis mit korrektem
+ *  Zwischenstand. Bewusst hier mit `tx` statt via belohnung.ts, um den Import-Zyklus
+ *  belohnung <-> orgasmusAnforderungService zu vermeiden (`logBelohnungEvent` haengt an belohnung). */
+async function refundReward(tx: PrismaTx, userId: string, n: number): Promise<void> {
+  const u = await tx.user.update({ where: { id: userId }, data: { verdienteOrgasmen: { increment: n } }, select: { verdienteOrgasmen: true } });
+  let bal = u.verdienteOrgasmen - n;
+  for (let i = 0; i < n; i++) {
+    bal += 1;
+    await tx.belohnungEvent.create({ data: { userId, type: "ERSTATTET", delta: 1, balanceAfter: bal, detail: "Belohnungs-Fenster zurueckgezogen — Guthaben erstattet" } });
   }
-  return { ok: true, data: { count: res.count } };
 }
 
 /** Withdraws a single OrgasmusAnforderung by id (not yet fulfilled/withdrawn). Used by the admin
@@ -133,15 +158,20 @@ export async function withdrawOrgasmusAnforderung(userId: string): Promise<Servi
  *  same row (single `updateMany` scoped by id + open-status does the existence/open check via
  *  `count`, matching the one-round-trip shape of `withdrawVerschlussAnforderung`). */
 export async function withdrawOrgasmusAnforderungById(id: string, userId: string): Promise<ServiceResult<{ count: number }>> {
-  const res = await prisma.orgasmusAnforderung.updateMany({
-    where: { id, fulfilledAt: null, withdrawnAt: null },
-    data: { withdrawnAt: new Date() },
+  const now = new Date();
+  const row = await prisma.orgasmusAnforderung.findUnique({
+    where: { id }, select: { istBelohnung: true, endetAt: true, fulfilledAt: true, withdrawnAt: true },
   });
-  if (res.count === 0) {
+  if (!row || row.fulfilledAt !== null || row.withdrawnAt !== null) {
     return serviceFail(400, "ORGASM_NOT_OPEN");
   }
+  const refund = row.istBelohnung && row.endetAt >= now;
+  await prisma.$transaction(async (tx) => {
+    await tx.orgasmusAnforderung.update({ where: { id }, data: { withdrawnAt: now } });
+    if (refund) await refundReward(tx, userId, 1);
+  });
   await notifyUser(userId, orgasmusWithdrawNotice());
-  return { ok: true, data: { count: res.count } };
+  return { ok: true, data: { count: 1 } };
 }
 
 /** Sends the directive e-mail + push to the user. Push is fire-and-forget. */
