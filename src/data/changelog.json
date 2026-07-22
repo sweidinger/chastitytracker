@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.105.2",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Autonome Bild-Erzeugung jetzt auch mit dem gehosteten Anbieter Novita: die KI-Keyholderin legt bei niedrigem Vorrat selbsttaetig neue Bilder an (bisher nur bei ComfyUI). Damit kann sie fertige Bilder von sich aus im Sub-Chat teilen (assign_media zeigt das Bild inline)."
+      }
+    ]
+  },
+  {
     "version": "4.105.1",
     "date": "2026-07-22",
     "changes": [
