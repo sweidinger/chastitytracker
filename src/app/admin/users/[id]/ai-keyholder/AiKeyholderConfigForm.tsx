@@ -35,6 +35,9 @@ interface Config {
   comfyUiBaseUrl: string | null;
   mediaProvider: string | null;
   mediaModelName: string | null;
+  mediaLlmProvider: string | null;
+  mediaLlmBaseUrl: string | null;
+  mediaLlmModel: string | null;
   mediaPromptTemplates: string | null;
   lastRunAt: string | null;
   /** Server returns only whether a key is stored, never the key itself */
@@ -77,6 +80,9 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
   const [mediaProvider, setMediaProvider] = useState(initial?.mediaProvider ?? "comfyui");
   const [comfyUiBaseUrl, setComfyUiBaseUrl] = useState(initial?.comfyUiBaseUrl ?? "");
   const [mediaModelName, setMediaModelName] = useState(initial?.mediaModelName ?? "");
+  const [mediaLlmProvider, setMediaLlmProvider] = useState(initial?.mediaLlmProvider ?? "inherit");
+  const [mediaLlmBaseUrl, setMediaLlmBaseUrl] = useState(initial?.mediaLlmBaseUrl ?? "");
+  const [mediaLlmModel, setMediaLlmModel] = useState(initial?.mediaLlmModel ?? "");
   const [mediaApiKey, setMediaApiKey] = useState("");
   const [mediaApiKeySet, setMediaApiKeySet] = useState(initial?.mediaApiKeySet ?? false);
   const [clearMediaKey, setClearMediaKey] = useState(false);
@@ -136,6 +142,9 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
           mediaProvider,
           comfyUiBaseUrl: mediaEnabled && mediaProvider === "comfyui" ? (comfyUiBaseUrl || null) : null,
           mediaModelName: mediaEnabled && mediaProvider === "novita" ? (mediaModelName || null) : null,
+          mediaLlmProvider: mediaEnabled ? mediaLlmProvider : "inherit",
+          mediaLlmBaseUrl: mediaEnabled && mediaLlmProvider === "ollama" ? (mediaLlmBaseUrl || null) : null,
+          mediaLlmModel: mediaEnabled && mediaLlmProvider === "ollama" ? (mediaLlmModel || null) : null,
           mediaPromptTemplates: mediaEnabled ? (mediaPromptTemplates || null) : null,
           ...(clearApiKey ? { anthropicApiKey: "" }
             : anthropicApiKey !== "" ? { anthropicApiKey }
@@ -517,6 +526,35 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
                 rows={6}
                 className="font-mono text-xs"
               />
+
+              <Select
+                label={t("aikhMediaLlmProvider")}
+                value={mediaLlmProvider}
+                onChange={(e) => setMediaLlmProvider(e.target.value)}
+                options={[
+                  { value: "inherit", label: t("aikhMediaLlmInherit") },
+                  { value: "anthropic", label: t("aikhMediaLlmAnthropic") },
+                  { value: "ollama", label: t("aikhMediaLlmOllama") },
+                ]}
+              />
+              <p className="text-xs text-foreground-muted -mt-1">{t("aikhMediaLlmProviderHint")}</p>
+              {mediaLlmProvider === "ollama" && (
+                <>
+                  <Input
+                    label={t("aikhMediaLlmUrl")}
+                    placeholder="http://192.168.1.10:11434"
+                    value={mediaLlmBaseUrl}
+                    onChange={(e) => setMediaLlmBaseUrl(e.target.value)}
+                  />
+                  <Input
+                    label={t("aikhMediaLlmModel")}
+                    placeholder="dolphin-mistral"
+                    hint={t("aikhMediaLlmModelHint")}
+                    value={mediaLlmModel}
+                    onChange={(e) => setMediaLlmModel(e.target.value)}
+                  />
+                </>
+              )}
 
               {/* Test-Generierung */}
               <div className="border-t border-border-subtle pt-3 flex flex-col gap-2">
