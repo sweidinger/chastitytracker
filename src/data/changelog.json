@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.106.0",
+    "date": "2026-07-22",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Die KI-Keyholderin kann jetzt auf Wunsch direkt im Chat ein Bild erzeugen und anzeigen (neue Chat-Aktion generate_media). Sie waehlt entweder selbst ein Motiv oder setzt einen gewuenschten Prompt um; ein Wunsch-Prompt kann woertlich uebernommen werden. Das fertige Bild erscheint nach kurzer Zeit automatisch im Sub-Chat."
+      }
+    ]
+  },
+  {
     "version": "4.105.2",
     "date": "2026-07-22",
     "changes": [
