@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.116.0",
+    "date": "2026-07-23",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Orgasmus-Budget (Stufe 2c): Ein Orgasmus \u00fcber dem Budget erscheint jetzt automatisch als Vergehen im Strafbuch (Kategorie \u201eOrgasmus \u00fcber Budget\u201c) und kann von Keyholder/KI beurteilt werden. Feuchte Tr\u00e4ume und von einer Anforderung/Belohnung gedeckte Orgasmen z\u00e4hlen nicht; ein mitten im Zeitraum gesetztes/gesenktes Budget wirkt nie r\u00fcckwirkend (Stichtag beim Setzen)."
+      }
+    ]
+  },
+  {
     "version": "4.115.0",
     "date": "2026-07-23",
     "changes": [

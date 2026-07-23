@@ -42,7 +42,8 @@ function strafbuchWithOneOfEach() {
     missedSessions: [{ ...j("missed_session", "s1"), windowEndedAt: "t", message: null, categoryName: null }],
     erektionViolations: [{ ...j("erektion", "e3"), time: "t", oeffnenGrund: null, note: null }],
     pauseOverageViolations: [{ ...j("pause_overage", "e4"), time: "t", device: null, grund: null, dauerMin: 30, maxMin: 15 }],
-    detectedOffenseCount: 12, openOffenseCount: 12, pendingPenaltyCount: 0,
+    orgasmOverBudgetViolations: [{ ...j("orgasm_over_budget", "og1"), time: "t", orgasmusArt: null, used: 3, limit: 2 }],
+    detectedOffenseCount: 13, openOffenseCount: 13, pendingPenaltyCount: 0,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 }
@@ -64,6 +65,7 @@ function rawStrafbuchWithOneOfEach() {
     missedSessions: [{ id: "s1", ...one }],
     erektionViolations: [{ entryId: "e3", ...one }],
     pauseOverageViolations: [{ entryId: "e4", ...one }],
+    orgasmOverBudgetViolations: [{ entryId: "og1", ...one }],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 }

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { getOrgasmOverBudgetViolations } from "@/lib/orgasmBudgetService";
 import { mapAnforderungStatus, tzDateParts, isPastDeadlineUnfulfilled, dateAtLocalMinutes, APP_TZ } from "@/lib/utils";
 import { activeVerschlussAnforderungWhere, cleaningBlockReason, type CleaningPermissionUser } from "@/lib/queries";
 import { aktivesReinigungsFenster } from "@/lib/reinigungService";
@@ -40,6 +41,14 @@ export interface StrafbuchData {
     entryId: string;
     startTime: Date | null;
     note: string | null;
+  }[];
+  /** Orgasmen ueber dem Orgasmus-Budget des laufenden Zeitraums — Erkennung, keine automatische Strafe. */
+  orgasmOverBudgetViolations: {
+    entryId: string;
+    startTime: Date;
+    orgasmusArt: string | null;
+    used: number;
+    limit: number;
   }[];
   wrongDeviceViolations: {
     entryId: string;
@@ -297,6 +306,7 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
     reinigungsFenster,
     timezone: subTz,
   };
+  const orgasmOverBudgetViolations = await getOrgasmOverBudgetViolations(userId, now, subTz);
 
   // Erektion + Pause-Überzug: LIVE aus den Pausen abgeleitet (keine automatische Bestrafung mehr).
   // Erektion wird beim Pause-Ende gemeldet; Pause-Überzug = abgeschlossene Pause über der
@@ -453,6 +463,7 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
       .filter((k) => k.autoMarkedRemovedAt !== null)
       .map(toAutoRemovedControl),
     reinigungLimitViolations,
+    orgasmOverBudgetViolations,
     wrongDeviceViolations,
     erektionViolations,
     pauseOverageViolations,

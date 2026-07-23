@@ -17,6 +17,7 @@ export type OffenseStoredType =
   | "PAUSE_OVERAGE"
   | "REINIGUNG_LIMIT"
   | "REINIGUNG_NICHT_VERSCHLOSSEN"
+  | "ORGASMUS_UEBER_BUDGET"
   /** Direkt verhängte Strafe (Keyholderin/KI im Chat) — kein automatisch erkanntes Vergehen. */
   | "AI_KEYHOLDER";
 

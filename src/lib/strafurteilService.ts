@@ -28,7 +28,8 @@ export type OffenseCanonicalType =
   | "erektion"
   | "pause_overage"
   | "late_lock"
-  | "cleaning_not_relocked";
+  | "cleaning_not_relocked"
+  | "orgasm_over_budget";
 
 /** Canonical offense type → stored StrafeRecord.offenseType. Exported so the manual-punish route
  *  (src/app/api/admin/strafe/route.ts) can validate against the same list instead of a hand-copied one. */
@@ -47,6 +48,7 @@ export const STORED_TYPE: Record<OffenseCanonicalType, string> = {
   pause_overage: "PAUSE_OVERAGE",
   late_lock: "VERSCHLUSS_ANFORDERUNG",
   cleaning_not_relocked: "REINIGUNG_NICHT_VERSCHLOSSEN",
+  orgasm_over_budget: "ORGASMUS_UEBER_BUDGET",
 };
 
 /** Schwere-Stufe eines Vergehens. Phase 1: Basis-Schwere (Wiederholungs-Eskalation folgt in Phase 2). */
@@ -66,6 +68,7 @@ export const OFFENSE_SEVERITY: Record<OffenseCanonicalType, OffenseSeverity> = {
   late_control: "mittel",
   pause_overage: "leicht",
   erektion: "leicht",
+  orgasm_over_budget: "mittel",
 };
 
 /** Sortier-Rang: schwer zuerst. */
@@ -153,6 +156,7 @@ export function collectDetectedOffenses(sb: StrafbuchData): DetectedOffense[] {
     ...sb.missedSessions.map((m) => mk("missed_session", m.id, m.endetAt)),
     ...sb.lateLocks.map((a) => mk("late_lock", a.id, a.fulfilledAt ?? a.endetAt)),
     ...sb.cleaningNotRelocked.map((c) => mk("cleaning_not_relocked", cleaningNotRelockedRef(c.entryId), c.relockAt ?? c.deadline)),
+    ...sb.orgasmOverBudgetViolations.map((v) => mk("orgasm_over_budget", v.entryId, v.startTime)),
   ];
 }
 

@@ -111,6 +111,13 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
       detail: null, note: v.note, sortAt: v.startTime?.getTime() ?? 0,
     });
   }
+  for (const v of sb.orgasmOverBudgetViolations) {
+    offenses.push({
+      refId: v.entryId, offenseType: "ORGASMUS_UEBER_BUDGET", severity: OFFENSE_SEVERITY["orgasm_over_budget"], typeLabel: t("strafbuchOrgasmusUeberBudget"),
+      headline: `${t("strafbuchOrgasmusUeberBudget")} (${v.orgasmusArt ?? "?"}, ${v.used}/${v.limit})${v.startTime ? `, ${fmtDual(v.startTime)}` : ""}`,
+      detail: null, note: null, sortAt: v.startTime.getTime(),
+    });
+  }
   for (const k of sb.autoRemovedControls) {
     offenses.push({
       refId: k.id, offenseType: "AUTO_ENTFERNT", severity: OFFENSE_SEVERITY["auto_removed_control"], typeLabel: t("strafbuchAutoEntfernt"),
@@ -263,6 +270,7 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
     missed_orgasm: t("strafbuchVerpassteOrgasmus"),
     pause_overage: t("strafbuchPauseUeberzug"),
     erektion: t("strafbuchErektion"),
+    orgasm_over_budget: t("strafbuchOrgasmusUeberBudget"),
   };
   const severityMatrix = (["schwer", "mittel", "leicht"] as OffenseSeverity[]).map((sev) => ({
     severity: sev,
