@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.112.3",
+    "date": "2026-07-23",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Nachtrag zu 4.112.2: das busy_timeout-PRAGMA wurde ueber den falschen Prisma-Aufruf gesetzt und griff dadurch nicht (WAL war bereits aktiv) \u2013 jetzt korrekt gesetzt."
+      }
+    ]
+  },
+  {
     "version": "4.112.2",
     "date": "2026-07-23",
     "changes": [
