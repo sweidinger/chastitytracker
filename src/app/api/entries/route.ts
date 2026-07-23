@@ -13,7 +13,7 @@ import { entryGuardError, entryGuardCode } from "@/lib/entryErrors";
 import { setBoxCommandForUser, boxCommandForEntry } from "@/lib/boxCommand";
 import { notifyHeimdall } from "@/lib/heimdallNotify";
 import { getActiveSessionForCategory, fulfillSessionAnforderung, getActiveSessionAnforderung } from "@/lib/sessionService";
-import { findRegionConflict } from "@/lib/bodyRegion";
+import { findRegionConflict, type RegionConflict } from "@/lib/bodyRegion";
 import { getActivePause, pauseReasonsForDevice, type PauseDevice } from "@/lib/pauseService";
 import { parseReinigungsFenster, aktivesReinigungsFenster } from "@/lib/reinigungService";
 import { gatherDeviceReferences } from "@/lib/deviceReferenceService";
@@ -85,6 +85,19 @@ export async function POST(req: NextRequest) {
   let withdrawnSperrzeit = false;
   let lockStartTime: Date | null = null;
   let fulfilledAnforderungDeviceId: string | null = null;
+
+  // Region-Exklusivitaet VORAB (ausserhalb der Transaktion) berechnen: findRegionConflict nutzt den
+  // globalen prisma-Client. INNERHALB der interaktiven $transaction (connection_limit=1 -> nur EINE
+  // Verbindung, von der Transaktion gehalten) wuerde dieser Query ewig auf eine zweite Verbindung
+  // warten und die Transaktion ins Timeout treiben (Deadlock). Hier, ausserhalb, ist die Verbindung
+  // frei; der eigentliche Abbruch (throw) passiert weiterhin IN der Transaktion, damit Status- und
+  // Fehler-Handling unveraendert bleiben.
+  let regionConflict: RegionConflict | null = null;
+  if ((type === "WEAR_BEGIN" || type === "SESSION_BEGIN") && deviceId) {
+    const rcDev = await prisma.device.findUnique({ where: { id: deviceId }, select: { categoryId: true } });
+    if (rcDev?.categoryId) regionConflict = await findRegionConflict(session.user.id, rcDev.categoryId);
+  }
+
   try {
     entry = await prisma.$transaction(async (tx) => {
       // Validate deviceId ownership inside transaction (VERSCHLUSS / WEAR_* / SESSION_*)
@@ -99,9 +112,8 @@ export async function POST(req: NextRequest) {
         wearResult = await prepareWearEntry(tx, session.user.id, type, deviceId, startTime, imageUrl);
         if (!wearResult.ok) throw entryGuardError(wearResult.code);
         // Körperregion-Exklusivität: kein zweites Gerät derselben Region gleichzeitig (z.B. Plug + Anal-Session).
-        if (type === "WEAR_BEGIN") {
-          const conflict = await findRegionConflict(session.user.id, wearResult.categoryId);
-          if (conflict) throw Object.assign(entryGuardError("REGION_CONFLICT"), { _blocking: conflict.blockingCategoryName });
+        if (type === "WEAR_BEGIN" && regionConflict) {
+          throw Object.assign(entryGuardError("REGION_CONFLICT"), { _blocking: regionConflict.blockingCategoryName });
         }
       }
 
@@ -123,9 +135,8 @@ export async function POST(req: NextRequest) {
           throw entryGuardError("SESSION_ALREADY_ACTIVE");
         }
         // Körperregion-Exklusivität: kein zweites Gerät derselben Region (z.B. Anal-Session bei getragenem Plug).
-        if (type === "SESSION_BEGIN") {
-          const conflict = await findRegionConflict(session.user.id, dev.categoryId);
-          if (conflict) throw Object.assign(entryGuardError("REGION_CONFLICT"), { _blocking: conflict.blockingCategoryName });
+        if (type === "SESSION_BEGIN" && regionConflict) {
+          throw Object.assign(entryGuardError("REGION_CONFLICT"), { _blocking: regionConflict.blockingCategoryName });
         }
         if (type === "SESSION_END") {
           if (!active) throw entryGuardError("SESSION_NOT_ACTIVE");

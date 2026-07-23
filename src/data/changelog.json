@@ -1,11 +1,21 @@
 [
   {
+    "version": "4.112.4",
+    "date": "2026-07-23",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Speichern von „Tragen beginnen“ (und Session-Start) schlug mit einem Datenbank-Timeout fehl: die Region-Konflikt-Pruefung lief mit dem globalen DB-Client INNERHALB der Transaktion, die bei nur einer erlaubten Verbindung genau diese Verbindung hielt – der Query wartete bis zum Timeout (Deadlock). Die Pruefung laeuft jetzt vor der Transaktion. Das war die eigentliche Ursache; WAL/Timeout aus 4.112.2/.3 bleiben als Absicherung."
+      }
+    ]
+  },
+  {
     "version": "4.112.3",
     "date": "2026-07-23",
     "changes": [
       {
         "type": "fix",
-        "text": "Nachtrag zu 4.112.2: das busy_timeout-PRAGMA wurde ueber den falschen Prisma-Aufruf gesetzt und griff dadurch nicht (WAL war bereits aktiv) \u2013 jetzt korrekt gesetzt."
+        "text": "Nachtrag zu 4.112.2: das busy_timeout-PRAGMA wurde ueber den falschen Prisma-Aufruf gesetzt und griff dadurch nicht (WAL war bereits aktiv) – jetzt korrekt gesetzt."
       }
     ]
   },
@@ -15,7 +25,7 @@
     "changes": [
       {
         "type": "fix",
-        "text": "Speichern des \u201eTragen beginnen\u201c-Formulars (mit Foto) schlug vereinzelt mit einem Transaktions-Timeout fehl, weil App und autonomer Keyholder-Cron dieselbe SQLite-Datei schreiben und sich gegenseitig sperrten. Behoben: WAL-Journal + busy_timeout entkoppeln Leser/Schreiber, zusaetzlich mehr Zeitreserve fuer die Schreib-Transaktion."
+        "text": "Speichern des „Tragen beginnen“-Formulars (mit Foto) schlug vereinzelt mit einem Transaktions-Timeout fehl, weil App und autonomer Keyholder-Cron dieselbe SQLite-Datei schreiben und sich gegenseitig sperrten. Behoben: WAL-Journal + busy_timeout entkoppeln Leser/Schreiber, zusaetzlich mehr Zeitreserve fuer die Schreib-Transaktion."
       }
     ]
   },
@@ -25,7 +35,7 @@
     "changes": [
       {
         "type": "fix",
-        "text": "Die von der KI-Keyholderin pro Anforderung gesetzte Foto-Pflicht wird jetzt auch serverseitig erzwungen \u2013 zuvor griff die serverseitige Pruefung nur beim Kategorie-Foto-Default (z.B. Plug), sodass die Foto-Pflicht in Kategorien ohne Default (z.B. Dildo) nur im Browser durchgesetzt und damit umgehbar war. Das Erfass-Formular hat die Regel bereits angezeigt; jetzt haelt auch der Server sie ein."
+        "text": "Die von der KI-Keyholderin pro Anforderung gesetzte Foto-Pflicht wird jetzt auch serverseitig erzwungen – zuvor griff die serverseitige Pruefung nur beim Kategorie-Foto-Default (z.B. Plug), sodass die Foto-Pflicht in Kategorien ohne Default (z.B. Dildo) nur im Browser durchgesetzt und damit umgehbar war. Das Erfass-Formular hat die Regel bereits angezeigt; jetzt haelt auch der Server sie ein."
       }
     ]
   },
@@ -49,7 +59,7 @@
     "changes": [
       {
         "type": "fix",
-        "text": "Anzeige der verfuegbaren Reinigungs-/Toilettenpausen in der Session-Karte zeigte rohe Uebersetzungs-Schluessel statt Text (fehlende i18n-Keys) \u2013 behoben. Es ist ein Tageskontingent (Reset taeglich), keine Pro-Session-Zaehlung."
+        "text": "Anzeige der verfuegbaren Reinigungs-/Toilettenpausen in der Session-Karte zeigte rohe Uebersetzungs-Schluessel statt Text (fehlende i18n-Keys) – behoben. Es ist ein Tageskontingent (Reset taeglich), keine Pro-Session-Zaehlung."
       },
       {
         "type": "fix",
@@ -83,7 +93,7 @@
     "changes": [
       {
         "type": "feat",
-        "text": "Das Aussehen fuer die Bild-Generierung haengt jetzt an der Persona: Jede Persona hat ein eigenes Feld \"Aussehen\". Beim Uebernehmen einer Persona wird dieses automatisch als Bild-Anker gesetzt \u2013 so passen Avatar und generierte Bilder zur gewaehlten Keyholderin-Persona."
+        "text": "Das Aussehen fuer die Bild-Generierung haengt jetzt an der Persona: Jede Persona hat ein eigenes Feld \"Aussehen\". Beim Uebernehmen einer Persona wird dieses automatisch als Bild-Anker gesetzt – so passen Avatar und generierte Bilder zur gewaehlten Keyholderin-Persona."
       }
     ]
   },
@@ -93,7 +103,7 @@
     "changes": [
       {
         "type": "feat",
-        "text": "Charakter-Konsistenz & Avatar: Ein fester Persona-Anker (Aussehens-Beschreibung) wird jedem Bild-Prompt vorangestellt, dazu ein fester Seed \u2013 so erscheint durchgehend dieselbe Figur. Zusaetzlich kann im Admin ein Profilbild/Avatar der Keyholderin generiert werden, das im Sub-Chat neben ihren Nachrichten angezeigt wird."
+        "text": "Charakter-Konsistenz & Avatar: Ein fester Persona-Anker (Aussehens-Beschreibung) wird jedem Bild-Prompt vorangestellt, dazu ein fester Seed – so erscheint durchgehend dieselbe Figur. Zusaetzlich kann im Admin ein Profilbild/Avatar der Keyholderin generiert werden, das im Sub-Chat neben ihren Nachrichten angezeigt wird."
       }
     ]
   },
