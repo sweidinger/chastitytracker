@@ -446,7 +446,10 @@ export async function POST(req: NextRequest) {
       if (boxCmd) await setBoxCommandForUser(tx, session.user.id, boxCmd);
 
       return created;
-    });
+      // timeout hochgesetzt: die Transaktion ist reine DB-Arbeit (Sekundenbruchteile), kann aber
+      // unter Schreib-Sperr-Contention mit dem cron-Prozess auf die WAL-Sperre warten. 5s (Default)
+      // war zu knapp -> vereinzelte "Transaction already closed"-Fehler beim Speichern.
+    }, { timeout: 15000, maxWait: 10000 });
   } catch (e: unknown) {
     const code = entryGuardCode(e);
     const payload: Record<string, unknown> = { error: code };
