@@ -284,6 +284,7 @@ export default async function DashboardPage() {
     } : null,
 
     offenePlugAnf: offenePlugAnf ? {
+      id: offenePlugAnf.id,
       endetAt: offenePlugAnf.endetAt?.toISOString() ?? null,
       nachricht: offenePlugAnf.nachricht,
       endetAtLabel: offenePlugAnf.endetAt ? t("plugWearRequestUntil", { date: formatDateTime(offenePlugAnf.endetAt, dl, tz) }) : null,

@@ -44,6 +44,7 @@ export interface DashboardProps {
 
   // Plug-Anforderung (Tragen anfordern)
   offenePlugAnf: {
+    id: string;
     endetAt: string | null;
     nachricht: string | null;
     endetAtLabel: string | null;
@@ -173,7 +174,7 @@ export default function DashboardClient(props: DashboardProps) {
       nachricht={offenePlugAnf.nachricht}
       endetAtLabel={offenePlugAnf.endetAtLabel}
       overdue={offenePlugAnf.overdue}
-      action={{ label: t("plugWearRequestAction"), href: `/dashboard/new/wear-begin?category=${offenePlugAnf.categoryId}` }}
+      action={{ label: t("plugWearRequestAction"), href: `/dashboard/new/wear-begin?category=${offenePlugAnf.categoryId}&anforderung=${offenePlugAnf.id}` }}
     />
   ) : null;
 

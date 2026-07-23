@@ -1,5 +1,19 @@
 [
   {
+    "version": "4.112.0",
+    "date": "2026-07-23",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Beim Anlegen aus einer Plug-Trage-Anforderung ist das Geraet jetzt fest vorgewaehlt und nicht mehr aenderbar (bisher wurde die konkrete deviceId bei Plug-Anforderungen nicht gespeichert)."
+      },
+      {
+        "type": "feat",
+        "text": "Die KI-Keyholderin kann pro Trage-Anforderung entscheiden, ob ein Foto beim Anlegen Pflicht ist (wearFotoPflicht). Das Erfass-Formular richtet sich danach."
+      }
+    ]
+  },
+  {
     "version": "4.111.0",
     "date": "2026-07-23",
     "changes": [

@@ -366,8 +366,8 @@ async function buildMessageHistory(
       "- create_orgasmus: {\"action\":\"create_orgasmus\",\"orgasmusArt\":\"ANWEISUNG\"|\"GELEGENHEIT\",\"fensterdauerH\":number,\"orgasmusVorgegebeneArt\":null|\"Orgasmus\"|\"ruinierter Orgasmus\"|\"feuchter Traum\",\"oeffnenErlaubt\":boolean}\n" +
       "  → orgasmusFotoPflicht=true verlangt beim Erfassen ein Foto (serverseitig erzwungen); false = Foto freiwillig. Erfasste Fotos bekommst du als Bild angehängt und kannst sie beurteilen.\n" +
       "  → orgasmusVorgegebeneArt MUSS exakt einem der gelisteten Werte entsprechen oder null (= beliebig). oeffnenErlaubt hängt vom Verschluss-Zustand ab: oeffnenErlaubt=false (User bleibt verschlossen) NUR wenn lock.isLocked===true. Ist der User NICHT verschlossen (lock.isLocked===false), setze oeffnenErlaubt=true — \"verschlossen bleiben\" ergibt ohne angelegten Käfig keinen Sinn. Ruinierter Orgasmus: orgasmusVorgegebeneArt=\"ruinierter Orgasmus\" (oeffnenErlaubt je nach Verschluss-Zustand).\n" +
-      "- create_wear_anforderung: {\"action\":\"create_wear_anforderung\",\"wearDeviceName\":string,\"wearDurationH\":number}\n" +
-      "  → Erstellt eine offizielle Trage-Anforderung (VerschlussAnforderung) für ein Nicht-KG-Gerät (Plug, etc.). Der User erhält Push + E-Mail und muss die Anforderung in der App erfüllen.\n" +
+      "- create_wear_anforderung: {\"action\":\"create_wear_anforderung\",\"wearDeviceName\":string,\"wearDurationH\":number,\"wearFotoPflicht\":true|false}\n" +
+      "  → Erstellt eine offizielle Trage-Anforderung (VerschlussAnforderung) für ein Nicht-KG-Gerät (Plug, etc.). wearDeviceName = EXAKTER Gerätename aus der Geräteliste (bei mehreren Plugs bewusst nach Größe/Beschreibung wählen); das Erfass-Formular wird fest auf genau dieses Gerät begrenzt. wearFotoPflicht: true = Foto beim Anlegen erzwingen, false = optional. Der User erhält Push + E-Mail und muss die Anforderung in der App erfüllen.\n" +
       "- create_strafe: {\"action\":\"create_strafe\",\"notiz\":string}\n" +
       "  → Verhänge eine Strafe im Strafbuch. notiz = kurze Begründung (z.B. 'Keine Trainingseinheit absolviert').\n" +
       "- review_strafe: {\"action\":\"review_strafe\",\"refId\":string,\"entscheidung\":\"bestaetigen\"|\"ablehnen\",\"grund\":null|string}\n" +
@@ -731,7 +731,8 @@ export async function executeChatAction(
     const wearConflict = await findRegionConflict(userId, device.categoryId, { includeOpenRequests: true });
     if (wearConflict) return { ok: false, actionType: "create_wear_anforderung", label: "Wear-Anforderung", error: `Körperregion-Konflikt: „${wearConflict.blockingCategoryName}" belegt dieselbe Region — nicht gleichzeitig anforderbar.` };
     const nachricht = `Trage ${deviceName} für ${durationH} Stunden.`;
-    const result = await createVerschlussAnforderung({ userId, art: "ANFORDERUNG", deviceCategoryId: device.categoryId, deviceId: device.id, nachricht, fristH: durationH });
+    const fotoPflicht = typeof action.wearFotoPflicht === "boolean" ? action.wearFotoPflicht : null;
+    const result = await createVerschlussAnforderung({ userId, art: "ANFORDERUNG", deviceCategoryId: device.categoryId, deviceId: device.id, nachricht, fristH: durationH, fotoPflicht });
     await logEntry(result.ok ? `Plug-Anforderung: ${deviceName} für ${durationH}h` : `Plug-Anforderung fehlgeschlagen: ${result.error}`);
     return { ok: result.ok, actionType: "create_wear_anforderung", label: `${deviceName} tragen (${durationH}h)`, error: result.ok ? undefined : result.error };
   }
@@ -984,7 +985,7 @@ export async function runAutonomousAction(
         '"orgasmusArt": null|"ANWEISUNG"|"GELEGENHEIT", "fensterdauerH": null|number, ' +
         '"orgasmusVorgegebeneArt": null|"Orgasmus"|"ruinierter Orgasmus"|"feuchter Traum", "oeffnenErlaubt": null|boolean, "orgasmusFotoPflicht": null|boolean, ' +
         '"vorgabeTagH": null|number, "vorgabeWocheH": null|number, "vorgabeMonatH": null|number, "vorgabeNotiz": null|string, ' +
-        '"wearDeviceName": null|string, "wearDurationH": null|number, "anforderungDeviceName": null|string, "requireCode": null|boolean, ' +
+        '"wearDeviceName": null|string, "wearDurationH": null|number, "wearFotoPflicht": null|true|false, "anforderungDeviceName": null|string, "requireCode": null|boolean, ' +
         '"device": null|"CAGE"|"PLUG", ' +
         '"sessionCategoryName": null|string, "sessionDeadlineH": null|number, "sessionRequireVideo": null|boolean, "sessionOrgasmusZiel": null|"KEINE"|"ERFORDERLICH"|"VERBOTEN", "sessionOrgasmusRuiniert": null|boolean, ' +
         '"windowHours": null|number, "category": null|string, "hours": null|number }' +
@@ -1017,7 +1018,7 @@ export async function runAutonomousAction(
         'vorgabeTagH/vorgabeWocheH/vorgabeMonatH = Mindeststunden pro Periode (mind. einer muss gesetzt sein). ' +
         'vorgabeNotiz = kurze Begründung (z.B. "Intensivierungsphase"). message = Chat-Text.\n' +
         'action="create_wear_anforderung" → erstellt eine offizielle Trage-Anforderung für ein Non-KG-Gerät (Plug, etc.); der User bekommt Push/E-Mail und muss es in der App bestätigen. ' +
-        'wearDeviceName = exakter Gerätename aus der Geräteliste (muss exakt übereinstimmen). wearDurationH = Frist in Stunden. message = kurze Erklärung im Chat.\n' +
+        'wearDeviceName = exakter Gerätename aus der Geräteliste (bei mehreren Plugs bewusst nach Größe/Beschreibung wählen). wearDurationH = Frist in Stunden. wearFotoPflicht = Foto beim Anlegen erzwingen (true) oder optional (false). message = kurze Erklärung im Chat.\n' +
         'action="create_session_anforderung" → fordere den User auf, eine Trainings-Session in einer Session-Kategorie zu starten. ' +
         'sessionCategoryName = exakter Name aus der Session-Kategorien-Liste. sessionDeadlineH = Frist in Stunden (null = keine). ' +
         'sessionRequireVideo = Video-/Foto-Nachweis beim Session-Ende. sessionOrgasmusZiel = Orgasmus erforderlich/verboten/kein Ziel. sessionOrgasmusRuiniert = nur bei ERFORDERLICH: muss ruiniert sein. message = Anweisung im Chat.\n' +
@@ -1076,6 +1077,7 @@ export async function runAutonomousAction(
       vorgabeNotiz?: string | null;
       wearDeviceName?: string | null;
       wearDurationH?: number | null;
+      wearFotoPflicht?: boolean | null;
       anforderungDeviceName?: string | null;
       requireCode?: boolean;
       device?: "CAGE" | "PLUG" | null;
@@ -1441,7 +1443,8 @@ export async function runAutonomousAction(
       const wearConflict = device?.categoryId ? await findRegionConflict(userId, device.categoryId, { includeOpenRequests: true }) : null;
       if (device?.categoryId && !wearConflict) {
         const nachricht = decision.message ?? `Trage ${deviceName} für ${durationH} Stunden.`;
-        await createVerschlussAnforderung({ userId, art: "ANFORDERUNG", deviceCategoryId: device.categoryId, deviceId: device.id, nachricht, fristH: durationH });
+        const wearFotoPflicht = typeof decision.wearFotoPflicht === "boolean" ? decision.wearFotoPflicht : null;
+        await createVerschlussAnforderung({ userId, art: "ANFORDERUNG", deviceCategoryId: device.categoryId, deviceId: device.id, nachricht, fristH: durationH, fotoPflicht: wearFotoPflicht });
       }
       const eventText = wearConflict
         ? `[Wear-Anforderung] Übersprungen: Körperregion-Konflikt mit „${wearConflict.blockingCategoryName}".`

@@ -57,6 +57,8 @@ interface Props {
   category: Category;
   /** WEAR_BEGIN only — devices the user can pick from (filtered to the category). */
   devices?: DeviceOption[];
+  /** WEAR_BEGIN from a wear-Anforderung: locks the device picker to this device. */
+  forcedDeviceId?: string | null;
   /** WEAR_END only — the active session being closed. */
   activeSession?: ActiveSession;
   /** Admin mode: target userId. Switches POST to /api/admin/entries with userId in body. */
@@ -75,7 +77,7 @@ interface Props {
   nowDefault: string;
 }
 
-export default function WearForm({ kind, category, devices, activeSession, adminUserId, redirectTo, initial, minTime, maxTime, tz, nowDefault }: Props) {
+export default function WearForm({ kind, category, devices, forcedDeviceId, activeSession, adminUserId, redirectTo, initial, minTime, maxTime, tz, nowDefault }: Props) {
   const t = useTranslations("wearForm");
   const tCommon = useTranslations("common");
   const apiError = useApiError();
@@ -91,7 +93,8 @@ export default function WearForm({ kind, category, devices, activeSession, admin
     toDatetimeLocal(initial?.startTime, tz) || nowDefault,
   );
   const [deviceId, setDeviceId] = useState<string>(
-    initial?.deviceId
+    forcedDeviceId
+      ?? initial?.deviceId
       ?? (kind === "end" ? activeSession?.deviceId ?? "" : devices?.[0]?.id ?? ""),
   );
   const [note, setNote] = useState(initial?.note ?? "");
@@ -218,7 +221,7 @@ export default function WearForm({ kind, category, devices, activeSession, admin
             value={deviceId}
             onChange={(e) => setDeviceId(e.target.value)}
             required
-            disabled={saving}
+            disabled={saving || !!forcedDeviceId}
             options={devices.map((d) => ({ value: d.id, label: d.name }))}
           />
         )}
