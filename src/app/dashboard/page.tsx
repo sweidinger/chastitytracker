@@ -32,6 +32,7 @@ import CategoriesPromoCard from "./CategoriesPromoCard";
 import CategoryGoalsToday from "./CategoryGoalsToday";
 import CategoryGoalsLive from "./CategoryGoalsLive";
 import BelohnungBanner from "./BelohnungBanner";
+import DenialCounterCard from "./DenialCounterCard";
 import HealthHoldCard from "./HealthHoldCard";
 import StrafenBanner from "./StrafenBanner";
 import { getBelohnungState } from "@/lib/belohnung";
@@ -75,6 +76,11 @@ export default async function DashboardPage() {
     reserved: t("belohnungReserved"),
     windowLabel: t("belohnungWindowLabel"),
     oeffnenAllowed: t("belohnungOeffnenAllowed"),
+  };
+  const denialLabels = {
+    title: t("denialTitle"),
+    since: t("denialSince"),
+    noneYet: t("denialNoneYet"),
   };
 
   // ── Parallel data fetch ──
@@ -174,6 +180,7 @@ export default async function DashboardPage() {
   const orgasmusEntries = entries
     .filter((e) => e.type === "ORGASMUS")
     .sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
+  const lastOrgasmAt = orgasmusEntries[0]?.startTime.toISOString() ?? null;
 
   const orgasmCfg = effectiveOrgasmusArten(userSettings?.orgasmusArtenConfig);
   const rawSessionEvents = activePair
@@ -341,6 +348,7 @@ export default async function DashboardPage() {
         oeffnenErlaubt={belohnungState.activeWindow?.oeffnenErlaubt ?? false}
         labels={belohnungBannerLabels}
       />
+      <DenialCounterCard lastOrgasmAt={lastOrgasmAt} labels={denialLabels} />
       <StrafenBanner userId={userId} />
       {cageOpen && currentStatus && (
         <div className="w-full max-w-2xl mx-auto px-4 pt-4">

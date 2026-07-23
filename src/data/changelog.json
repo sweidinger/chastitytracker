@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.113.0",
+    "date": "2026-07-23",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Neuer Denial-Zaehler auf dem Dashboard: zeigt live die Zeit seit dem letzten Orgasmus (bzw. einen Hinweis, wenn noch keiner erfasst wurde)."
+      }
+    ]
+  },
+  {
     "version": "4.112.4",
     "date": "2026-07-23",
     "changes": [
