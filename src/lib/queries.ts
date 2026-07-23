@@ -244,8 +244,27 @@ export async function prepareWearEntry(
   if (!dev?.categoryId) return { ok: false, code: "WEAR_DEVICE_NO_CATEGORY" };
   // KG uses VERSCHLUSS/OEFFNEN, not WEAR_BEGIN/END. Other built-ins (e.g. Plug) are allowed.
   if (dev.category?.slug === "kg") return { ok: false, code: "WEAR_DEVICE_KG" };
-  if (type === "WEAR_BEGIN" && dev.category?.requirePhoto && !imageUrl) {
-    return { ok: false, code: "WEAR_PHOTO_REQUIRED" };
+  // Foto-Pflicht hat ZWEI Quellen: den Kategorie-Default (requirePhoto) ODER eine offene
+  // Keyholder-Anforderung mit fotoPflicht=true. Beides serverseitig erzwingen, damit die Ansage
+  // der Keyholderin auch in Kategorien OHNE Kategorie-Foto-Default (z.B. Dildo) verbindlich ist –
+  // vorher nur im Client (wear-begin-Seite) gespiegelt und damit umgehbar.
+  if (type === "WEAR_BEGIN" && !imageUrl) {
+    let photoRequired = !!dev.category?.requirePhoto;
+    if (!photoRequired) {
+      const anfWithPhoto = await tx.verschlussAnforderung.findFirst({
+        where: {
+          userId,
+          deviceCategoryId: dev.categoryId,
+          art: "ANFORDERUNG",
+          fotoPflicht: true,
+          fulfilledAt: null,
+          withdrawnAt: null,
+        },
+        select: { id: true },
+      });
+      photoRequired = !!anfWithPhoto;
+    }
+    if (photoRequired) return { ok: false, code: "WEAR_PHOTO_REQUIRED" };
   }
 
   const latestWear = await tx.entry.findFirst({

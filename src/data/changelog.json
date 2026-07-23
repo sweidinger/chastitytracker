@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.112.1",
+    "date": "2026-07-23",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Die von der KI-Keyholderin pro Anforderung gesetzte Foto-Pflicht wird jetzt auch serverseitig erzwungen \u2013 zuvor griff die serverseitige Pruefung nur beim Kategorie-Foto-Default (z.B. Plug), sodass die Foto-Pflicht in Kategorien ohne Default (z.B. Dildo) nur im Browser durchgesetzt und damit umgehbar war. Das Erfass-Formular hat die Regel bereits angezeigt; jetzt haelt auch der Server sie ein."
+      }
+    ]
+  },
+  {
     "version": "4.112.0",
     "date": "2026-07-23",
     "changes": [
