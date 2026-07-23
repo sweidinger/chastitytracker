@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.112.2",
+    "date": "2026-07-23",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Speichern des \u201eTragen beginnen\u201c-Formulars (mit Foto) schlug vereinzelt mit einem Transaktions-Timeout fehl, weil App und autonomer Keyholder-Cron dieselbe SQLite-Datei schreiben und sich gegenseitig sperrten. Behoben: WAL-Journal + busy_timeout entkoppeln Leser/Schreiber, zusaetzlich mehr Zeitreserve fuer die Schreib-Transaktion."
+      }
+    ]
+  },
+  {
     "version": "4.112.1",
     "date": "2026-07-23",
     "changes": [
