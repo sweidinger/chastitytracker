@@ -8,13 +8,13 @@ import { getActiveWearSessionForCategory } from "@/lib/queries";
 import { nowDatetimeLocal, APP_TZ } from "@/lib/utils";
 import WearForm from "../../WearForm";
 
-export default async function NewWearBeginPage({ searchParams }: { searchParams: Promise<{ category?: string }> }) {
+export default async function NewWearBeginPage({ searchParams }: { searchParams: Promise<{ category?: string; anforderung?: string }> }) {
   if (!deviceCategoriesEnabled()) notFound();
   const session = await auth();
   if (!session) redirect("/login");
   const tz = session.user.timezone ?? APP_TZ;
 
-  const { category: categoryId } = await searchParams;
+  const { category: categoryId, anforderung: anforderungId } = await searchParams;
   if (!categoryId) redirect("/dashboard/categories");
 
   const category = await prisma.deviceCategory.findUnique({
@@ -38,6 +38,20 @@ export default async function NewWearBeginPage({ searchParams }: { searchParams:
   const tn = await getTranslations("newEntry");
   const t = await getTranslations("wearForm");
 
+  // Aus einer Wear-Anforderung geoeffnet: Geraet fest vorwaehlen + sperren, Foto-Pflicht ggf. ueberschreiben.
+  let forcedDeviceId: string | null = null;
+  let requirePhoto = category.requirePhoto;
+  if (anforderungId) {
+    const anf = await prisma.verschlussAnforderung.findFirst({
+      where: { id: anforderungId, userId: session.user.id, deviceCategoryId: categoryId, art: "ANFORDERUNG", fulfilledAt: null, withdrawnAt: null },
+      select: { deviceId: true, fotoPflicht: true },
+    });
+    if (anf) {
+      forcedDeviceId = anf.deviceId;
+      if (anf.fotoPflicht !== null) requirePhoto = anf.fotoPflicht;
+    }
+  }
+
   if (devices.length === 0) {
     return (
       <div className="w-full max-w-2xl mx-auto px-4 py-6">
@@ -58,8 +72,9 @@ export default async function NewWearBeginPage({ searchParams }: { searchParams:
       <h1 className="text-xl font-bold text-foreground mt-1 mb-6">{t("titleBegin")}</h1>
       <WearForm
         kind="begin"
-        category={{ id: category.id, name: category.name, color: category.color, icon: category.icon, requirePhoto: category.requirePhoto }}
+        category={{ id: category.id, name: category.name, color: category.color, icon: category.icon, requirePhoto }}
         devices={devices}
+        forcedDeviceId={forcedDeviceId}
         tz={tz}
         nowDefault={nowDatetimeLocal(tz)}
       />

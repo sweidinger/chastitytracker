@@ -26,6 +26,8 @@ export interface CreateVerschlussAnforderungParams {
   deviceId?: string | null;
   /** Non-KG category (e.g. Plug). When set: uses wear-state instead of KG lock-state. */
   deviceCategoryId?: string | null;
+  /** Wear-Anforderung: Foto beim Anlegen erzwingen (true) / optional (false) / Kategorie-Default (null). */
+  fotoPflicht?: boolean | null;
   reinigungErlaubt?: boolean;
   toiletteErlaubt?: boolean;
   /** Verzögerte Auslösung in Minuten (>0). Fehlt/0 = sofort (sofern kein wirksamAbAt). */
@@ -66,7 +68,7 @@ export function checkLockEnd(
 export async function createVerschlussAnforderung(
   params: CreateVerschlussAnforderungParams,
 ): Promise<ServiceResult<{ id: string; scheduledFor: string | null }>> {
-  const { userId, art, nachricht, endetAt, fristH, dauerH, sperrEndetAt, deviceId, deviceCategoryId, reinigungErlaubt, toiletteErlaubt, delayMinutes, wirksamAbAt } = params;
+  const { userId, art, nachricht, endetAt, fristH, dauerH, sperrEndetAt, deviceId, deviceCategoryId, fotoPflicht, reinigungErlaubt, toiletteErlaubt, delayMinutes, wirksamAbAt } = params;
   const isPlugCategory = !!deviceCategoryId;
 
   if (!userId) return serviceFail(400, "USER_ID_REQUIRED");
@@ -178,8 +180,9 @@ export async function createVerschlussAnforderung(
           endetAt: endetAtDate,
           dauerH: effectiveDauerH,
           sperrEndetAt: sperrEndetAtDate,
-          deviceId: (art === "ANFORDERUNG" && !isPlugCategory) ? (deviceId || null) : null,
+          deviceId: art === "ANFORDERUNG" ? (deviceId || null) : null,
           deviceCategoryId: deviceCategoryId || null,
+          fotoPflicht: fotoPflicht ?? null,
           reinigungErlaubt: effectiveReinigung,
           toiletteErlaubt: effectiveToilette,
           wirksamAb,

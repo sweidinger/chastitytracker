@@ -419,6 +419,7 @@ model VerschlussAnforderung {
   device           Device?         @relation(fields: [deviceId], references: [id], onDelete: SetNull)
   deviceCategoryId String?         // null = KG (backward compat); non-null = Plug oder andere non-KG Kategorie
   deviceCategory   DeviceCategory? @relation(fields: [deviceCategoryId], references: [id], onDelete: SetNull)
+  fotoPflicht      Boolean?        // Wear-Anforderung: von der Keyholderin gesetzte Foto-Pflicht (null = Kategorie-Default)
   reinigungErlaubt Boolean   @default(false) // SPERRZEIT: Reinigungsöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
   toiletteErlaubt  Boolean   @default(false) // SPERRZEIT: Toilettenöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
   createdAt        DateTime  @default(now())
