@@ -9,6 +9,7 @@ import { requestKontrolle } from "@/lib/kontrolleService";
 import { createVerschlussAnforderung } from "@/lib/verschlussAnforderungService";
 import { createOrgasmusAnforderung } from "@/lib/orgasmusAnforderungService";
 import { createVorgabe } from "@/lib/vorgabeService";
+import { setOrgasmBudgetSettings } from "@/lib/orgasmBudgetService";
 import { getIsLocked, getUserTimezone } from "@/lib/queries";
 import { formatDateTime, formatTime } from "@/lib/utils";
 import { grantBelohnung, grantGutschrift, computeBelohnbar, denyReward, delayReward, REWARD_GUIDANCE_TEXT } from "@/lib/belohnung";
@@ -24,7 +25,7 @@ import { calendarLine } from "@/lib/relativeTime";
 const HEALTH_HOLD_BLOCKED_ACTIONS = new Set([
   "create_kontrolle", "create_anforderung", "create_sperrzeit", "create_orgasmus",
   "create_wear_anforderung", "create_session_anforderung", "create_strafe",
-  "set_vorgabe", "assign_media", "deny_orgasm", "delay_orgasm",
+  "set_vorgabe", "set_orgasm_budget", "assign_media", "deny_orgasm", "delay_orgasm",
 ]);
 import { SEVERITY_GUIDANCE_TEXT } from "@/lib/strafurteilService";
 import { decrypt } from "@/lib/encrypt";
@@ -357,6 +358,8 @@ async function buildMessageHistory(
       "Verfügbare Aktionen:\n" +
       "- set_vorgabe: {\"action\":\"set_vorgabe\",\"vorgabeTagH\":null|number,\"vorgabeWocheH\":null|number,\"vorgabeMonatH\":null|number,\"vorgabeNotiz\":null|string}\n" +
       "  → mind. ein Zeitwert erforderlich\n" +
+      "- set_orgasm_budget: {\"action\":\"set_orgasm_budget\",\"orgasmBudget\":number,\"orgasmBudgetPeriode\":\"WOCHE\"|\"MONAT\"}\n" +
+      "  → Setzt das Orgasmus-Budget des Subs (max. erlaubte Orgasmen pro Zeitraum, 0–99). Als Belohnung erhöhen, als Strafe senken. orgasmBudgetPeriode optional (Standard: bisheriger Zeitraum). Feuchte Träume und von einer Anforderung/Belohnung gedeckte Orgasmen zählen nicht.\n" +
       "- create_kontrolle: {\"action\":\"create_kontrolle\",\"kommentar\":null|string,\"requireCode\":true|false,\"device\":\"CAGE\"|\"PLUG\"}\n" +
       "  → NUR wenn lock.isLocked. device: Gerät der Kontrolle (CAGE=Keuschheitsgürtel, PLUG=Plug). requireCode=true: sendet Code per E-Mail (Standard). requireCode=false: nur Foto-Nachweis\n" +
       "- create_anforderung: {\"action\":\"create_anforderung\",\"fristH\":number,\"dauerH\":null|number,\"nachricht\":null|string,\"deviceName\":null|string}\n" +
@@ -646,6 +649,20 @@ export async function executeChatAction(
     const parts = [tagH ? `${tagH}h/Tag` : null, wocheH ? `${wocheH}h/Woche` : null, monatH ? `${monatH}h/Monat` : null].filter(Boolean).join(", ");
     await logEntry(result.ok ? `Trainingsvorgabe gesetzt: ${parts}` : `Trainingsvorgabe fehlgeschlagen: ${result.error}`);
     return { ok: result.ok, actionType: "set_vorgabe", label: `Vorgabe: ${parts}`, error: result.ok ? undefined : result.error };
+  }
+
+  // ── set_orgasm_budget ──
+  if (action.action === "set_orgasm_budget") {
+    const budget = typeof action.orgasmBudget === "number" && action.orgasmBudget >= 0 ? Math.min(99, Math.floor(action.orgasmBudget)) : null;
+    if (budget === null) {
+      return { ok: false, actionType: "set_orgasm_budget", label: "Orgasmus-Budget", error: "Kein Budget-Wert angegeben" };
+    }
+    const periode = action.orgasmBudgetPeriode === "MONAT" ? "MONAT" : action.orgasmBudgetPeriode === "WOCHE" ? "WOCHE" : undefined;
+    const result = await setOrgasmBudgetSettings(userId, { budget, periode });
+    const periodeText = periode === "MONAT" ? "pro Monat" : periode === "WOCHE" ? "pro Woche" : "";
+    const label = periodeText ? `Orgasmus-Budget: ${budget} ${periodeText}` : `Orgasmus-Budget: ${budget}`;
+    await logEntry(result.ok ? `${label} gesetzt` : `Orgasmus-Budget fehlgeschlagen: ${result.error}`);
+    return { ok: result.ok, actionType: "set_orgasm_budget", label, error: result.ok ? undefined : result.error };
   }
 
   // ── create_kontrolle ──
@@ -978,13 +995,14 @@ export async function runAutonomousAction(
         "Analysiere den Status des Users und entscheide ob eine Aktion nötig ist. " +
         "Antworte mit einem JSON-Objekt (kein Markdown, nur JSON):\n" +
         '{ "act": boolean, ' +
-        '"action": "none"|"send_message"|"assign_media"|"create_kontrolle"|"create_strafe"|"review_strafe"|"create_anforderung"|"create_sperrzeit"|"create_orgasmus"|"set_vorgabe"|"create_wear_anforderung"|"create_session_anforderung"|"grant_reward"|"credit_reward"|"deny_orgasm"|"delay_orgasm", ' +
+        '"action": "none"|"send_message"|"assign_media"|"create_kontrolle"|"create_strafe"|"review_strafe"|"create_anforderung"|"create_sperrzeit"|"create_orgasmus"|"set_vorgabe"|"set_orgasm_budget"|"create_wear_anforderung"|"create_session_anforderung"|"grant_reward"|"credit_reward"|"deny_orgasm"|"delay_orgasm", ' +
         '"message": "...", "mediaIndex": 0|null, "kommentar": null|"...", "strafeNotiz": null|"...", ' +
         '"refId": null|string, "entscheidung": null|"bestaetigen"|"ablehnen", "grund": null|string, ' +
         '"fristH": null|number, "dauerH": null|number, "sperrDauerH": null|number, ' +
         '"orgasmusArt": null|"ANWEISUNG"|"GELEGENHEIT", "fensterdauerH": null|number, ' +
         '"orgasmusVorgegebeneArt": null|"Orgasmus"|"ruinierter Orgasmus"|"feuchter Traum", "oeffnenErlaubt": null|boolean, "orgasmusFotoPflicht": null|boolean, ' +
         '"vorgabeTagH": null|number, "vorgabeWocheH": null|number, "vorgabeMonatH": null|number, "vorgabeNotiz": null|string, ' +
+        '"orgasmBudget": null|number, "orgasmBudgetPeriode": null|"WOCHE"|"MONAT", ' +
         '"wearDeviceName": null|string, "wearDurationH": null|number, "wearFotoPflicht": null|true|false, "anforderungDeviceName": null|string, "requireCode": null|boolean, ' +
         '"device": null|"CAGE"|"PLUG", ' +
         '"sessionCategoryName": null|string, "sessionDeadlineH": null|number, "sessionRequireVideo": null|boolean, "sessionOrgasmusZiel": null|"KEINE"|"ERFORDERLICH"|"VERBOTEN", "sessionOrgasmusRuiniert": null|boolean, ' +
@@ -1017,6 +1035,8 @@ export async function runAutonomousAction(
         'action="set_vorgabe" → setze oder ändere die Trage-Trainingsvorgabe des Users (Mindeststunden). ' +
         'vorgabeTagH/vorgabeWocheH/vorgabeMonatH = Mindeststunden pro Periode (mind. einer muss gesetzt sein). ' +
         'vorgabeNotiz = kurze Begründung (z.B. "Intensivierungsphase"). message = Chat-Text.\n' +
+        'action="set_orgasm_budget" → setze/ändere das Orgasmus-Budget des Users (max. erlaubte Orgasmen pro Zeitraum, orgasmBudget 0–99). '  +
+        'Als Belohnung erhöhen, als Strafe senken. orgasmBudgetPeriode = "WOCHE"|"MONAT" (optional). message = Chat-Text.\n' +
         'action="create_wear_anforderung" → erstellt eine offizielle Trage-Anforderung für ein Non-KG-Gerät (Plug, etc.); der User bekommt Push/E-Mail und muss es in der App bestätigen. ' +
         'wearDeviceName = exakter Gerätename aus der Geräteliste (bei mehreren Plugs bewusst nach Größe/Beschreibung wählen). wearDurationH = Frist in Stunden. wearFotoPflicht = Foto beim Anlegen erzwingen (true) oder optional (false). message = kurze Erklärung im Chat.\n' +
         'action="create_session_anforderung" → fordere den User auf, eine Trainings-Session in einer Session-Kategorie zu starten. ' +
@@ -1075,6 +1095,8 @@ export async function runAutonomousAction(
       vorgabeWocheH?: number | null;
       vorgabeMonatH?: number | null;
       vorgabeNotiz?: string | null;
+      orgasmBudget?: number | null;
+      orgasmBudgetPeriode?: "WOCHE" | "MONAT" | null;
       wearDeviceName?: string | null;
       wearDurationH?: number | null;
       wearFotoPflicht?: boolean | null;
@@ -1430,6 +1452,33 @@ export async function runAutonomousAction(
         } else if (!result.ok) {
           await prisma.aiKeyholderMessage.create({
             data: { userId, role: "assistant", content: decision.message ?? "Ich wollte deine Trainingsvorgabe anpassen, aber es gab ein Problem." },
+          });
+        }
+      }
+
+    } else if (decision.action === "set_orgasm_budget") {
+      const budget = typeof decision.orgasmBudget === "number" && decision.orgasmBudget >= 0 ? Math.min(99, Math.floor(decision.orgasmBudget)) : null;
+      if (budget === null) {
+        await prisma.aiKeyholderMessage.create({
+          data: { userId, role: "assistant", content: decision.message ?? "Ich wollte das Orgasmus-Budget setzen, aber es fehlte ein gültiger Wert." },
+        });
+      } else {
+        const periode = decision.orgasmBudgetPeriode === "MONAT" ? "MONAT" : decision.orgasmBudgetPeriode === "WOCHE" ? "WOCHE" : undefined;
+        const result = await setOrgasmBudgetSettings(userId, { budget, periode });
+        const periodeText = periode === "MONAT" ? "pro Monat" : periode === "WOCHE" ? "pro Woche" : "";
+        const label = periodeText ? `${budget} ${periodeText}` : `${budget}`;
+        const eventText = result.ok ? `[Orgasmus-Budget] ${label}` : `[Orgasmus-Budget] Konnte nicht gesetzt werden: ${result.error}`;
+        await prisma.aiKeyholderMessage.create({
+          data: { userId, role: "system", content: `[Autonome Prüfung] ${eventText}` },
+        });
+        if (result.ok && decision.message) {
+          await prisma.aiKeyholderMessage.create({
+            data: { userId, role: "assistant", content: decision.message },
+          });
+          await sendPushToUser(userId, "Orgasmus-Budget geändert", decision.message.slice(0, 100), "/dashboard/keyholder");
+        } else if (!result.ok) {
+          await prisma.aiKeyholderMessage.create({
+            data: { userId, role: "assistant", content: decision.message ?? "Ich wollte dein Orgasmus-Budget anpassen, aber es gab ein Problem." },
           });
         }
       }

@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.115.0",
+    "date": "2026-07-23",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Orgasmus-Budget (Stufe 2b): Die KI-Keyholderin kann das Budget jetzt selbst setzen \u2013 im Chat und in ihren autonomen L\u00e4ufen (Aktion set_orgasm_budget), z.B. als Belohnung erh\u00f6hen oder als Strafe senken. Bei aktivem Gesundheits-Stopp ist die Aktion blockiert."
+      }
+    ]
+  },
+  {
     "version": "4.114.0",
     "date": "2026-07-23",
     "changes": [
