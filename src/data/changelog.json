@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.114.0",
+    "date": "2026-07-23",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Orgasmus-Budget (Stufe 2a): Der Keyholder kann pro Sub ein Budget an Orgasmen pro Woche oder Monat festlegen (Admin \u2192 Einstellungen). Das Dashboard zeigt Verbrauch und Rest in der Denial-Karte. Feuchte Tr\u00e4ume und von einer Anforderung/Belohnung gedeckte Orgasmen z\u00e4hlen nicht mit. Durchsetzung (Strafbuch) und KI-Steuerung folgen in den n\u00e4chsten Schritten."
+      }
+    ]
+  },
+  {
     "version": "4.113.0",
     "date": "2026-07-23",
     "changes": [

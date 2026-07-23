@@ -12,12 +12,14 @@ export interface DenialCounterLabels {
 interface Props {
   /** ISO-Zeitpunkt des letzten Orgasmus, oder null wenn noch keiner erfasst wurde. */
   lastOrgasmAt: string | null;
+  /** Vorformatierte Budget-Zeile (serverseitig lokalisiert), oder null wenn kein Budget aktiv. */
+  budgetLine?: string | null;
   labels: DenialCounterLabels;
 }
 
-/** Sub-Dashboard: Zeit seit dem letzten Orgasmus (Denial-Zaehler), live tickend.
- *  Spiegelt bewusst die Struktur des BelohnungBanner (gleiche Karte, orgasm-Farbtoken). */
-export default function DenialCounterCard({ lastOrgasmAt, labels }: Props) {
+/** Sub-Dashboard: Zeit seit dem letzten Orgasmus (Denial-Zaehler), live tickend, plus optional
+ *  die Orgasmus-Budget-Zeile. Spiegelt die Struktur des BelohnungBanner (orgasm-Farbtoken). */
+export default function DenialCounterCard({ lastOrgasmAt, budgetLine, labels }: Props) {
   return (
     <div className="w-full max-w-2xl mx-auto px-4 pt-4">
       <div className="rounded-2xl border border-[var(--color-orgasm)] bg-[color-mix(in_srgb,var(--color-orgasm)_8%,transparent)] px-5 py-4">
@@ -35,6 +37,7 @@ export default function DenialCounterCard({ lastOrgasmAt, labels }: Props) {
             ) : (
               <p className="text-sm text-foreground-muted">{labels.noneYet}</p>
             )}
+            {budgetLine && <p className="text-sm text-foreground-muted mt-0.5">{budgetLine}</p>}
           </div>
         </div>
       </div>

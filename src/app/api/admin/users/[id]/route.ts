@@ -8,6 +8,7 @@ import { getActiveSperrzeit, getIsLocked } from "@/lib/queries";
 import { isUniqueConstraintOn } from "@/lib/prismaErrors";
 import { setReinigungSettings, parseReinigungsFenster } from "@/lib/reinigungService";
 import { setToiletteSettings } from "@/lib/toiletteService";
+import { setOrgasmBudgetSettings } from "@/lib/orgasmBudgetService";
 import { setAutoKontrolleSettings } from "@/lib/autoKontrolleService";
 import { setInspectionEscalationSettings } from "@/lib/inspectionEscalationService";
 import { setReasonConfig } from "@/lib/reasonsService";
@@ -102,6 +103,14 @@ export async function PATCH(
       maxProTag: body.toiletteMaxProTag !== undefined ? Number(body.toiletteMaxProTag) : undefined,
     });
     return NextResponse.json({ ok: true });
+  }
+
+  if (body.orgasmBudget !== undefined || body.orgasmBudgetPeriode !== undefined) {
+    const r = await setOrgasmBudgetSettings(id, {
+      budget: body.orgasmBudget !== undefined ? (body.orgasmBudget === null ? null : Number(body.orgasmBudget)) : undefined,
+      periode: body.orgasmBudgetPeriode !== undefined ? String(body.orgasmBudgetPeriode) : undefined,
+    });
+    return r.ok ? NextResponse.json({ ok: true }) : NextResponse.json({ error: r.error }, { status: 400 });
   }
 
   if (

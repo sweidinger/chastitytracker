@@ -73,6 +73,10 @@ model User {
   plugReinigungsFenster   String?  // JSON [{start,end}] — tägliche Zeitfenster für Plug-Reinigung (analog reinigungsFenster)
   // Plug-Toilette: immer erlaubt, unbegrenzte Anzahl — nur Max.-Dauer konfigurierbar.
   plugToiletteMaxMinuten  Int      @default(15)
+  // Orgasmus-Budget: max. Anzahl zaehlbarer Orgasmen pro Zeitraum (WOCHE|MONAT). null = kein Budget/aus.
+  // Zaehlt echte Orgasmen (ohne "feuchter Traum"), die keine erfuellte Orgasmus-Anforderung erfuellen.
+  orgasmBudget            Int?
+  orgasmBudgetPeriode     String   @default("WOCHE")
   // Pro-User anpassbare Auswahllisten als JSON-Array [{code,label?}] (TEXT). null = eingebaute
   // Standardliste (Bestandsnutzer unverändert). Öffnungsgründe enthalten IMMER die geschützten
   // Built-ins "REINIGUNG" und "TOILETTE" (Code fix, nur Label umbenennbar). Siehe reasonsService.ts.

@@ -33,6 +33,7 @@ import CategoryGoalsToday from "./CategoryGoalsToday";
 import CategoryGoalsLive from "./CategoryGoalsLive";
 import BelohnungBanner from "./BelohnungBanner";
 import DenialCounterCard from "./DenialCounterCard";
+import { getOrgasmusBudgetState } from "@/lib/orgasmBudgetService";
 import HealthHoldCard from "./HealthHoldCard";
 import StrafenBanner from "./StrafenBanner";
 import { getBelohnungState } from "@/lib/belohnung";
@@ -181,6 +182,15 @@ export default async function DashboardPage() {
     .filter((e) => e.type === "ORGASMUS")
     .sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
   const lastOrgasmAt = orgasmusEntries[0]?.startTime.toISOString() ?? null;
+  const orgasmBudgetState = await getOrgasmusBudgetState(userId, now, tz);
+  const orgasmBudgetLine = orgasmBudgetState.limit != null
+    ? t("orgasmBudgetLine", {
+        used: orgasmBudgetState.used,
+        limit: orgasmBudgetState.limit,
+        period: orgasmBudgetState.periode === "MONAT" ? t("orgasmBudgetPeriodMonth") : t("orgasmBudgetPeriodWeek"),
+        remaining: orgasmBudgetState.remaining ?? 0,
+      })
+    : null;
 
   const orgasmCfg = effectiveOrgasmusArten(userSettings?.orgasmusArtenConfig);
   const rawSessionEvents = activePair
@@ -348,7 +358,7 @@ export default async function DashboardPage() {
         oeffnenErlaubt={belohnungState.activeWindow?.oeffnenErlaubt ?? false}
         labels={belohnungBannerLabels}
       />
-      <DenialCounterCard lastOrgasmAt={lastOrgasmAt} labels={denialLabels} />
+      <DenialCounterCard lastOrgasmAt={lastOrgasmAt} budgetLine={orgasmBudgetLine} labels={denialLabels} />
       <StrafenBanner userId={userId} />
       {cageOpen && currentStatus && (
         <div className="w-full max-w-2xl mx-auto px-4 pt-4">
