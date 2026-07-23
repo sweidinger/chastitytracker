@@ -77,6 +77,7 @@ model User {
   // Zaehlt echte Orgasmen (ohne "feuchter Traum"), die keine erfuellte Orgasmus-Anforderung erfuellen.
   orgasmBudget            Int?
   orgasmBudgetPeriode     String   @default("WOCHE")
+  orgasmBudgetSetAt       DateTime?
   // Pro-User anpassbare Auswahllisten als JSON-Array [{code,label?}] (TEXT). null = eingebaute
   // Standardliste (Bestandsnutzer unverändert). Öffnungsgründe enthalten IMMER die geschützten
   // Built-ins "REINIGUNG" und "TOILETTE" (Code fix, nur Label umbenennbar). Siehe reasonsService.ts.

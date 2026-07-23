@@ -74,6 +74,8 @@ export interface StrafbuchOverview {
   pauseOverageViolations: ({ time: string | null; device: string | null; grund: string | null; dauerMin: number; maxMin: number } & OffenseJudgment)[];
   /** REINIGUNG openings not (or too late) followed by a VERSCHLUSS within the re-lock deadline. */
   cleaningNotRelocked: ({ time: string; deadline: string; relockedAt: string | null; note: string | null } & OffenseJudgment)[];
+  /** Orgasmen ueber dem Orgasmus-Budget des laufenden Zeitraums. */
+  orgasmOverBudgetViolations: ({ time: string | null; orgasmusArt: string | null; used: number; limit: number } & OffenseJudgment)[];
 }
 
 /** Baut den Strafbuch-Snapshot. Nimmt den bereits aufgelösten User: `getOffenses` hat ihn ohnehin
@@ -192,6 +194,13 @@ async function mcpStrafbuch(userId: string, timezone: string, now: Date): Promis
       relockedAt: c.relockAt ? fmt(c.relockAt) : null,
       note: c.note,
       ...judge("cleaning_not_relocked", cleaningNotRelockedRef(c.entryId)),
+    })),
+    orgasmOverBudgetViolations: sb.orgasmOverBudgetViolations.map((v) => ({
+      time: v.startTime ? fmt(v.startTime) : null,
+      orgasmusArt: v.orgasmusArt,
+      used: v.used,
+      limit: v.limit,
+      ...judge("orgasm_over_budget", v.entryId),
     })),
   };
 }
@@ -315,6 +324,7 @@ export function buildOffenseRows(
     ...sb.pauseOverageViolations.map((v) => toRow(v.time, v, { device: v.device, grund: v.grund, dauerMin: v.dauerMin, maxMin: v.maxMin })),
     ...sb.lateLocks.map((a) => toRow(a.fulfilledAt ?? a.deadline, a, { deadline: a.deadline, fulfilledAt: a.fulfilledAt, message: a.message, categoryName: a.categoryName })),
     ...sb.cleaningNotRelocked.map((c) => toRow(c.relockedAt ?? c.deadline, c, { time: c.time, deadline: c.deadline, relockedAt: c.relockedAt, note: c.note })),
+    ...sb.orgasmOverBudgetViolations.map((v) => toRow(v.time, v, { orgasmusArt: v.orgasmusArt, used: v.used, limit: v.limit })),
   ];
 }
 

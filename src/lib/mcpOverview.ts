@@ -699,6 +699,8 @@ export interface StrafbuchOverview {
   erektionViolations: ({ time: string | null; oeffnenGrund: string | null; note: string | null } & OffenseJudgment)[];
   /** Completed pauses that exceeded the configured max duration. */
   pauseOverageViolations: ({ time: string | null; device: string | null; grund: string | null; dauerMin: number; maxMin: number } & OffenseJudgment)[];
+  /** Orgasmen ueber dem Orgasmus-Budget des laufenden Zeitraums. */
+  orgasmOverBudgetViolations: ({ time: string | null; orgasmusArt: string | null; used: number; limit: number } & OffenseJudgment)[];
 }
 
 /** Builds the Strafbuch snapshot for the user. Throws if the user does not exist. */
@@ -826,6 +828,13 @@ export async function mcpStrafbuch(username: string, opts: McpFormatOptions = {}
       dauerMin: v.dauerMin,
       maxMin: v.maxMin,
       ...judge("pause_overage", v.entryId),
+    })),
+    orgasmOverBudgetViolations: sb.orgasmOverBudgetViolations.map((v) => ({
+      time: v.startTime ? fmt(v.startTime) : null,
+      orgasmusArt: v.orgasmusArt,
+      used: v.used,
+      limit: v.limit,
+      ...judge("orgasm_over_budget", v.entryId),
     })),
   };
 }

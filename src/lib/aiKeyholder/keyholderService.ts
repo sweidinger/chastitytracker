@@ -293,6 +293,8 @@ async function buildMessageHistory(
         lines.push(`- Erektion beim Öffnen (${o.oeffnenGrund ?? "?"}) am ${o.time ?? "?"} (Urteil: ${o.judgment})`);
       for (const o of sb.pauseOverageViolations)
         lines.push(`- Pause zu lang (${o.device ?? "?"}/${o.grund ?? "?"}, ${o.dauerMin} Min statt max ${o.maxMin} Min) am ${o.time ?? "?"} (Urteil: ${o.judgment})`);
+      for (const o of sb.orgasmOverBudgetViolations)
+        lines.push(`- Orgasmus über Budget (${o.orgasmusArt ?? "?"}, ${o.used}/${o.limit}) am ${o.time ?? "?"} (Urteil: ${o.judgment})`);
       strafbuchText = `\n\n--- Strafbuch ---\n${lines.join("\n")}${SEVERITY_GUIDANCE_TEXT}`;
     }
   } catch { /* non-fatal */ }
@@ -952,6 +954,8 @@ export async function runAutonomousAction(
         lines.push(`- Erektion beim Öffnen (${o.oeffnenGrund ?? "?"}) am ${o.time ?? "?"} (Urteil: ${o.judgment})`);
       for (const o of sb.pauseOverageViolations)
         lines.push(`- Pause zu lang (${o.device ?? "?"}/${o.grund ?? "?"}, ${o.dauerMin} Min statt max ${o.maxMin} Min) am ${o.time ?? "?"} (Urteil: ${o.judgment})`);
+      for (const o of sb.orgasmOverBudgetViolations)
+        lines.push(`- Orgasmus über Budget (${o.orgasmusArt ?? "?"}, ${o.used}/${o.limit}) am ${o.time ?? "?"} (Urteil: ${o.judgment})`);
       strafbuchText = `\n\n--- Strafbuch ---\n${lines.join("\n")}${SEVERITY_GUIDANCE_TEXT}`;
     }
   } catch { /* non-fatal */ }

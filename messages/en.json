@@ -1252,6 +1252,7 @@
     "orgasmBudgetPeriodeLabel": "Period",
     "orgasmBudgetPeriodeWoche": "per week",
     "orgasmBudgetPeriodeMonat": "per month",
+    "strafbuchOrgasmusUeberBudget": "Orgasm over budget",
     "toiletteErlaubtLabel": "Allow toilet opening",
     "toiletteErlaubtHint": "Toilet openings don't break the lock and aren't flagged as unauthorised openings (provided the user is generally allowed to use the toilet).",
     "notifyGroupPause": "Pauses",
