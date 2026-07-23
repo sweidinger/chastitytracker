@@ -1,5 +1,19 @@
 [
   {
+    "version": "4.111.0",
+    "date": "2026-07-23",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "Anzeige der verfuegbaren Reinigungs-/Toilettenpausen in der Session-Karte zeigte rohe Uebersetzungs-Schluessel statt Text (fehlende i18n-Keys) \u2013 behoben. Es ist ein Tageskontingent (Reset taeglich), keine Pro-Session-Zaehlung."
+      },
+      {
+        "type": "fix",
+        "text": "Die KI-Keyholderin sieht in ihrer Geraeteliste jetzt zu jedem Geraet die Groessen-Reihenfolge und Beschreibung (Durchmesser/Gewicht) und kann bei mehreren gleichartigen Geraeten (z.B. Plugs) bewusst nach Groesse waehlen. Das Erfass-Formular bleibt wie bisher auf das gewaehlte Geraet fixiert."
+      }
+    ]
+  },
+  {
     "version": "4.110.1",
     "date": "2026-07-22",
     "changes": [

@@ -15,16 +15,26 @@ async function buildDeviceListText(userId: string): Promise<string> {
       where: { userId, archivedAt: null },
       include: { category: { select: { name: true, slug: true } } },
     });
-    const kgCages = devices.filter((d) => d.category?.slug === "kg").map((d) => d.name);
+    // Detail je Gerät: Größen-Reihenfolge (sortOrder) + Beschreibung (enthält oft Durchmesser/Gewicht),
+    // damit der Keyholder bei mehreren gleichartigen Geräten (z.B. Plugs) BEWUSST nach Größe wählen kann.
+    const detailOf = (d: { sortOrder: number; description: string | null }) =>
+      [`Größe ${d.sortOrder}`, d.description?.trim()].filter(Boolean).join("; ");
+    const fmt = (d: { name: string; sortOrder: number; description: string | null }, cat?: string) => {
+      const detail = detailOf(d);
+      return `${d.name}${cat ? ` (${cat})` : ""}${detail ? ` [${detail}]` : ""}`;
+    };
+    const bySize = (a: { sortOrder: number }, b: { sortOrder: number }) => a.sortOrder - b.sortOrder;
+    const kgCages = devices.filter((d) => d.category?.slug === "kg").sort(bySize).map((d) => fmt(d));
     const nonKgDevices = devices
       .filter((d) => d.category?.slug !== "kg")
-      .map((d) => `${d.name} (${d.category?.name ?? "?"})`);
+      .sort(bySize)
+      .map((d) => fmt(d, d.category?.name ?? "?"));
 
     const parts: string[] = [];
     if (kgCages.length > 0) parts.push(`KG-Käfige (für anforderungDeviceName): ${kgCages.join(", ")}`);
     if (nonKgDevices.length > 0) parts.push(`Andere Geräte (für wearDeviceName): ${nonKgDevices.join(", ")}`);
     return parts.length > 0
-      ? `\n\n--- Verfügbare Geräte des Users (Namen EXAKT übernehmen) ---\n${parts.join("\n")}`
+      ? `\n\n--- Verfügbare Geräte des Users (Namen EXAKT übernehmen; bei mehreren gleichartigen Geräten wähle bewusst anhand Größe/Beschreibung) ---\n${parts.join("\n")}`
       : "";
   } catch {
     return "";

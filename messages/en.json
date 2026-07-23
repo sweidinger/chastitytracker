@@ -405,7 +405,12 @@
     "deviceLabelPlug": "Plug",
     "pauseRunning": "Pause active:",
     "pauseStart": "Start pause",
-    "pauseEnd": "End pause"
+    "pauseEnd": "End pause",
+    "pauseQuotaLabel": "Available pauses",
+    "pauseGrundReinigung": "Cleaning",
+    "pauseGrundToilette": "Toilet",
+    "pauseQuotaRemaining": "{remaining}/{max} left",
+    "pauseQuotaUnlimited": "unlimited"
   },
   "newEntry": {
     "title": "New entry",
