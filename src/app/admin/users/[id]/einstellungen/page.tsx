@@ -4,6 +4,7 @@ import { assertKeyholderOrAdmin } from "@/lib/authGuards";
 import RoleSelect from "@/app/admin/RoleSelect";
 import ReinigungToggle from "@/app/admin/ReinigungToggle";
 import ToiletteToggle from "@/app/admin/ToiletteToggle";
+import OrgasmusBudgetToggle from "@/app/admin/OrgasmusBudgetToggle";
 import PlugToggle from "@/app/admin/PlugToggle";
 import AutoKontrolleToggle from "@/app/admin/AutoKontrolleToggle";
 import InspectionEscalationToggle from "@/app/admin/InspectionEscalationToggle";
@@ -126,6 +127,15 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
             />
           </div>
         </div>
+      </SettingsSection>
+
+      {/* Orgasmus-Budget */}
+      <SettingsSection title={t("sectionOrgasmBudget")} description={t("sectionOrgasmBudgetDesc")} bodyPadded>
+        <OrgasmusBudgetToggle
+          userId={user.id}
+          initialBudget={user.orgasmBudget}
+          initialPeriode={user.orgasmBudgetPeriode}
+        />
       </SettingsSection>
 
       {/* Anal-Plug — Reinigung + Toilette */}
