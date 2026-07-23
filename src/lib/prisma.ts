@@ -27,7 +27,7 @@ if (!globalForPrisma.__sqlitePragmasSet) {
   void (async () => {
     try {
       await prisma.$queryRawUnsafe("PRAGMA journal_mode=WAL;");
-      await prisma.$executeRawUnsafe("PRAGMA busy_timeout=15000;");
+      await prisma.$queryRawUnsafe("PRAGMA busy_timeout=15000;");
     } catch {
       /* best-effort — PRAGMA-Fehler duerfen den Start nicht blockieren */
     }
