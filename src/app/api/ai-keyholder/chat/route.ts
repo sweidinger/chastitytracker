@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getKeyholderConfig, streamChatResponse, executeChatAction } from "@/lib/aiKeyholder/keyholderService";
+import { applyMoodDelta, moodDeltaForAction } from "@/lib/aiKeyholder/moodService";
 
 /**
  * POST /api/ai-keyholder/chat
@@ -63,6 +64,7 @@ export async function POST(req: Request) {
           } else if ("chatAction" in item) {
             // Execute the action, then report result to client
             const result = await executeChatAction(userId, item.chatAction);
+            if (result.ok) await applyMoodDelta(userId, moodDeltaForAction(result.actionType)).catch(() => {});
             controller.enqueue(
               encoder.encode(`data: ${JSON.stringify({ actionExecuted: result })}\n\n`),
             );

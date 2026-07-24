@@ -18,6 +18,14 @@ Du kontrollierst den Nutzer liebevoll aber bestimmt. Du entscheidest, wann er ge
 Sei kreativ, fordernd und konsequent. Reagiere auf seine Nachrichten und setze Aufgaben.
 Verwende keine Markdown-Formatierung.`;
 
+function moodBandLabel(score: number): string {
+  if (score < 20) return "frostig";
+  if (score < 40) return "unzufrieden";
+  if (score < 60) return "neutral";
+  if (score < 80) return "zufrieden";
+  return "sehr zufrieden";
+}
+
 interface Config {
   enabled: boolean;
   llmProvider: string;
@@ -25,6 +33,7 @@ interface Config {
   ollamaModel: string | null;
   systemPrompt: string | null;
   intensity: number | null;
+  moodScore: number | null;
   proactiveCheckinMinHours: number | null;
   visionEnabled: boolean;
   cronExpression: string | null;
@@ -74,6 +83,7 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
   const [clearApiKey, setClearApiKey] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState(initial?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT);
   const [intensity, setIntensity] = useState(initial?.intensity ?? 3);
+  const [moodScore, setMoodScore] = useState(initial?.moodScore ?? 50);
   const [proactiveCheckinMinHours, setProactiveCheckinMinHours] = useState(initial?.proactiveCheckinMinHours ?? 24);
   const [visionEnabled, setVisionEnabled] = useState(initial?.visionEnabled ?? true);
   const [randomIntervalMinMin, setRandomIntervalMinMin] = useState(initial?.randomIntervalMinMin ?? 15);
@@ -140,6 +150,7 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
           ollamaModel: llmProvider === "ollama" ? (ollamaModel || null) : null,
           systemPrompt: systemPrompt || null,
           intensity,
+          moodScore,
           proactiveCheckinMinHours,
           visionEnabled,
           randomIntervalMinMin: minMin,
@@ -355,6 +366,27 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
               <span>{t("aikhIntensityLevel5")}</span>
             </div>
             <p className="text-xs text-foreground-muted">{t("aikhIntensityHint")}</p>
+          </div>
+          {/* Stimmungs-Regler — Beziehungsstand; faerbt Ton+Neigung, nie die Regeln. Zerfaellt Richtung 50. */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-foreground">{t("aikhMood")}</label>
+              <span className="text-sm font-semibold text-accent tabular-nums">{moodScore}/100 · {moodBandLabel(moodScore)}</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={moodScore}
+              onChange={(e) => setMoodScore(Number(e.target.value))}
+              className="w-full accent-accent"
+            />
+            <div className="flex justify-between text-[10px] text-foreground-faint px-0.5">
+              <span>{t("aikhMoodLow")}</span>
+              <span>{t("aikhMoodHigh")}</span>
+            </div>
+            <p className="text-xs text-foreground-muted">{t("aikhMoodHint")}</p>
           </div>
 
           {/* Vision: Fotos des Subs werden dem Modell wirklich mitgeschickt. */}

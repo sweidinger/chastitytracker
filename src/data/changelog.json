@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.117.0",
+    "date": "2026-07-24",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Stimmungsstand der KI-Keyholderin (Stufe 3): Die Keyholderin hat jetzt einen Beziehungs-/Stimmungsstand (0\u2013100), der sich aus euren Interaktionen entwickelt \u2013 Belohnungen heben ihn, Strafen senken ihn \u2013 und mit der Zeit Richtung neutral zerf\u00e4llt. Er f\u00e4rbt ihren Ton UND ihre autonome Neigung (gro\u00dfz\u00fcgiger vs. strenger), \u00e4ndert aber nie die Sicherheitsregeln. Der Sub sieht im Chat einen dezenten Hinweis auf ihre Stimmung; im Admin l\u00e4sst sie sich anzeigen und manuell setzen."
+      }
+    ]
+  },
+  {
     "version": "4.116.0",
     "date": "2026-07-23",
     "changes": [
