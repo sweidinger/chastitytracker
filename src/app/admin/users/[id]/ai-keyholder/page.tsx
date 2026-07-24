@@ -20,6 +20,12 @@ export default async function AiKeyholderPage({ params }: { params: Promise<{ id
 
   if (!user) redirect("/admin");
 
+  const moodHistory = config
+    ? (await prisma.moodEvent.findMany({ where: { userId: id }, orderBy: { createdAt: "desc" }, take: 24, select: { newScore: true } }))
+        .map((m) => m.newScore)
+        .reverse()
+    : [];
+
   return (
     <div className="flex flex-col gap-4">
       <div className="mb-1">
@@ -34,6 +40,7 @@ export default async function AiKeyholderPage({ params }: { params: Promise<{ id
         randomIntervalMinMin={config?.randomIntervalMinMin ?? 15}
         randomIntervalMinMax={config?.randomIntervalMinMax ?? 120}
         moodScore={config ? effectiveMood({ moodScore: config.moodScore, moodUpdatedAt: config.moodUpdatedAt }) : null}
+        moodHistory={moodHistory}
       />
 
       {/* Configuration form */}

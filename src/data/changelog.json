@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.119.0",
+    "date": "2026-07-24",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Stimmungs-Verlauf: Jede Aenderung des Stimmungsstands der KI-Keyholderin wird protokolliert. Das Admin-Status-Panel zeigt jetzt eine kleine Trendkurve der letzten Aenderungen neben dem aktuellen Wert."
+      }
+    ]
+  },
+  {
     "version": "4.118.0",
     "date": "2026-07-24",
     "changes": [

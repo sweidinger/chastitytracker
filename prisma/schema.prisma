@@ -90,6 +90,7 @@ model User {
   // ebenfalls. Vorgemerkte werden über offene istBelohnung-GELEGENHEITEN gezählt (nicht hier).
   verdienteOrgasmen     Int                    @default(0)
   entries               Entry[]
+  moodEvents            MoodEvent[]
   notificationPrefs     NotificationPreference[]
   vorgaben              TrainingVorgabe[]
   passwordResetTokens   PasswordResetToken[]
@@ -1023,3 +1024,14 @@ model Tagesform {
   @@index([userId, datum(sort: Desc)])
 }
 
+model MoodEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  delta     Int
+  newScore  Int
+  reason    String
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}

@@ -1608,7 +1608,7 @@ export async function runAutonomousAction(
       },
     });
 
-    await applyMoodDelta(userId, moodDeltaForAction(decision.action)).catch(() => {});
+    await applyMoodDelta(userId, moodDeltaForAction(decision.action), `auto:${decision.action}`).catch(() => {});
 
     return { acted: true, summary: decision.message };
   } catch (e) {
