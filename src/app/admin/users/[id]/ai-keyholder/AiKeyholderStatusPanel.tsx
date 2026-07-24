@@ -77,6 +77,26 @@ interface AiKeyholderStatusPanelProps {
   randomIntervalMinMin: number;
   randomIntervalMinMax: number;
   moodScore: number | null;
+  moodHistory: number[];
+}
+
+function MoodSparkline({ points }: { points: number[] }) {
+  if (points.length < 2) return null;
+  const w = 96, h = 22, pad = 2;
+  const coords = points
+    .map((p, i) => {
+      const x = pad + (i / (points.length - 1)) * (w - 2 * pad);
+      const y = pad + (1 - Math.max(0, Math.min(100, p)) / 100) * (h - 2 * pad);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const midY = pad + (1 - 50 / 100) * (h - 2 * pad);
+  return (
+    <svg width={w} height={h} className="shrink-0" aria-hidden>
+      <line x1={pad} y1={midY} x2={w - pad} y2={midY} stroke="currentColor" strokeWidth={0.5} className="text-foreground-faint" />
+      <polyline points={coords} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" className="text-accent" />
+    </svg>
+  );
 }
 
 function moodBandLabel(score: number): string {
@@ -93,6 +113,7 @@ export default function AiKeyholderStatusPanel({
   randomIntervalMinMin,
   randomIntervalMinMax,
   moodScore,
+  moodHistory,
 }: AiKeyholderStatusPanelProps) {
   const t = useTranslations("admin");
 
@@ -205,6 +226,7 @@ export default function AiKeyholderStatusPanel({
           <div className="flex items-center gap-2 text-sm">
             <span className="text-foreground-muted">{t("aikhStatusMood")}:</span>
             <span className="font-semibold text-accent tabular-nums">{moodBandLabel(moodScore)} · {moodScore}/100</span>
+            <MoodSparkline points={moodHistory} />
           </div>
         )}
 

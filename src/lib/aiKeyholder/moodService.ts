@@ -78,7 +78,7 @@ export function moodDeltaForAction(action: string | null | undefined): number {
 
 /** Wendet ein Delta auf die Stimmung an (mit vorherigem Zerfall). No-op ohne AI-Keyholder-Config.
  *  Fire-and-forget geeignet (Aufrufer sollten Fehler abfangen). */
-export async function applyMoodDelta(userId: string, delta: number, now: Date = new Date()): Promise<void> {
+export async function applyMoodDelta(userId: string, delta: number, reason: string, now: Date = new Date()): Promise<void> {
   if (!delta) return;
   const cfg = await prisma.aiKeyholderConfig.findUnique({
     where: { userId },
@@ -88,4 +88,5 @@ export async function applyMoodDelta(userId: string, delta: number, now: Date = 
   const base = decayedMood(cfg.moodScore, cfg.moodUpdatedAt, now);
   const next = clampMood(base + delta);
   await prisma.aiKeyholderConfig.update({ where: { userId }, data: { moodScore: next, moodUpdatedAt: now } });
+  await prisma.moodEvent.create({ data: { userId, delta, newScore: next, reason } });
 }

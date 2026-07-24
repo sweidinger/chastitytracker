@@ -141,6 +141,9 @@ export async function PATCH(
     create: { userId, ...data },
     update: data,
   });
+  if (typeof body.moodScore === "number") {
+    await prisma.moodEvent.create({ data: { userId, delta: 0, newScore: config.moodScore, reason: "manuell" } });
+  }
 
   // Never return the encrypted keys
   const { anthropicApiKeyEnc, mediaApiKeyEnc, ...safeConfig } = config;

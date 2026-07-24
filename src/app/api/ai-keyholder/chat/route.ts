@@ -64,7 +64,7 @@ export async function POST(req: Request) {
           } else if ("chatAction" in item) {
             // Execute the action, then report result to client
             const result = await executeChatAction(userId, item.chatAction);
-            if (result.ok) await applyMoodDelta(userId, moodDeltaForAction(result.actionType)).catch(() => {});
+            if (result.ok) await applyMoodDelta(userId, moodDeltaForAction(result.actionType), `chat:${result.actionType}`).catch(() => {});
             controller.enqueue(
               encoder.encode(`data: ${JSON.stringify({ actionExecuted: result })}\n\n`),
             );

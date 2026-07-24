@@ -214,7 +214,7 @@ export async function autoGrantReachedGoals(userId: string, now: Date = new Date
     if (r.ok) credited++;
   }
   // Erreichte Trainingsziele waermen die Beziehung zur KI-Keyholderin (No-op ohne KI-Keyholder).
-  if (credited > 0) await applyMoodDelta(userId, moodDeltaForAction("goal_reached")).catch(() => {});
+  if (credited > 0) await applyMoodDelta(userId, moodDeltaForAction("goal_reached"), "goal_reached").catch(() => {});
   return credited;
 }
 
