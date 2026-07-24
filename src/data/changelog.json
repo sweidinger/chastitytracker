@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.120.0",
+    "date": "2026-07-24",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Stimmungs-Ereignisse: Erreicht der Stimmungsstand der KI-Keyholderin ein Extrem, meldet sie sich spontan \u2013 bei sehr hoher Stimmung mit einer warmen Geste, bei sehr niedriger mit einer ernsten Ermahnung. Mit Zeitdrossel (max. alle 12 h) und nur bei Band-Wechsel; ernste Ermahnungen entfallen bei aktivem Gesundheits-Stopp."
+      }
+    ]
+  },
+  {
     "version": "4.119.0",
     "date": "2026-07-24",
     "changes": [

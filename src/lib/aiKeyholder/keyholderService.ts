@@ -10,7 +10,7 @@ import { createVerschlussAnforderung } from "@/lib/verschlussAnforderungService"
 import { createOrgasmusAnforderung } from "@/lib/orgasmusAnforderungService";
 import { createVorgabe } from "@/lib/vorgabeService";
 import { setOrgasmBudgetSettings } from "@/lib/orgasmBudgetService";
-import { moodGuidance, moodDeltaForAction, applyMoodDelta } from "@/lib/aiKeyholder/moodService";
+import { moodGuidance, moodDeltaForAction, applyMoodDelta, effectiveMood } from "@/lib/aiKeyholder/moodService";
 import { getIsLocked, getUserTimezone } from "@/lib/queries";
 import { formatDateTime, formatTime } from "@/lib/utils";
 import { grantBelohnung, grantGutschrift, computeBelohnbar, denyReward, delayReward, REWARD_GUIDANCE_TEXT } from "@/lib/belohnung";
@@ -892,12 +892,56 @@ export async function executeChatAction(
  * Called by the cron endpoint. The agent receives a full overview snapshot,
  * decides whether to act, and optionally creates a task or sends a push.
  */
+/** Spontane Reaktionen bei sehr hoher/niedriger Stimmung — warme Geste bzw. ernste Ermahnung.
+ *  Getemplatet, mit Band-Wechsel-Bedingung + Zeitdrossel; kein LLM-Aufruf. */
+const MOOD_EVENT_HIGH = [
+  "Ich bin gerade sehr zufrieden mit dir. Dein Gehorsam entgeht mir nicht — mach weiter so.",
+  "Du hast dich zuletzt vorbildlich verhalten. Das gefällt mir sehr.",
+  "Im Moment bin ich richtig stolz auf dich. Genieße dieses Gefühl — du hast es dir verdient.",
+];
+const MOOD_EVENT_LOW = [
+  "Meine Geduld mit dir ist nahezu erschöpft. Reiß dich ab sofort zusammen.",
+  "Ich bin ausgesprochen unzufrieden mit dir. Das ändert sich jetzt — sonst gibt es Konsequenzen.",
+  "Du hast mich enttäuscht. Ich erwarte ab sofort deutlich mehr Disziplin von dir.",
+];
+function pickMoodEventMessage(band: "high" | "low"): string {
+  const pool = band === "high" ? MOOD_EVENT_HIGH : MOOD_EVENT_LOW;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+/** Feuert ein Stimmungs-Ereignis, wenn die (zerfallene) Stimmung ein Extrem-Band erreicht, das Band
+ *  seit dem letzten Ereignis gewechselt hat und die Zeitdrossel (12 h) abgelaufen ist. Stern-Ereignisse
+ *  entfallen bei Gesundheits-Stopp. Gibt ein Ergebnis zurueck (dann autonomen LLM-Lauf ueberspringen). */
+async function maybeFireMoodEvent(
+  userId: string,
+  cfg: { moodScore: number | null; moodUpdatedAt: Date | null; lastMoodEventBand: string | null; lastMoodEventAt: Date | null },
+  now: Date,
+): Promise<{ acted: boolean; summary: string } | null> {
+  const score = effectiveMood({ moodScore: cfg.moodScore, moodUpdatedAt: cfg.moodUpdatedAt }, now);
+  const band: "high" | "low" | null = score >= 80 ? "high" : score < 20 ? "low" : null;
+  if (!band) {
+    if (cfg.lastMoodEventBand) await prisma.aiKeyholderConfig.update({ where: { userId }, data: { lastMoodEventBand: null } });
+    return null;
+  }
+  if (cfg.lastMoodEventBand === band) return null;
+  const MIN_HOURS = 12;
+  if (cfg.lastMoodEventAt && now.getTime() - cfg.lastMoodEventAt.getTime() < MIN_HOURS * 3_600_000) return null;
+  if (band === "low" && (await isHealthHoldActive(userId))) return null;
+  const msg = pickMoodEventMessage(band);
+  await prisma.aiKeyholderMessage.create({ data: { userId, role: "assistant", content: msg } });
+  await prisma.aiKeyholderConfig.update({ where: { userId }, data: { lastMoodEventBand: band, lastMoodEventAt: now, lastRunAt: now } });
+  await sendPushToUser(userId, "Deine Keyholderin meldet sich", msg.slice(0, 100), "/dashboard/keyholder");
+  return { acted: true, summary: `mood event (${band})` };
+}
+
 export async function runAutonomousAction(
   userId: string,
   username: string,
 ): Promise<{ acted: boolean; summary: string }> {
   const cfg = await getKeyholderConfig(userId);
   if (!cfg?.enabled) return { acted: false, summary: "not enabled" };
+
+  const moodEvent = await maybeFireMoodEvent(userId, cfg, new Date());
+  if (moodEvent) return moodEvent;
 
   let overviewText = "";
   let autoTagesform: TagesformView | undefined;
