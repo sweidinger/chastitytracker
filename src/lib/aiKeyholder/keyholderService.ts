@@ -9,10 +9,10 @@ import { requestKontrolle } from "@/lib/kontrolleService";
 import { createVerschlussAnforderung } from "@/lib/verschlussAnforderungService";
 import { createOrgasmusAnforderung } from "@/lib/orgasmusAnforderungService";
 import { createVorgabe } from "@/lib/vorgabeService";
-import { setOrgasmBudgetSettings } from "@/lib/orgasmBudgetService";
-import { moodGuidance, moodDeltaForAction, applyMoodDelta, effectiveMood } from "@/lib/aiKeyholder/moodService";
+import { setOrgasmBudgetSettings, getOrgasmusBudgetState } from "@/lib/orgasmBudgetService";
+import { moodGuidance, moodDeltaForAction, applyMoodDelta, effectiveMood, moodBand } from "@/lib/aiKeyholder/moodService";
 import { getIsLocked, getUserTimezone } from "@/lib/queries";
-import { formatDateTime, formatTime } from "@/lib/utils";
+import { formatDateTime, formatTime, APP_TZ } from "@/lib/utils";
 import { grantBelohnung, grantGutschrift, computeBelohnbar, denyReward, delayReward, REWARD_GUIDANCE_TEXT } from "@/lib/belohnung";
 import { findRegionConflict } from "@/lib/bodyRegion";
 import { isHealthHoldActive } from "@/lib/healthHoldService";
@@ -933,6 +933,64 @@ async function maybeFireMoodEvent(
   return { acted: true, summary: `mood event (${band})` };
 }
 
+/** Woechentlicher Rueckblick in Persona-Stimme (per LLM, mit Template-Fallback). Getriggert aus dem
+ *  autonomen Lauf, gedrosselt ueber lastWeeklyReviewAt (~alle 7 Tage). Erster Rueckblick 7 Tage nach
+ *  Aktivierung. Gibt ein Ergebnis zurueck (dann autonomen LLM-Lauf ueberspringen). */
+async function maybeWeeklyReview(
+  userId: string,
+  cfg: AiKeyholderConfig,
+  now: Date,
+): Promise<{ acted: boolean; summary: string } | null> {
+  const WEEK_MS = 7 * 86_400_000;
+  if (!cfg.lastWeeklyReviewAt) {
+    await prisma.aiKeyholderConfig.update({ where: { userId }, data: { lastWeeklyReviewAt: now } });
+    return null;
+  }
+  if (now.getTime() - cfg.lastWeeklyReviewAt.getTime() < WEEK_MS) return null;
+
+  const weekAgo = new Date(now.getTime() - WEEK_MS);
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { timezone: true } });
+  const tz = user?.timezone ?? APP_TZ;
+  const [orgasms7d, kAngefordert, kBeantwortet, strafen7d, lastOrgasm, budget] = await Promise.all([
+    prisma.entry.count({ where: { userId, type: "ORGASMUS", startTime: { gte: weekAgo } } }),
+    prisma.kontrollAnforderung.count({ where: { userId, createdAt: { gte: weekAgo } } }),
+    prisma.entry.count({ where: { userId, type: "PRUEFUNG", startTime: { gte: weekAgo } } }),
+    prisma.strafeRecord.count({ where: { userId, createdAt: { gte: weekAgo } } }),
+    prisma.entry.findFirst({ where: { userId, type: "ORGASMUS" }, orderBy: { startTime: "desc" }, select: { startTime: true } }),
+    getOrgasmusBudgetState(userId, now, tz),
+  ]);
+  const denialDays = lastOrgasm ? Math.floor((now.getTime() - lastOrgasm.startTime.getTime()) / 86_400_000) : null;
+  const moodLabel = moodBand(effectiveMood({ moodScore: cfg.moodScore, moodUpdatedAt: cfg.moodUpdatedAt }, now)).label;
+  const budgetLine = budget.limit != null ? `${budget.used}/${budget.limit} pro ${budget.periode === "MONAT" ? "Monat" : "Woche"}` : "kein Budget gesetzt";
+  const statsText = [
+    "Zahlen der letzten 7 Tage:",
+    `- Orgasmen: ${orgasms7d}`,
+    denialDays != null ? `- Aktuelle orgasmusfreie Straehne: ${denialDays} Tage` : "- Noch kein Orgasmus erfasst",
+    `- Kontrollen angefordert: ${kAngefordert}, davon beantwortet: ${kBeantwortet}`,
+    `- Neue Strafen: ${strafen7d}`,
+    `- Orgasmus-Budget: ${budgetLine}`,
+    `- Deine aktuelle Stimmung ihm gegenueber: ${moodLabel}`,
+  ].join("\n");
+
+  let review = "";
+  try {
+    review = (await llmChat(toLlmConfig(cfg), [
+      { role: "system", content: buildSystemPrompt(cfg) },
+      { role: "user", content: `Schreibe dem Sub einen kurzen, persoenlichen Wochenrueckblick in deiner Rolle als Keyholderin (2-5 Saetze, keine Markdown-Formatierung, keine Aufzaehlung). Fasse die folgenden Zahlen in deiner Art zusammen (lobend/tadelnd je nach Verhalten) und schliesse mit einer klaren Erwartung fuer die kommende Woche.\n\n${statsText}` },
+    ])).trim();
+  } catch {
+    review = "";
+  }
+  if (!review) {
+    review = `Wochenrueckblick: In den letzten 7 Tagen ${orgasms7d} Orgasmus/Orgasmen${denialDays != null ? `, aktuelle Straehne ${denialDays} Tage` : ""}, ${kAngefordert} Kontrolle(n) angefordert (${kBeantwortet} beantwortet), ${strafen7d} neue Strafe(n). Ich erwarte naechste Woche mindestens dieselbe Disziplin.`;
+  }
+
+  await prisma.aiKeyholderMessage.create({ data: { userId, role: "assistant", content: review } });
+  await prisma.aiKeyholderConfig.update({ where: { userId }, data: { lastWeeklyReviewAt: now, lastRunAt: now } });
+  await sendPushToUser(userId, "Wochenrueckblick deiner Keyholderin", review.slice(0, 100), "/dashboard/keyholder");
+  return { acted: true, summary: "weekly review" };
+}
+
 export async function runAutonomousAction(
   userId: string,
   username: string,
@@ -942,6 +1000,8 @@ export async function runAutonomousAction(
 
   const moodEvent = await maybeFireMoodEvent(userId, cfg, new Date());
   if (moodEvent) return moodEvent;
+  const weekly = await maybeWeeklyReview(userId, cfg, new Date());
+  if (weekly) return weekly;
 
   let overviewText = "";
   let autoTagesform: TagesformView | undefined;
