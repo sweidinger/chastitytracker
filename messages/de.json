@@ -1347,6 +1347,7 @@
     "aikhSaved": "Einstellungen gespeichert.",
     "aikhSave": "Speichern",
     "aikhStatusTitle": "Status & Warteschlange",
+    "aikhStatusMood": "Stimmung",
     "aikhStatusRefresh": "Aktualisieren",
     "aikhStatusMediaQueue": "Medien-Warteschlange",
     "aikhStatus_queued": "Ausstehend",

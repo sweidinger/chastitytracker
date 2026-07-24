@@ -6,6 +6,7 @@ import { isKgVorgabe } from "@/lib/vorgaben";
 import { proratedVorgabeTargets, type GoalPeriod } from "@/lib/goalFulfillment";
 import { createOrgasmusAnforderung } from "@/lib/orgasmusAnforderungService";
 import { notifyUser } from "@/lib/notify";
+import { applyMoodDelta, moodDeltaForAction } from "@/lib/aiKeyholder/moodService";
 
 /** Kompakte Leitlinie zur Belohnungs-Ökonomie — geteilt vom AI-Kontext (analog zu SEVERITY_GUIDANCE_TEXT). */
 export const REWARD_GUIDANCE_TEXT = [
@@ -212,6 +213,8 @@ export async function autoGrantReachedGoals(userId: string, now: Date = new Date
     const r = await grantGutschrift(userId, z.categoryId, z.periodType, z.periodKey);
     if (r.ok) credited++;
   }
+  // Erreichte Trainingsziele waermen die Beziehung zur KI-Keyholderin (No-op ohne KI-Keyholder).
+  if (credited > 0) await applyMoodDelta(userId, moodDeltaForAction("goal_reached")).catch(() => {});
   return credited;
 }
 

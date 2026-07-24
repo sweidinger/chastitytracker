@@ -71,6 +71,7 @@ export function moodDeltaForAction(action: string | null | undefined): number {
     case "delay_orgasm": return -5;
     case "grant_reward": return 6;
     case "credit_reward": return 5;
+    case "goal_reached": return 5;
     default: return 0;
   }
 }
