@@ -858,6 +858,9 @@ model AiKeyholderConfig {
   // zerfaellt ueber die Zeit Richtung neutral. moodUpdatedAt = Zeitpunkt der letzten Aenderung.
   moodScore            Int      @default(50)
   moodUpdatedAt        DateTime?
+  // Drossel fuer Stimmungs-Ereignisse: Band ("high"/"low") + Zeitpunkt des letzten Ereignisses.
+  lastMoodEventBand    String?
+  lastMoodEventAt      DateTime?
   // Vision: Fotos des Subs werden dem Modell wirklich mitgeschickt (nur mit vision-fähigem Modell).
   visionEnabled        Boolean  @default(true)
   // Persona / instructions
