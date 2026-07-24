@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import KeyholderChatClient from "./KeyholderChatClient";
+import { moodHintForSub } from "@/lib/aiKeyholder/moodService";
 
 export default async function KeyholderPage() {
   const session = await auth();
@@ -41,6 +42,12 @@ export default async function KeyholderPage() {
   ]);
 
   return (
+    <>
+      {cfg?.enabled && (
+        <div className="w-full max-w-2xl mx-auto px-4 pt-3 text-center text-xs italic text-foreground-muted">
+          {moodHintForSub({ moodScore: cfg.moodScore, moodUpdatedAt: cfg.moodUpdatedAt })}
+        </div>
+      )}
     <KeyholderChatClient
       enabled={cfg?.enabled ?? false}
       avatarPath={cfg?.avatarPath ?? null}
@@ -63,5 +70,6 @@ export default async function KeyholderPage() {
           : null,
       }))}
     />
+    </>
   );
 }

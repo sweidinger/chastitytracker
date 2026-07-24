@@ -10,6 +10,7 @@ import { createVerschlussAnforderung } from "@/lib/verschlussAnforderungService"
 import { createOrgasmusAnforderung } from "@/lib/orgasmusAnforderungService";
 import { createVorgabe } from "@/lib/vorgabeService";
 import { setOrgasmBudgetSettings } from "@/lib/orgasmBudgetService";
+import { moodGuidance, moodDeltaForAction, applyMoodDelta } from "@/lib/aiKeyholder/moodService";
 import { getIsLocked, getUserTimezone } from "@/lib/queries";
 import { formatDateTime, formatTime } from "@/lib/utils";
 import { grantBelohnung, grantGutschrift, computeBelohnbar, denyReward, delayReward, REWARD_GUIDANCE_TEXT } from "@/lib/belohnung";
@@ -210,7 +211,7 @@ function intensityGuidance(level: number): string {
 }
 
 export function buildSystemPrompt(cfg: AiKeyholderConfig): string {
-  return (cfg.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT) + OVERVIEW_LIMIT_HINWEIS + TIME_GUIDANCE + intensityGuidance(cfg.intensity ?? 3);
+  return (cfg.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT) + OVERVIEW_LIMIT_HINWEIS + TIME_GUIDANCE + intensityGuidance(cfg.intensity ?? 3) + moodGuidance(cfg);
 }
 
 /** Build the full message history for a user to send to the LLM. */
@@ -1606,6 +1607,8 @@ export async function runAutonomousAction(
         ...(decision.action === "send_message" ? { lastCheckinAt: new Date() } : {}),
       },
     });
+
+    await applyMoodDelta(userId, moodDeltaForAction(decision.action)).catch(() => {});
 
     return { acted: true, summary: decision.message };
   } catch (e) {
