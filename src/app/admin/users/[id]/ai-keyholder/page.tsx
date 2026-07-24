@@ -4,6 +4,7 @@ import { assertKeyholderOrAdmin } from "@/lib/authGuards";
 import { getTranslations } from "next-intl/server";
 import AiKeyholderConfigForm from "./AiKeyholderConfigForm";
 import AiKeyholderStatusPanel from "./AiKeyholderStatusPanel";
+import { effectiveMood } from "@/lib/aiKeyholder/moodService";
 
 export default async function AiKeyholderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -32,6 +33,7 @@ export default async function AiKeyholderPage({ params }: { params: Promise<{ id
         nextRunAt={config?.nextRunAt?.toISOString() ?? null}
         randomIntervalMinMin={config?.randomIntervalMinMin ?? 15}
         randomIntervalMinMax={config?.randomIntervalMinMax ?? 120}
+        moodScore={config ? effectiveMood({ moodScore: config.moodScore, moodUpdatedAt: config.moodUpdatedAt }) : null}
       />
 
       {/* Configuration form */}

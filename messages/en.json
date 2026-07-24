@@ -1347,6 +1347,7 @@
     "aikhSaved": "Settings saved.",
     "aikhSave": "Save",
     "aikhStatusTitle": "Status & Queue",
+    "aikhStatusMood": "Mood",
     "aikhStatusRefresh": "Refresh",
     "aikhStatusMediaQueue": "Media Queue",
     "aikhStatus_queued": "Queued",

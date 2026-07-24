@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.118.0",
+    "date": "2026-07-24",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Stimmungsstand-Feinschliff: Erreichte Trainingsziele heben jetzt ebenfalls den Stimmungsstand der KI-Keyholderin. Zusaetzlich zeigt das Admin-Status-Panel die aktuelle Stimmung (Stufe + Wert) auf einen Blick."
+      }
+    ]
+  },
+  {
     "version": "4.117.0",
     "date": "2026-07-24",
     "changes": [

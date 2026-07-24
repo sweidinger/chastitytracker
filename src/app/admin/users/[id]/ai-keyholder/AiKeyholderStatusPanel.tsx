@@ -76,6 +76,15 @@ interface AiKeyholderStatusPanelProps {
   nextRunAt: string | null;
   randomIntervalMinMin: number;
   randomIntervalMinMax: number;
+  moodScore: number | null;
+}
+
+function moodBandLabel(score: number): string {
+  if (score < 20) return "frostig";
+  if (score < 40) return "unzufrieden";
+  if (score < 60) return "neutral";
+  if (score < 80) return "zufrieden";
+  return "sehr zufrieden";
 }
 
 export default function AiKeyholderStatusPanel({
@@ -83,6 +92,7 @@ export default function AiKeyholderStatusPanel({
   nextRunAt: initialNextRunAt,
   randomIntervalMinMin,
   randomIntervalMinMax,
+  moodScore,
 }: AiKeyholderStatusPanelProps) {
   const t = useTranslations("admin");
 
@@ -190,6 +200,13 @@ export default function AiKeyholderStatusPanel({
             </Button>
           </div>
         </div>
+
+        {moodScore != null && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-foreground-muted">{t("aikhStatusMood")}:</span>
+            <span className="font-semibold text-accent tabular-nums">{moodBandLabel(moodScore)} · {moodScore}/100</span>
+          </div>
+        )}
 
         {error && <FormError message={error} />}
 
