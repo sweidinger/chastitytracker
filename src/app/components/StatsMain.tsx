@@ -122,6 +122,13 @@ export default async function StatsMain({ userId, heading, backHref, backLabel, 
   const lastOrgasmus = [...entries].filter((e) => e.type === "ORGASMUS")
     .sort((a, b) => b.startTime.getTime() - a.startTime.getTime())[0] ?? null;
   const orgasmusFreiMs = lastOrgasmus ? now.getTime() - lastOrgasmus.startTime.getTime() : null;
+  const orgasmusAsc = [...entries].filter((e) => e.type === "ORGASMUS").sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+  let longestGapMs = 0;
+  for (let i = 1; i < orgasmusAsc.length; i++) {
+    const g = orgasmusAsc[i].startTime.getTime() - orgasmusAsc[i - 1].startTime.getTime();
+    if (g > longestGapMs) longestGapMs = g;
+  }
+  const longestDenialMs = Math.max(longestGapMs, orgasmusFreiMs ?? 0);
 
   const oeffnungen = entries.filter(e => e.type === "OEFFNEN");
   const unerlaubteOeffnungen = oeffnungen.filter(o =>
@@ -340,6 +347,12 @@ export default async function StatsMain({ userId, heading, backHref, backLabel, 
               {formatMs(orgasmusFreiMs, dl)}
             </span>
           </div>
+          {longestDenialMs > 0 && (
+            <div className="px-6 py-3 border-t border-orgasm-border flex items-center justify-between gap-4">
+              <p className="text-sm text-orgasm-text">{t("longestDenial")}</p>
+              <span className="text-sm font-semibold text-orgasm-text whitespace-nowrap tabular-nums">{formatMs(longestDenialMs, dl)}</span>
+            </div>
+          )}
         </Card>
       ) : (
         <Card padding="none" className="overflow-hidden">

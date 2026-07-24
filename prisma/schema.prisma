@@ -89,6 +89,8 @@ model User {
   // Gewähren eines Belohnungs-Fensters wird 1 vorgemerkt (Guthaben −1); Straf-Aktion Entzug reduziert
   // ebenfalls. Vorgemerkte werden über offene istBelohnung-GELEGENHEITEN gezählt (nicht hier).
   verdienteOrgasmen     Int                    @default(0)
+  // Hoechster gemeldeter orgasmusfreier Rekord (Tage) — Meilenstein-Push-Drossel (denialService.ts).
+  denialRecordDays      Int                    @default(0)
   entries               Entry[]
   moodEvents            MoodEvent[]
   notificationPrefs     NotificationPreference[]
