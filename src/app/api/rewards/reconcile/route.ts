@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { autoGrantReachedGoals } from "@/lib/belohnung";
+import { checkDenialMilestone } from "@/lib/denialService";
 
 /**
  * Cron-Endpunkt: schreibt erreichte Trainingsziele als Belohnungs-Guthaben gut — fuer ALLE Nutzer,
@@ -46,5 +47,12 @@ export async function POST(req: Request) {
     } catch { /* ein Nutzer-Fehler darf den Lauf nicht kippen */ }
   }
 
-  return NextResponse.json({ checkedUsers: vorgaben.length, usersWithCredit, totalCredited });
+  // Denial-Meilensteine: neue orgasmusfreie Rekorde melden (alle Nutzer mit mindestens einem Orgasmus).
+  const orgasmUsers = await prisma.entry.findMany({ where: { type: "ORGASMUS" }, select: { userId: true }, distinct: ["userId"] });
+  let denialRecords = 0;
+  for (const { userId } of orgasmUsers) {
+    try { if (await checkDenialMilestone(userId, now)) denialRecords++; } catch { /* ein Nutzer-Fehler darf den Lauf nicht kippen */ }
+  }
+
+  return NextResponse.json({ checkedUsers: vorgaben.length, usersWithCredit, totalCredited, denialRecords });
 }

@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.121.0",
+    "date": "2026-07-24",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Denial-Straehne: Die Statistik zeigt jetzt die laengste orgasmusfreie Straehne. Und wenn der Sub einen neuen persoenlichen Rekord aufstellt, kommt eine Push-Benachrichtigung (max. einmal pro Rekord-Tag)."
+      }
+    ]
+  },
+  {
     "version": "4.120.0",
     "date": "2026-07-24",
     "changes": [
