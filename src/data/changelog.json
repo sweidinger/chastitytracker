@@ -1,5 +1,15 @@
 [
   {
+    "version": "4.122.0",
+    "date": "2026-07-24",
+    "changes": [
+      {
+        "type": "feat",
+        "text": "Woechentlicher Rueckblick: Einmal pro Woche fasst die KI-Keyholderin in ihrer Persona-Stimme die vergangene Woche zusammen (Orgasmen, Denial-Straehne, Kontrollen, Strafen, Budget, Stimmung) und schickt sie als Chat-Nachricht mit Push. Erster Rueckblick 7 Tage nach Aktivierung."
+      }
+    ]
+  },
+  {
     "version": "4.121.0",
     "date": "2026-07-24",
     "changes": [
