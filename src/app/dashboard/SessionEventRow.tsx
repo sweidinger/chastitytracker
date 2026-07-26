@@ -5,6 +5,7 @@ import { Lock, LockOpen, CheckCircle2, Droplets, ImageOff, MoreVertical, Camera,
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { FullscreenImageModal } from "@/app/components/ImageViewer";
+import DetailField from "@/app/components/DetailField";
 import SealedCodePhoto from "./SealedCodePhoto";
 
 export interface SessionEventData {
@@ -20,6 +21,11 @@ export interface SessionEventData {
   note: string | null;
   entryId: string | null;
   captureHref: string | null;
+  /** Keyholder-Sicht: Banner zeigen, Erfassen-Knopf NICHT. Der Link führte auf eine Sub-Route, wo das
+   *  Formular über die eigene Session schreibt — der Keyholder hätte die Kontrolle seines Subs auf
+   *  SEINEM Konto erfasst. Bewusst ein eigenes Feld statt `captureHref: null`: das Feld steuert auch
+   *  die Alarm-Darstellung, und die Frist seines Subs soll der Keyholder sehr wohl sehen. */
+  captureDisabled?: boolean;
   deadlineStr: string | null;
   isOverdue: boolean;
   kontrolleCode: string | null;
@@ -32,9 +38,9 @@ export interface SessionEventData {
   reinigungPillLabel?: string | null;
   timeCorrected?: boolean;
   timeCorrectedSystemStr?: string | null;
-  /** VERSCHLUSS only: the device worn (null = none selected). */
+  /** VERSCHLUSS + KONTROLLE: the device worn (null = none selected). */
   deviceName?: string | null;
-  /** VERSCHLUSS only: show the device row (true when the user has any devices). */
+  /** VERSCHLUSS + KONTROLLE: show the device row (true when the user has any devices). */
   showDevice?: boolean;
 }
 
@@ -152,21 +158,18 @@ export default function SessionEventRow({ ev, icon }: { ev: SessionEventData; ic
             title={reinigungPill}
             panel={
               <div className="flex flex-col gap-3">
-                <div>
-                  <p className="text-xs text-foreground-faint uppercase tracking-wider font-semibold mb-0.5">{tc("dateTime")}</p>
+                <DetailField label={tc("dateTime")}>
                   <p className="text-sm font-semibold text-foreground">{ev.dateStr}, {ev.timeStr}</p>
-                </div>
+                </DetailField>
                 {ev.pauseDurationStr && (
-                  <div>
-                    <p className="text-xs text-foreground-faint uppercase tracking-wider font-semibold mb-0.5">{t("sessionPauseDuration")}</p>
+                  <DetailField label={t("sessionPauseDuration")}>
                     <p className="text-sm text-foreground-muted">{ev.pauseDurationStr}</p>
-                  </div>
+                  </DetailField>
                 )}
                 {ev.note && (
-                  <div>
-                    <p className="text-xs text-foreground-faint uppercase tracking-wider font-semibold mb-0.5">{tc("note")}</p>
+                  <DetailField label={tc("note")}>
                     <p className="text-sm text-foreground-muted italic">„{ev.note}"</p>
-                  </div>
+                  </DetailField>
                 )}
               </div>
             }
@@ -193,10 +196,9 @@ export default function SessionEventRow({ ev, icon }: { ev: SessionEventData; ic
   // Geräte-Zeile (getragenes Gerät) — dieselbe Darstellung an zwei Positionen im Detail-Panel:
   // bei Kontrollen direkt unter Datum/Zeit, bei Verschlüssen weiter unten (bewusst getrennte Orte).
   const deviceRow = ev.showDevice ? (
-    <div>
-      <p className="text-xs text-foreground-faint uppercase tracking-wider font-semibold mb-0.5">{tc("device")}</p>
+    <DetailField label={tc("device")}>
       <p className="text-sm text-foreground-muted">{ev.deviceName ?? "—"}</p>
-    </div>
+    </DetailField>
   ) : null;
 
   // Open / overdue kontrolle → banner style
@@ -222,9 +224,11 @@ export default function SessionEventRow({ ev, icon }: { ev: SessionEventData; ic
             <p className="text-xs font-medium mt-1 opacity-90">{ev.kontrolleKommentar}</p>
           )}
         </div>
-        <div onClick={(e) => e.stopPropagation()}>
-          <CaptureButton href={ev.captureHref} />
-        </div>
+        {!ev.captureDisabled && (
+          <div onClick={(e) => e.stopPropagation()}>
+            <CaptureButton href={ev.captureHref} />
+          </div>
+        )}
       </div>
     );
   }
@@ -265,7 +269,12 @@ export default function SessionEventRow({ ev, icon }: { ev: SessionEventData; ic
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <span className="hidden sm:inline-flex">{typePill}</span>
-              {ev.captureHref && (
+              {/* Zweite Aufrufstelle desselben Knopfes. Heute unerreichbar (der Banner-Zweig oben
+                  kehrt zurück, sobald `captureHref` gesetzt ist) — trotzdem mit demselben Riegel:
+                  eine Regel, die nur an einer von zwei Stellen steht, ist keine Regel, und ein
+                  Verengen der Bedingung oben brächte den Keyholder-Knopf sonst durch die Hintertür
+                  zurück. */}
+              {ev.captureHref && !ev.captureDisabled && (
                 <div onClick={(e) => e.stopPropagation()}>
                   <CaptureButton href={ev.captureHref} />
                 </div>
@@ -292,56 +301,46 @@ export default function SessionEventRow({ ev, icon }: { ev: SessionEventData; ic
           title={typePill}
           panel={
             <div className="flex flex-col gap-3">
-              <div>
-                <p className="text-xs text-foreground-faint uppercase tracking-wider font-semibold mb-0.5">{tc("dateTime")}</p>
+              <DetailField label={tc("dateTime")}>
                 <p className="text-sm font-semibold text-foreground">{ev.dateStr}, {ev.timeStr}</p>
-              </div>
+              </DetailField>
               {ev.type === "kontrolle" && deviceRow}
               {ev.exifStr && (
-                <div>
-                  <p className="text-xs text-foreground-faint uppercase tracking-wider font-semibold mb-0.5">{tc("exifDate")}</p>
+                <DetailField label={tc("exifDate")}>
                   <p className="text-sm text-[var(--color-warn)]">{ev.exifStr}</p>
-                </div>
+                </DetailField>
               )}
               {ev.orgasmusArt && (
-                <div>
-                  <p className="text-xs text-foreground-faint uppercase tracking-wider font-semibold mb-0.5">{tc("type")}</p>
+                <DetailField label={tc("type")}>
                   <p className="text-sm text-foreground-muted">{ev.orgasmusArt}</p>
-                </div>
+                </DetailField>
               )}
               {ev.deadlineStr && (
-                <div>
-                  <p className="text-xs text-foreground-faint uppercase tracking-wider font-semibold mb-0.5">{tc("deadline")}</p>
+                <DetailField label={tc("deadline")}>
                   <p className="text-sm text-foreground-muted">{ev.deadlineStr}</p>
-                </div>
+                </DetailField>
               )}
               {ev.timeCorrectedSystemStr && (
-                <div>
-                  <p className="text-xs text-[var(--color-warn)] uppercase tracking-wider font-semibold mb-0.5">{tc("timeCorrected")}</p>
+                <DetailField label={tc("timeCorrected")} tone="warn">
                   <p className="text-sm text-[var(--color-warn)]">{tc("specified")}: {ev.dateStr}, {ev.timeStr}</p>
                   <p className="text-sm text-[var(--color-warn)]">{tc("systemTime")}: {ev.timeCorrectedSystemStr}</p>
-                </div>
+                </DetailField>
               )}
               {ev.kontrolleCode && (
-                <div>
-                  <p className="text-xs text-foreground-faint uppercase tracking-wider font-semibold mb-0.5">
-                    {ev.type === "verschluss" ? tc("sealNumber") : tc("controlCode")}
-                  </p>
+                <DetailField label={ev.type === "verschluss" ? tc("sealNumber") : tc("controlCode")}>
                   <p className="text-sm font-mono font-bold text-[var(--color-inspect)]">{ev.kontrolleCode}</p>
-                </div>
+                </DetailField>
               )}
               {ev.kontrolleKommentar && (
-                <div>
-                  <p className="text-xs text-foreground-faint uppercase tracking-wider font-semibold mb-0.5">{tc("instruction")}</p>
+                <DetailField label={tc("instruction")}>
                   <p className="text-sm text-[var(--color-warn)]">{ev.kontrolleKommentar}</p>
-                </div>
+                </DetailField>
               )}
               {ev.type === "verschluss" && deviceRow}
               {ev.note && (
-                <div>
-                  <p className="text-xs text-foreground-faint uppercase tracking-wider font-semibold mb-0.5">{tc("note")}</p>
+                <DetailField label={tc("note")}>
                   <p className="text-sm text-foreground-muted italic">„{ev.note}"</p>
-                </div>
+                </DetailField>
               )}
             </div>
           }

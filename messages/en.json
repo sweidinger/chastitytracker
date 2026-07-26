@@ -70,7 +70,10 @@
     "LOCK_INVALID_ART": "Invalid request type",
     "LOCK_INVALID_SEND_TIME": "Invalid send time",
     "LOCK_DEADLINE_REQUIRED": "A deadline to lock up is required",
+    "LOCK_DURATION_OR_END": "Provide either a minimum wearing duration or an absolute lock end — not both",
     "LOCK_INVALID_LOCK_END": "Invalid lock end",
+    "LOCK_REQUEST_NOT_FOUND": "Lock-up request not found",
+    "LOCK_REQUEST_NOT_EDITABLE": "The request has already been fulfilled or withdrawn",
     "LOCK_PERIOD_NOT_FOUND": "Lock period not found",
     "LOCK_PERIOD_ONLY_HAS_END": "Only lock periods have an end",
     "LOCK_PERIOD_ALREADY_WITHDRAWN": "The lock period has already been lifted",
@@ -137,7 +140,8 @@
     "PENALTY_NO_LARGER_PLUG": "No next larger plug available (set the order in your devices)",
     "PENALTY_UNKNOWN_ACTION": "Unknown penalty action",
     "INVALID_SESSION_CATEGORY": "Invalid session category",
-    "NO_SESSION_CATEGORY": "No session-capable category available"
+    "NO_SESSION_CATEGORY": "No session-capable category available",
+    "lastAdmin": "The last admin cannot be demoted — otherwise nobody can reach the admin area anymore"
   },
   "appLock": {
     "subtitle": "Confirm your identity to continue",
@@ -305,6 +309,7 @@
     "entries": "Sessions",
     "totalDuration": "Total duration",
     "trainingGoals": "Training goals",
+    "kgGoalLabel": "CB",
     "promoTitle": "Track more than just CB",
     "promoBody": "Add categories like Plug, Collar or Cuffs — separate wear time, stats, and training goals.",
     "promoCta": "Add a category",
@@ -416,7 +421,8 @@
     "pauseGrundReinigung": "Cleaning",
     "pauseGrundToilette": "Toilet",
     "pauseQuotaRemaining": "{remaining}/{max} left",
-    "pauseQuotaUnlimited": "unlimited"
+    "pauseQuotaUnlimited": "unlimited",
+    "wearSessionPhotoAlt": "Photo from start of wear: {category}"
   },
   "newEntry": {
     "title": "New entry",
@@ -509,13 +515,14 @@
     "messageLabel": "Your message",
     "messagePlaceholder": "What would you like to share?",
     "messageRequired": "Please enter a message",
-    "includeContactLabel": "I'd like to receive a reply",
-    "emailLabel": "Your email",
-    "emailRequired": "Please provide your email or disable the reply option",
-    "privacyNote": "Your feedback is sent to the maintainers. Only <strong>the message, page name, app version, and platform</strong> are transmitted — no username, no IP.",
+    "emailLabel": "Your e-mail for the reply",
+    "emailRequired": "Please enter an e-mail address",
+    "privacyNote": "Your feedback goes straight to the developers. We send <strong>your message, email, the page you're on, app version, platform and language</strong> — neither your username nor your IP address. Your email is used solely to reply to this report.",
     "submit": "Send",
     "thankYou": "Thanks!",
-    "thankYouSubtitle": "Your feedback helps improve the tracker."
+    "thankYouSubtitle": "Your feedback helps improve the tracker.",
+    "emailInvalid": "This e-mail address does not look valid",
+    "emailHint": "Just so we can get back to you."
   },
   "openForm": {
     "title": "Log opening",
@@ -940,7 +947,6 @@
     "noEmail": "No email address on file",
     "selectUser": "Select user",
     "alreadyHasSperrzeit": "Lock duration already active",
-    "alreadyHasAnforderung": "Open request already exists",
     "vorgabeAddTitle": "Add new goal",
     "vorgabeCategory": "Category",
     "vorgabeEditTitle": "Edit goal",
@@ -1423,7 +1429,8 @@
     "aikhMediaRefresh": "Refresh",
     "aikhMediaTestHint": "Queues a generation job and submits it immediately. Status does not auto-update — use Refresh (hosted images usually take a few seconds).",
     "aikhMediaTestQueued": "Job queued — use Refresh to check the status.",
-    "aikhMediaOpen": "Open"
+    "aikhMediaOpen": "Open",
+    "roleSelfDemoteConfirm": "This removes your own admin rights; you will lose access to the admin area as soon as your session picks up the new role. Continue?"
   },
   "forgotPassword": {
     "title": "Forgot password",
@@ -1666,6 +1673,8 @@
     "lockPeriodWithdrawnMessage": "The keyholder has lifted your active lock period.",
     "lockRequestWithdrawnSubject": "Request withdrawn",
     "lockRequestWithdrawnMessage": "The keyholder has withdrawn the lock-up request.",
+    "lockRequestChangedSubject": "Lock-up request changed",
+    "lockRequestChangedMessage": "The keyholder has changed the lock-up request. New deadline: {date}.",
     "lockPeriodChangedSubject": "Lock period changed",
     "lockPeriodChangedMessage": "The keyholder has changed the end of your lock period to {date}.",
     "lockPeriodChangedMessageIndefinite": "The keyholder has set your lock period to indefinite.",

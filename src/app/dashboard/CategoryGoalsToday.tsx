@@ -1,6 +1,6 @@
 import { buildCategoryWearGoals, hasAnyGoal } from "@/lib/categoryGoals";
 import { type SegmentEntry } from "@/lib/sessionModel";
-import CategoryGoalsLive from "./CategoryGoalsLive";
+import CategoryGoalsLive, { type KgGoalRow } from "./CategoryGoalsLive";
 
 interface Props {
   userId: string;
@@ -12,22 +12,31 @@ interface Props {
   excludeCategoryIds?: string[];
   /** Die schon geladenen Einträge des Dashboards — erspart eine zweite Entry-Query. */
   entries?: SegmentEntry[];
+  /** Das KG-Ziel als führende Zeile — nur im offenen Zustand gesetzt (bei aktiver Sperre steht es in
+   *  der grünen Session-Karte). null = nicht zeigen. */
+  kgGoal?: KgGoalRow | null;
+  /** Kategorie-Ziele laden? Aus, wenn die Kategorie-Funktion deaktiviert ist (dann trägt die Karte
+   *  nur das KG-Ziel) — erspart die Query. */
+  includeCategories?: boolean;
 }
 
 /** Server component — fetches per-category wear hours + goals (tracking-enabled non-KG categories
  *  with at least one period target) and hands them to the live client renderer. Categories with a
- *  running wear session tick up live there. Hidden when no goal data. */
-export default async function CategoryGoalsToday({ userId, activeWearSessions = [], excludeCategoryIds = [], entries }: Props) {
+ *  running wear session tick up live there. Trägt zusätzlich optional das KG-Ziel als führende Zeile.
+ *  Kategorien, die bereits in einer eigenen Session-Karte stehen (excludeCategoryIds), werden hier
+ *  ausgelassen. Hidden when neither a KG goal nor any category goal is present. */
+export default async function CategoryGoalsToday({ userId, activeWearSessions = [], excludeCategoryIds = [], entries, kgGoal = null, includeCategories = true }: Props) {
   const now = new Date();
-  const allRows = await buildCategoryWearGoals(userId, now, entries);
   const activeCategoryIds = new Set(activeWearSessions.map((s) => s.categoryId));
   const excluded = new Set(excludeCategoryIds);
 
-  const rows = allRows
-    .filter(hasAnyGoal)
-    .filter((r) => !excluded.has(r.categoryId))
-    .map((r) => ({ ...r, active: activeCategoryIds.has(r.categoryId) }));
-  if (rows.length === 0) return null;
+  const rows = includeCategories
+    ? (await buildCategoryWearGoals(userId, now, entries))
+        .filter(hasAnyGoal)
+        .filter((r) => !excluded.has(r.categoryId))
+        .map((r) => ({ ...r, active: activeCategoryIds.has(r.categoryId) }))
+    : [];
+  if (!kgGoal && rows.length === 0) return null;
 
-  return <CategoryGoalsLive rows={rows} serverNow={now.toISOString()} />;
+  return <CategoryGoalsLive rows={rows} kgGoal={kgGoal} serverNow={now.toISOString()} />;
 }

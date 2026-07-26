@@ -78,3 +78,5 @@ AGENTS.md
 
 # local NAS SSH key (never commit)
 .nas_key
+# Persönlicher Keyholder-Rollentext — nicht ins öffentliche Repo
+keyholder-instructions.md

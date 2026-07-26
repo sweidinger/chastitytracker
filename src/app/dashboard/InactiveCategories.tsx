@@ -5,8 +5,9 @@ import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
 import { ChevronDown, Plus } from "lucide-react";
 import Card from "@/app/components/Card";
-import { categoryStyle } from "@/lib/categoryConstants";
-import CategoryIconRender from "@/app/components/CategoryIcon";
+import { categoryStyle, wearActionHref } from "@/lib/categoryConstants";
+import { CategoryIconTile } from "@/app/components/CategoryPhotoThumb";
+import DashboardBlock from "@/app/components/DashboardBlock";
 import { formatHours, toDateLocale } from "@/lib/utils";
 
 export interface InactiveCategoryRow {
@@ -36,7 +37,7 @@ export default function InactiveCategories({ categories }: Props) {
   if (categories.length === 0) return null;
 
   return (
-    <div className="w-full max-w-2xl mx-auto px-4 pb-2">
+    <DashboardBlock>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -56,7 +57,7 @@ export default function InactiveCategories({ categories }: Props) {
             const style = categoryStyle(c.color);
             const beginHref = c.isSessionCategory
               ? `/dashboard/new/session-begin?category=${c.id}`
-              : `/dashboard/new/wear-begin?category=${c.id}`;
+              : wearActionHref({ categoryId: c.id, active: false });
             return (
               <li key={c.id}>
                 <Card>
@@ -64,13 +65,7 @@ export default function InactiveCategories({ categories }: Props) {
                     href={beginHref}
                     className="flex items-center gap-3 p-3 active:bg-background-subtle transition opacity-80 hover:opacity-100"
                   >
-                    <div
-                      className="shrink-0 size-9 rounded-lg flex items-center justify-center"
-                      style={{ backgroundColor: style.backgroundColor, color: style.color }}
-                      aria-hidden
-                    >
-                      <CategoryIconRender name={c.icon} className="size-4" />
-                    </div>
+                    <CategoryIconTile color={c.color} icon={c.icon} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-foreground truncate">{c.name}</p>
                       {c.todayHours > 0 && (
@@ -90,6 +85,6 @@ export default function InactiveCategories({ categories }: Props) {
           })}
         </ul>
       )}
-    </div>
+    </DashboardBlock>
   );
 }

@@ -70,7 +70,10 @@
     "LOCK_INVALID_ART": "Ungültige Art der Anforderung",
     "LOCK_INVALID_SEND_TIME": "Ungültiger Versandzeitpunkt",
     "LOCK_DEADLINE_REQUIRED": "Frist zum Einschliessen ist erforderlich",
+    "LOCK_DURATION_OR_END": "Entweder Mindest-Tragedauer oder absolutes Sperr-Ende — nicht beides",
     "LOCK_INVALID_LOCK_END": "Ungültiges Sperr-Ende",
+    "LOCK_REQUEST_NOT_FOUND": "Einschliess-Anforderung nicht gefunden",
+    "LOCK_REQUEST_NOT_EDITABLE": "Die Anforderung ist bereits erfüllt oder zurückgezogen",
     "LOCK_PERIOD_NOT_FOUND": "Sperrzeit nicht gefunden",
     "LOCK_PERIOD_ONLY_HAS_END": "Nur Sperrzeiten haben ein Ende",
     "LOCK_PERIOD_ALREADY_WITHDRAWN": "Die Sperrzeit ist bereits aufgehoben",
@@ -137,7 +140,8 @@
     "PENALTY_NO_LARGER_PLUG": "Kein nächstgrösserer Plug vorhanden (Reihenfolge in den Geräten setzen)",
     "PENALTY_UNKNOWN_ACTION": "Unbekannte Straf-Aktion",
     "INVALID_SESSION_CATEGORY": "Ungültige Session-Kategorie",
-    "NO_SESSION_CATEGORY": "Keine Session-fähige Kategorie vorhanden"
+    "NO_SESSION_CATEGORY": "Keine Session-fähige Kategorie vorhanden",
+    "lastAdmin": "Der letzte Admin kann sich die Rechte nicht selbst entziehen — sonst kommt niemand mehr in den Adminbereich"
   },
   "appLock": {
     "subtitle": "Identität bestätigen um fortzufahren",
@@ -305,6 +309,7 @@
     "entries": "Sessions",
     "totalDuration": "Gesamtdauer",
     "trainingGoals": "Trainingsvorgaben",
+    "kgGoalLabel": "KG",
     "promoTitle": "Tracke mehr als nur KG",
     "promoBody": "Lege Kategorien wie Plug, Halsband oder Cuffs an — eigene Tragezeiten, eigene Statistik, eigene Trainingsziele.",
     "promoCta": "Kategorie anlegen",
@@ -416,7 +421,8 @@
     "pauseGrundReinigung": "Reinigung",
     "pauseGrundToilette": "Toilette",
     "pauseQuotaRemaining": "{remaining}/{max} übrig",
-    "pauseQuotaUnlimited": "unbegrenzt"
+    "pauseQuotaUnlimited": "unbegrenzt",
+    "wearSessionPhotoAlt": "Foto vom Trage-Beginn: {category}"
   },
   "newEntry": {
     "title": "Neu erfassen",
@@ -509,13 +515,14 @@
     "messageLabel": "Deine Nachricht",
     "messagePlaceholder": "Was möchtest du mitteilen?",
     "messageRequired": "Bitte eine Nachricht eingeben",
-    "includeContactLabel": "Ich möchte eine Rückmeldung erhalten",
-    "emailLabel": "Deine E-Mail",
-    "emailRequired": "Bitte E-Mail angeben oder Rückmeldung deaktivieren",
-    "privacyNote": "Dein Feedback wird an die Entwickler:innen gesendet. Übertragen werden <strong>nur Nachricht, Seitenname, App-Version und Plattform</strong> — weder Benutzername noch IP.",
+    "emailLabel": "Deine E-Mail für die Rückantwort",
+    "emailRequired": "Bitte eine E-Mail-Adresse angeben",
+    "privacyNote": "Dein Feedback geht direkt an die Entwickler:innen. Übermittelt werden <strong>deine Nachricht, E-Mail-Adresse, Seite, App-Version, Plattform und Sprache</strong> — weder Benutzername noch IP-Adresse. Die Adresse dient ausschliesslich der Antwort auf diese Meldung.",
     "submit": "Senden",
     "thankYou": "Danke!",
-    "thankYouSubtitle": "Dein Feedback hilft, den Tracker zu verbessern."
+    "thankYouSubtitle": "Dein Feedback hilft, den Tracker zu verbessern.",
+    "emailInvalid": "Diese E-Mail-Adresse sieht nicht gültig aus",
+    "emailHint": "Nur so können wir dir antworten."
   },
   "openForm": {
     "title": "Öffnung erfassen",
@@ -940,7 +947,6 @@
     "noEmail": "Keine E-Mail hinterlegt",
     "selectUser": "Benutzer auswählen",
     "alreadyHasSperrzeit": "Sperrdauer bereits aktiv",
-    "alreadyHasAnforderung": "Offene Anforderung vorhanden",
     "vorgabeAddTitle": "Neue Vorgabe hinzufügen",
     "vorgabeCategory": "Kategorie",
     "vorgabeEditTitle": "Vorgabe bearbeiten",
@@ -1423,7 +1429,8 @@
     "aikhMediaRefresh": "Aktualisieren",
     "aikhMediaTestHint": "Legt einen Generierungs-Auftrag an und schickt ihn sofort ab. Der Status aktualisiert sich nicht automatisch — mit „Aktualisieren“ nachladen (fertige Bilder dauern beim gehosteten Anbieter meist einige Sekunden).",
     "aikhMediaTestQueued": "Auftrag erstellt — mit „Aktualisieren“ den Status prüfen.",
-    "aikhMediaOpen": "Öffnen"
+    "aikhMediaOpen": "Öffnen",
+    "roleSelfDemoteConfirm": "Du entziehst dir damit selbst die Adminrechte und verlierst den Zugang zum Adminbereich, sobald deine Sitzung die neue Rolle übernimmt. Fortfahren?"
   },
   "forgotPassword": {
     "title": "Passwort vergessen",
@@ -1666,6 +1673,8 @@
     "lockPeriodWithdrawnMessage": "Der Keyholder hat deine aktive Sperrzeit aufgehoben.",
     "lockRequestWithdrawnSubject": "Anforderung zurückgezogen",
     "lockRequestWithdrawnMessage": "Der Keyholder hat die Einschliess-Anforderung zurückgezogen.",
+    "lockRequestChangedSubject": "Anforderung geändert",
+    "lockRequestChangedMessage": "Der Keyholder hat die Einschliess-Anforderung geändert. Neue Frist: {date}.",
     "lockPeriodChangedSubject": "Sperrzeit geändert",
     "lockPeriodChangedMessage": "Der Keyholder hat das Ende deiner Sperrzeit auf {date} geändert.",
     "lockPeriodChangedMessageIndefinite": "Der Keyholder hat deine Sperrzeit auf unbefristet gesetzt.",

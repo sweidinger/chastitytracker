@@ -3,8 +3,9 @@
 import { Lock, LockOpen, AlertTriangle } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { formatDateTime, toDateLocale, APP_TZ } from "@/lib/utils";
-import { boxIsPhysicallyLocked, boxIstLabel, boxPendingTransition, boxSollLabel, boxFreshnessLabel, boxReinigungLabel, boxReinigungQuotaLabel, type BoxReinigungView } from "@/lib/boxStatus";
+import { boxIsPhysicallyLocked, boxIstLabel, boxPendingTransition, boxSollLabel, boxSollLocked, boxFreshnessLabel, boxReinigungLabel, boxReinigungQuotaLabel, type BoxReinigungView } from "@/lib/boxStatus";
 import { useBoxStatus } from "@/app/hooks/useBoxStatus";
+import DashboardBlock from "@/app/components/DashboardBlock";
 
 /** Reine Status-Anzeige der Heimdall-Box(en) auf dem Dashboard (Ist + Soll + Frische). Keine
  *  Box-Kommandos — die Box folgt den Verschluss-/Öffnen-Einträgen. Pollt `/api/box` (self-hiding,
@@ -25,15 +26,17 @@ export default function BoxStatusCard({ tz = APP_TZ, reinigung }: { tz?: string;
   const quotaLabel = boxReinigungQuotaLabel(reinigung ?? null, t);
 
   return (
-    <div className="w-full max-w-2xl mx-auto px-4 pt-6">
+    <DashboardBlock>
       <div className="flex flex-col gap-2">
         {boxes.map((b) => {
           // „Steht offen, obwohl eine Sperre verschlossen verlangt" (z.B. Reinigungspause) →
           // Warn-Optik. PHYSISCH offen, nicht SOLL-offen: eine erst scharfgestellte Öffnung
           // (Riegel noch zu, wartet auf Knopf) ist kein Alarm — dafür gibt es die Übergangs-Zeile.
+          // Das SOLL kommt aus `boxSollLocked` (nicht aus den Spiegel-Feldern direkt), damit die
+          // Warn-Optik dieselbe Quelle hat wie die Soll-Zeile darunter: nach einer eingetragenen
+          // Öffnung schlug die Karte sonst Alarm wegen eines Konflikts, den der Eintrag löste.
           const istLocked = boxIsPhysicallyLocked(b);
-          const shouldBeLocked = b.keyholderLocked || !!b.lockUntil || b.simpleLock;
-          const conflict = !istLocked && shouldBeLocked;
+          const conflict = !istLocked && boxSollLocked(b);
           const transition = boxPendingTransition(b);
           const scheme = conflict
             ? { bg: "bg-warn-bg", border: "border-warn-border", accent: "text-warn", text: "text-warn-text", Icon: AlertTriangle }
@@ -68,6 +71,6 @@ export default function BoxStatusCard({ tz = APP_TZ, reinigung }: { tz?: string;
           );
         })}
       </div>
-    </div>
+    </DashboardBlock>
   );
 }

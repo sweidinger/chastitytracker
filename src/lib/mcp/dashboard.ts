@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { getOpenKontrolle, getActiveSperrzeit, getActiveWearSessions, getActiveOrgasmusAnforderung, getInterruptedSperrzeit, getCurrentLockKeyInBox, getOpenLockRequest } from "@/lib/queries";
+import { getOpenKontrolle, getActiveSperrzeit, getActiveWearSessions, getActiveOrgasmusAnforderung, getInterruptedSperrzeit, getCurrentLockKeyInBox, getOpenLockRequests } from "@/lib/queries";
 import {
   buildLockState, mapOpenKontrolle, mapActiveSperrzeit, mapOpenOrgasmusAnforderung,
   mapActiveWearSessions, mapInterruptedSperrzeit, mapOpenLockRequest,
@@ -13,6 +13,7 @@ import { records, periodSummary, type PeriodSummaryResult } from "@/lib/mcp/stat
 import { getOffenses, type OffenseRow } from "@/lib/mcp/ledger";
 import { queryNotes } from "@/lib/mcp/notes";
 import { loadActiveHealthHold, type HealthHoldView } from "@/lib/mcp/context";
+import { toPendingCommand } from "@/lib/boxStatus";
 
 /** keyholder_dashboard (explain_model §13) — EIN Call, der 90 % der Keyholder-Fragen beantwortet: aktueller
  *  Lauf vs. Personal Best, was JETZT getragen wird (alle Kategorien), das Nächst-Relevante, Ziele +
@@ -24,10 +25,20 @@ export type HardwareEnforcedReason = "soll-open" | "reported-open" | "key-not-in
 
 export interface BoxStateView {
   name: string;
-  /** SOLL: soll die Box gerade zu sein? (`boxLocked()` — jede Sperrquelle, eigen ODER Tracker-Sperrzeit).
-   *  Der zuletzt von Heimdall gemeldete Wert; er kippt NICHT durch blossen Zeitablauf, solange die Box
-   *  nicht wieder synct — dafür ist `staleLock` da. */
+  /** SOLL: soll die Box gerade zu sein? Der zuletzt von Heimdall gemeldete Wert (jede Sperrquelle,
+   *  eigen ODER Tracker-Sperrzeit); er kippt NICHT durch blossen Zeitablauf, solange die Box nicht
+   *  wieder synct — dafür ist `staleLock` da. Steht `pendingCommand` an, ist dieser Wert ÄLTER als
+   *  die Absicht des Trackers — siehe dort. */
   locked: boolean;
+  /** Aus einem Eintrag abgeleitetes Kommando, das die Box noch nicht abgeholt hat. `"open"` heisst:
+   *  der Sub hat eine Öffnung eingetragen, `locked` stammt aber noch vom Push DAVOR und ist bis zum
+   *  nächsten Box-Sync (Minuten) überholt — ohne dieses Feld liest sich der Zwischenstand wie „der
+   *  Sub ist noch verschlossen". `null` = Spiegel und Absicht sind einig.
+   *
+   *  ACHTUNG, kein Freibrief: eine laufende Keyholder-Sperrzeit überschreibt ein `"open"` NICHT.
+   *  Die Vorrang-Regel steht als Code in `boxSollLocked` (src/lib/boxStatus.ts) — dort ist auch
+   *  begründet, warum sie nur den Spiegel-Anteil schlägt und nicht die Sperrzeit. */
+  pendingCommand: "lock" | "open" | null;
   /** Physisches IST: war die Box beim letzten Sync wirklich zu? Kann seit dem Präsenz-Guard
    *  (FW 0.2.33) vom SOLL abweichen — „soll zu, steht aber offen und wartet auf Knopf/USB".
    *  `null` = Alt-Zeile ohne IST-Meldung; dann gilt das SOLL (`locked`) als bester Stand. */
@@ -94,8 +105,12 @@ export interface DashboardResult extends Envelope {
    *  ist. Semantik-Änderung eines Bestandsfelds → schemaVersion-Bump (nicht rein additiv).
    *  v5 (MCP-Restliste 2026-07-18): `currentRun.since` ist bei `isLocked:false` jetzt `null` (kein
    *  aktiver Lauf) statt des Öffnen-Zeitpunkts — konsistent mit den dann ebenfalls null-Feldern
-   *  durationHours/deviceName/currentSegmentSince. */
-  schemaVersion: 5;
+   *  durationHours/deviceName/currentSegmentSince.
+   *  v6: mehrere Einschliess-Anforderungen dürfen koexistieren. `nextRelevant.openLockRequest` ist
+   *  damit nicht mehr „DIE offene", sondern die DRINGENDSTE (frühste Frist) von möglicherweise
+   *  mehreren — vollständig stehen sie in `nextRelevant.openLockRequests`. Ein Wert aus v5 sagte
+   *  „es gibt genau diese eine"; das lässt sich rückwirkend nicht mehr behaupten. */
+  schemaVersion: 6;
   user: string;
   /** Freitext-Regeln des menschlichen Keyholders (mcpKeyholderInstructions) — bewusst als erstes
    *  Inhaltsfeld: alle Direktiven/Writes müssen diese Regeln befolgen. null = keine gesetzt. */
@@ -164,6 +179,10 @@ export interface DashboardResult extends Envelope {
      *  — die Sperrzeit hält einen bestehenden Verschluss, die Anforderung verlangt ihn erst.
      *  Nur die bereits ausgelöste; geplante stehen in `scheduledDirectives`. */
     openLockRequest: OpenLockRequestView | null;
+    /** ALLE offenen, bereits ausgelösten Anforderungen — dringendste zuerst, `openLockRequest` ist
+     *  die erste davon. Mehrere sind seit v6 normal: sie ersetzen einander nicht, und EIN Verschluss
+     *  erfüllt alle. Jede trägt ihre id für `edit_lock_request` / `withdraw`. */
+    openLockRequests: OpenLockRequestView[];
   };
   goals: { kg: PeriodSummaryResult["kg"]; categories: PeriodSummaryResult["categories"] };
   openOffenses: { count: number; pendingPenalties: number; top: OffenseRow[] };
@@ -299,6 +318,7 @@ function mapBoxState(box: BoxRow, now: Date, iso: Iso, keyInBox: boolean | null)
   return {
     name: box.name,
     locked: box.locked,
+    pendingCommand: toPendingCommand(box.pendingCommand),
     reportedLocked: box.reportedLocked,
     lockUntil: iso(box.lockUntil),
     hardwareEnforced,
@@ -358,11 +378,11 @@ export async function keyholderDashboard(username: string): Promise<DashboardRes
   // Live-Zustand direkt aus der Helfer-Schicht (mcp/liveState.ts) — nicht mehr durch die fertige
   // V1-Antwort von buildOverview hindurch, die ~14 weitere Felder samt vier ungenutzter Queries
   // (Strafen-Zähler, Keyholder-Notizen, Reinigungs-Verbrauch, offene Verschluss-Anforderung) baute.
-  const [openKontrolleRow, activeSperrzeitRow, openLockRequestRow, interruptedSperrzeitRow, activeWearRows, openOrgasmusRow,
+  const [openKontrolleRow, activeSperrzeitRow, openLockRequestRows, interruptedSperrzeitRow, activeWearRows, openOrgasmusRow,
          rec, periods, ledger, pinned, boxRow, healthHold, scheduledDirectives] = await Promise.all([
     getOpenKontrolle(trackingCtx.userId, now),
     getActiveSperrzeit(trackingCtx.userId),
-    getOpenLockRequest(trackingCtx.userId, now),
+    getOpenLockRequests(trackingCtx.userId, now),
     getInterruptedSperrzeit(trackingCtx.userId, now),
     getActiveWearSessions(trackingCtx.userId),
     getActiveOrgasmusAnforderung(trackingCtx.userId, now),
@@ -409,11 +429,15 @@ export async function keyholderDashboard(username: string): Promise<DashboardRes
   const todayIncludesPriorSession =
     rec.currentRunHours != null && periods.kg.today - rec.currentRunHours > ROUND_EPSILON_H;
 
+  // Einmal mappen, zweimal ausliefern: `openLockRequest` ist DASSELBE Objekt wie `openLockRequests[0]`
+  // (die dringendste), nicht ein zweites, das auseinanderlaufen könnte.
+  const openLockRequestViews = openLockRequestRows.map((r) => mapOpenLockRequest(r, now, fmt)!);
+
   // CT-004: echte (cross-cluster) Bild-Diskrepanzen als Daten-Hinweis (keine Vergehen).
   const discrepancyItems = collectImageConflicts(sessions, iso);
 
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     user: username,
     ...buildEnvelope(now, iso, trackingCtx.timezone),
     keyholderInstructions: trackingCtx.keyholderInstructions,
@@ -442,7 +466,10 @@ export async function keyholderDashboard(username: string): Promise<DashboardRes
       // Sie wäre ein Dauer-Gespenst im Dashboard, das niemand mehr wegbekommt.
       interruptedLockPeriod: activeSperrzeitRow ? null : mapInterruptedSperrzeit(interruptedSperrzeitRow, fmt),
       openOrgasmWindow: mapOpenOrgasmusAnforderung(openOrgasmusRow, now, fmt),
-      openLockRequest: mapOpenLockRequest(openLockRequestRow, now, fmt),
+      // Die dringendste zuerst (getOpenLockRequests sortiert danach) — sie steht zusätzlich einzeln,
+      // damit die häufige Frage „was ist als Nächstes fällig?" nicht durch eine Liste muss.
+      openLockRequest: openLockRequestViews[0] ?? null,
+      openLockRequests: openLockRequestViews,
     },
     goals: { kg: periods.kg, categories: periods.categories },
     openOffenses: { count: ledger.openOffenseCount, pendingPenalties: ledger.pendingPenaltyCount, top: openOffenseRows.slice(0, 5) },

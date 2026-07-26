@@ -14,7 +14,7 @@ import { buildWearSessionRows } from "@/lib/wearSessionRows";
 import { proratedVorgabeTargets } from "@/lib/goalFulfillment";
 import { buildSessionEvents, buildPlugSessionEvents } from "@/lib/sessionHelpers";
 import { buildCategoryWearGoals } from "@/lib/categoryGoals";
-import { getActiveVorgabe, getActiveSperrzeit, getActiveWearSessions, getNonKgTrackingCategories, getSessionCategories, getActiveOrgasmusAnforderung, getActivePlugAnforderung, getActivePlugSperrzeit, aktiveKontrolleWhere, activeVerschlussAnforderungWhere, cleaningBlockReason } from "@/lib/queries";
+import { getActiveVorgabe, getActiveSperrzeit, getActiveWearSessions, getNonKgTrackingCategories, getSessionCategories, getActiveOrgasmusAnforderung, getActivePlugAnforderung, getActivePlugSperrzeit, aktiveKontrolleWhere, activeVerschlussAnforderungWhere, openLockRequestWhere, LOCK_REQUEST_ORDER, cleaningBlockReason } from "@/lib/queries";
 import { getActiveSessionsAllCategories, getAllActiveSessionAnforderungen } from "@/lib/sessionService";
 import { plugCategoryId } from "@/lib/deviceCategories";
 import { deviceCategoriesEnabled, heimdallEnabled } from "@/lib/constants";
@@ -30,7 +30,6 @@ import WearSessionList from "./WearSessionList";
 import ActiveWearSessions from "./ActiveWearSessions";
 import CategoriesPromoCard from "./CategoriesPromoCard";
 import CategoryGoalsToday from "./CategoryGoalsToday";
-import CategoryGoalsLive from "./CategoryGoalsLive";
 import BelohnungBanner from "./BelohnungBanner";
 import DenialCounterCard from "./DenialCounterCard";
 import { getOrgasmusBudgetState } from "@/lib/orgasmBudgetService";
@@ -43,6 +42,7 @@ import { LockOpen } from "lucide-react";
 import TagesformWidget from "@/app/components/TagesformWidget";
 import InactiveCategories from "./InactiveCategories";
 import BoxStatusCard from "@/app/components/BoxStatusCard";
+import DashboardBlock from "@/app/components/DashboardBlock";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -97,9 +97,11 @@ export default async function DashboardPage() {
     prisma.kontrollAnforderung.findMany({ where: { userId, ...aktiveKontrolleWhere(now) }, orderBy: { createdAt: "desc" }, include: { entry: true } }),
     getActiveVorgabe(userId, now),
     // Zeitversetzt geplante Anforderungen (wirksamAb in der Zukunft) bleiben für den Sub unsichtbar.
-    // KG only: deviceCategoryId = null
+    // KG only (deviceCategoryId = null): bei mehreren offenen zeigt das Sub-Banner die dringendste
+    // (LOCK_REQUEST_ORDER) — ein Verschluss erfüllt ohnehin alle. Plug läuft separat über offenePlugAnf.
     prisma.verschlussAnforderung.findFirst({
-      where: { userId, art: "ANFORDERUNG", deviceCategoryId: null, fulfilledAt: null, withdrawnAt: null, ...activeVerschlussAnforderungWhere(now) },
+      where: { ...openLockRequestWhere(userId), deviceCategoryId: null, ...activeVerschlussAnforderungWhere(now) },
+      orderBy: LOCK_REQUEST_ORDER,
       include: { device: { select: { name: true } } },
     }),
     getActiveSperrzeit(userId),
@@ -199,27 +201,28 @@ export default async function DashboardPage() {
 
   const { tagH, wocheH, monatH, jahrH } = calculateWearingHoursByRange(entries, now);
 
-  // Cage offen -> separate Trainingsvorgabe-Box (gleicher Stil wie Kategorie-Ziele), nur im offenen Zustand.
+  // "Offen"-Hero-Karte (Fork): zeigt beim geöffneten Käfig den Seit-Timer.
   const cageOpen = currentStatus?.type === "OEFFNEN";
-  const cageProrated = activeVorgabe ? proratedVorgabeTargets(activeVorgabe, now, tz) : null;
-  const cageHasGoal = !!cageProrated && (cageProrated.minProTagH != null || cageProrated.minProWocheH != null || cageProrated.minProMonatH != null || cageProrated.minProJahrH != null);
-  const cageGoalRow = (cageOpen && cageHasGoal && cageProrated) ? {
-    categoryId: "kg",
-    name: t("deviceLabelCage"),
-    color: "cat-steel",
-    icon: "Lock",
-    tagH, wocheH, monatH, jahrH,
-    goalDayH: cageProrated.minProTagH,
-    goalWeekH: cageProrated.minProWocheH,
-    goalMonthH: cageProrated.minProMonatH,
-    goalYearH: cageProrated.minProJahrH,
-    active: false,
-  } : null;
+  // Das KG-Ziel steht während einer Sperre in der grünen Session-Karte (LaufendeSessionCard). Läuft
+  // KEINE Sperre, hätte es sonst nirgends Platz — dann zeigen wir es als führende Zeile in der
+  // „Trainingsvorgaben"-Karte (dieselbe, die die Kategorie-Ziele trägt), damit der Sub sein KG-Ziel
+  // auch im offenen Zustand sieht statt nur beim Verschluss.
+  const kgTargets = activeVorgabe ? proratedVorgabeTargets(activeVorgabe, now, tz) : null;
+  const showLaufendeSession = !!activePair && rawSessionEvents.length > 0;
+  const inlineKgGoal =
+    !showLaufendeSession && kgTargets &&
+    (kgTargets.minProTagH != null || kgTargets.minProWocheH != null || kgTargets.minProMonatH != null || kgTargets.minProJahrH != null)
+      ? {
+          tagH, wocheH, monatH, jahrH,
+          goalDayH: kgTargets.minProTagH, goalWeekH: kgTargets.minProWocheH,
+          goalMonthH: kgTargets.minProMonatH, goalYearH: kgTargets.minProJahrH,
+        }
+      : null;
 
   // Die Trage-Sessions EINMAL bauen — Zeilen-Liste und Wanduhr-Stunden je Kategorie leiten sich
   // beide daraus ab (je GERAET gepaart, Ueberlappungen fuer die Stunden verschmolzen).
   const wearSessionList = buildWearSessions(entries, now);
-  const wearSessionRows = buildWearSessionRows(allNonKgCategories, wearSessionList, dl);
+  const wearSessionRows = buildWearSessionRows(allNonKgCategories, wearSessionList, dl, entries);
   const wearPairsByCategory = wearHourPairsByCategory(wearSessionList, now);
 
   // Offene Session-Anforderungen (von Admin/AI-Keyholderin) → Banner mit „Session starten"-Button.
@@ -343,10 +346,12 @@ export default async function DashboardPage() {
   const username = session.user.name ?? "";
 
   return (
-    <>
-      <div className="w-full max-w-2xl mx-auto px-4 pt-6">
+    // Der Abstand zwischen den Blöcken kommt AUSSCHLIESSLICH von diesem `gap-4`, nie aus pt-/pb- der
+    // Blöcke selbst — Begründung in `DashboardBlock`.
+    <div className="flex flex-col gap-4 py-6">
+      <DashboardBlock>
         <h1 className="text-xl font-bold text-foreground">{t("userTitle", { name: username })}</h1>
-      </div>
+      </DashboardBlock>
       <HealthHoldCard
         initial={healthHold ? { reason: healthHold.reason, since: healthHold.since.toISOString() } : null}
         labels={healthHoldLabels}
@@ -379,12 +384,9 @@ export default async function DashboardPage() {
           </div>
         </div>
       )}
-      {cageGoalRow && (
-        <CategoryGoalsLive rows={[cageGoalRow]} serverNow={now.toISOString()} />
-      )}
       {heimdallEnabled() && <BoxStatusCard tz={tz} reinigung={boxReinigung} />}
-      {activePair && rawSessionEvents.length > 0 && (
-        <div className="w-full max-w-2xl mx-auto px-4 pt-6 pb-2">
+      {showLaufendeSession && (
+        <DashboardBlock>
           <LaufendeSessionCard
             sessionStart={activePair.verschluss.startTime}
             interruptionPausedMs={interruptionPauseMs(activePair.interruptions)}
@@ -410,10 +412,10 @@ export default async function DashboardPage() {
             deviceName={cageDeviceName}
             pauseQuota={cagePauseQuota}
           />
-        </div>
+        </DashboardBlock>
       )}
       {plugCardData && (
-        <div className="w-full max-w-2xl mx-auto px-4 pt-2 pb-2">
+        <DashboardBlock>
           <LaufendePlugSessionCard
             sessionStart={plugCardData.session.since}
             interruptionPausedMs={plugCardData.plugPausedMs}
@@ -440,7 +442,7 @@ export default async function DashboardPage() {
             tz={tz}
             pauseQuota={plugPauseQuota}
           />
-        </div>
+        </DashboardBlock>
       )}
       <ActiveWearSessions
         sessions={[
@@ -480,7 +482,15 @@ export default async function DashboardPage() {
       <div className="w-full max-w-2xl mx-auto px-4 pb-2">
         <TagesformWidget />
       </div>
-      {flagOn && <CategoryGoalsToday userId={userId} activeWearSessions={wearSessions} entries={entries} />}
+      {/* KG-Ziel (inlineKgGoal) + Kategorie-Ziele: ungated, damit das KG-Ziel auch bei deaktivierter
+          Kategorie-Funktion erscheint. CategoryGoalsToday rendert nichts, wenn weder KG-Ziel noch Zeilen. */}
+      <CategoryGoalsToday
+        userId={userId}
+        activeWearSessions={wearSessions}
+        entries={entries}
+        includeCategories={flagOn}
+        kgGoal={inlineKgGoal}
+      />
       <InactiveCategories
         categories={allNonKgCategories
           .filter((c) => !wearSessions.some((s) => s.categoryId === c.id))
@@ -495,15 +505,15 @@ export default async function DashboardPage() {
       />
       <DashboardClient {...clientProps} tz={tz} />
       {pairs.length > 0 && (
-        <div className="w-full max-w-2xl mx-auto px-4 pb-6">
+        <DashboardBlock>
           <SessionList pairs={pairs} orgasmusEntries={orgasmusEntries} userHasDevices={userHasDevices} tz={tz} orgasmusArtenConfig={userSettings?.orgasmusArtenConfig} oeffnenGruendeConfig={userSettings?.oeffnenGruendeConfig} />
-        </div>
+        </DashboardBlock>
       )}
       {wearSessionRows.length > 0 && (
-        <div className="w-full max-w-2xl mx-auto px-4 pb-6">
+        <DashboardBlock>
           <WearSessionList sessions={wearSessionRows} />
-        </div>
+        </DashboardBlock>
       )}
-    </>
+    </div>
   );
 }

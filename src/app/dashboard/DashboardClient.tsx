@@ -7,6 +7,7 @@ import TimerDisplay from "@/app/components/TimerDisplay";
 import EmptyState from "@/app/components/EmptyState";
 import KontrolleBanner from "@/app/components/KontrolleBanner";
 import LockRequestBanner from "@/app/components/LockRequestBanner";
+import DashboardBlock from "@/app/components/DashboardBlock";
 import { formatHoursHM } from "@/lib/utils";
 import { inspectionHelpUrl } from "@/lib/constants";
 import { useLiveHours } from "@/app/hooks/useLiveHours";
@@ -203,7 +204,7 @@ export default function DashboardClient(props: DashboardProps) {
 
   if (!hasEntries) {
     return (
-      <main className="flex-1 w-full max-w-2xl mx-auto px-4 py-8 flex flex-col gap-5">
+      <DashboardBlock as="main" className="flex flex-col gap-5">
         {lockRequestBanner}
         {orgasmusRequestBanner}
         {plugAnforderungBanner}
@@ -215,12 +216,12 @@ export default function DashboardClient(props: DashboardProps) {
           description={t("welcomeDesc")}
           action={{ label: t("welcomeCta"), href: "/dashboard/new/verschluss" }}
         />
-      </main>
+      </DashboardBlock>
     );
   }
 
   return (
-    <main className="flex-1 w-full max-w-2xl mx-auto px-4 py-6 flex flex-col gap-5">
+    <DashboardBlock as="main" className="flex flex-col gap-5">
 
       {/* Status-Hero (offener Zustand) wird jetzt oben in page.tsx gerendert. */}
 
@@ -284,7 +285,7 @@ export default function DashboardClient(props: DashboardProps) {
 
       {/* Actions accessible via Neu-Button in bottom nav */}
 
-    </main>
+    </DashboardBlock>
   );
 }
 

@@ -207,7 +207,9 @@ Diese Regeln verhindern, dass gleiche Features unterschiedlich implementiert wer
 
 **Components:**
 - `src/app/components/AdminActionFormShell.tsx` — Wrapper für Admin-Aktionsformulare (Back-Link + Card mit Icon-Header)
+- `src/app/components/DashboardBlock.tsx` — ein gestapelter Block der Dashboard-Spalte (`w-full max-w-2xl mx-auto px-4`). **Trägt bewusst KEINE vertikalen Abstände** — der Abstand kommt vom `gap` des Elters (`dashboard/page.tsx`: `flex flex-col gap-4`), damit sich selbst ausblendende Blöcke ihren Abstand automatisch überspringen. Neue Dashboard-Blöcke nutzen ihn und ergänzen **kein** `pt-`/`pb-`/`py-`
 - `src/app/components/DateTimePicker.tsx` — Datetime-Input mit Label, Error, Hint, ARIA (statt `<Input type="datetime-local">`)
+- `src/app/components/DetailField.tsx` — beschriftetes Feld im Detail-Panel (Label über dem Wert, `tone="warn"` für Warn-Label); der Wert kommt als `children` und bleibt bewusst frei gestaltbar
 - `src/app/components/KontrolleBanner.tsx` — Kontroll-Status-Banner (compact + large)
 - `src/app/components/LockRequestBanner.tsx` — Verschluss-Anforderung-Banner
 - `src/app/components/FormError.tsx` — Styled Error-Card für Formulare
@@ -253,6 +255,7 @@ Diese Regeln verhindern, dass gleiche Features unterschiedlich implementiert wer
 - `src/lib/kontrollePills.ts` — `ANFORDERUNG_PILLS`, `getKombinierterPill()`
 - `src/lib/compressImage.ts` — Client-seitige Bildkomprimierung vor Upload
 - `src/lib/haptics.ts` — Haptisches Feedback (Vibration API)
+- `src/lib/swMessages.ts` — Service-Worker-Kommunikation: `postSwMessage()`, `clearSwUserCache()`, `activateWaitingSw()` (wartenden SW aktivieren + auf Übernahme warten). **Jeder SW-Zugriff gehört hierher** — `navigator.serviceWorker` fehlt in der iOS-WKWebView der Capacitor-App und in Privatfenstern komplett; ein ungeschützter Zugriff wirft dort und verschluckt die Aktion drumherum
 - `src/lib/idb.ts` — IndexedDB-Wrapper (Offline-Cache)
 - `src/lib/rate-limit.ts` — DB-basiertes Rate Limiting Helper
 - `src/lib/login-attempts.ts` — Login-Versuchs-Tracking

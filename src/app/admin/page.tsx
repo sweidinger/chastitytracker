@@ -15,7 +15,7 @@ import UserAvatar from "@/app/components/UserAvatar";
 import { Lock, LockOpen, Users, ShieldAlert, CalendarClock } from "lucide-react";
 import { getTranslations, getLocale } from "next-intl/server";
 import { toDateLocale, formatDuration, formatDateTimeDual, nowDatetimeLocal, APP_TZ } from "@/lib/utils";
-import { getKeyholderSperrzeiten, getKeyholderOrgasmusAnforderungen, keyholderVisibleKontrolleWhere, foldActiveSperrzeiten, isScheduledDirective } from "@/lib/queries";
+import { getKeyholderSperrzeiten, getKeyholderOrgasmusAnforderungen, keyholderVisibleKontrolleWhere, foldActiveSperrzeiten, isScheduledDirective, LOCK_REQUEST_ORDER, openLockRequestWhere } from "@/lib/queries";
 import { orgasmusAnforderungArtLabel } from "@/lib/constants";
 
 export default async function AdminPage() {
@@ -67,9 +67,12 @@ export default async function AdminPage() {
       where: { userId: { in: userIds }, entryId: null, withdrawnAt: null, ...keyholderVisibleKontrolleWhere(now) },
       orderBy: { createdAt: "desc" },
     }),
+    // Dringendste zuerst (LOCK_REQUEST_ORDER): bei mehreren offenen zeigt die Kachel unten die
+    // erste nicht-terminierte — das muss die mit der frühsten Frist sein, nicht eine beliebige.
     prisma.verschlussAnforderung.findMany({
-      where: { userId: { in: userIds }, art: "ANFORDERUNG", fulfilledAt: null, withdrawnAt: null },
-      select: { id: true, userId: true, nachricht: true, endetAt: true, wirksamAb: true, deviceCategoryId: true },
+      // Volle Zeile (kein select): wir brauchen deviceCategoryId (KG/Plug-Split) + nachricht für die Banner.
+      where: openLockRequestWhere({ userIds }),
+      orderBy: LOCK_REQUEST_ORDER,
     }),
     getKeyholderSperrzeiten({ userIds }),
     getKeyholderOrgasmusAnforderungen(userIds),
@@ -107,14 +110,15 @@ export default async function AdminPage() {
     const offeneOrgasmusAnforderung = orgasmusAnfByUser.get(userId)?.[0] ?? null;
 
     const offeneKontrolle = userKontrollen.find(k => !isScheduled(k.wirksamAb)) ?? null;
-    // deviceCategoryId=null -> KG Verschluss; non-null -> Plug oder andere nicht-KG Kategorie
-    const kgAnforderungen = userAnforderungen.filter(v => v.deviceCategoryId == null);
-    const plugAnforderungen = userAnforderungen.filter(v => v.deviceCategoryId != null);
-    const offeneKgAnforderung = kgAnforderungen.find(v => !isScheduled(v.wirksamAb)) ?? null;
-    const offenePlugAnforderung = plugAnforderungen.find(v => !isScheduled(v.wirksamAb)) ?? null;
-    // Mehrere aktive Sperrzeiten koennen koexistieren — die Liste zeigt dieselbe EFFEKTIVE, gegen die
-    // der Sub verschlossen ist (spaetestes Ende, Reinigung nur wenn alle sie erlauben). Die erste Zeile
-    // zu nehmen hiesse: ein anderes Ende anzuzeigen, als die Box durchsetzt.
+    // deviceCategoryId=null -> KG Verschluss; non-null -> Plug oder andere nicht-KG Kategorie.
+    // KG: mehrere ANFORDERUNGen dürfen koexistieren (Upstream v4.52.0), dringendste zuerst
+    // (userAnforderungen ist per LOCK_REQUEST_ORDER sortiert). Plug bleibt regionen-exklusiv →
+    // einzeln (Fork-Modell). Terminierte stehen separat in `scheduled`.
+    const offeneKgAnforderungen = userAnforderungen.filter(v => v.deviceCategoryId == null && !isScheduled(v.wirksamAb));
+    const offenePlugAnforderung = userAnforderungen.find(v => v.deviceCategoryId != null && !isScheduled(v.wirksamAb)) ?? null;
+    // Mehrere aktive Sperrzeiten können koexistieren — die Liste zeigt dieselbe EFFEKTIVE, gegen die
+    // der Sub verschlossen ist (spätestes Ende, Reinigung nur wenn alle sie erlauben). Die erste Zeile
+    // zu nehmen hiesse: ein anderes Ende anzeigen, als die Box durchsetzt.
     const activeSperrzeit = foldActiveSperrzeiten(userSperrzeiten.filter(s => !isScheduled(s.wirksamAb)));
 
     const scheduled = [
@@ -129,11 +133,12 @@ export default async function AdminPage() {
       offeneKontrolle: offeneKontrolle
         ? { id: offeneKontrolle.id, deadline: offeneKontrolle.deadline, code: offeneKontrolle.code || null, kommentar: offeneKontrolle.kommentar, overdue: offeneKontrolle.deadline < now }
         : null,
-      hasOffeneAnforderung: !!offeneKgAnforderung,
+      // Alarm bei offener KG- ODER Plug-Anforderung (beide sind offene Einschliess-Direktiven).
+      hasOffeneAnforderung: offeneKgAnforderungen.length > 0 || !!offenePlugAnforderung,
       hasActiveSperrzeit: !!activeSperrzeit,
-      offeneAnforderung: offeneKgAnforderung
-        ? { id: offeneKgAnforderung.id, nachricht: offeneKgAnforderung.nachricht, endetAt: offeneKgAnforderung.endetAt, overdue: !!offeneKgAnforderung.endetAt && offeneKgAnforderung.endetAt < now }
-        : null,
+      offeneAnforderungen: offeneKgAnforderungen.map(a => ({
+        id: a.id, nachricht: a.nachricht, endetAt: a.endetAt, overdue: !!a.endetAt && a.endetAt < now,
+      })),
       offenePlugAnforderung: offenePlugAnforderung
         ? { id: offenePlugAnforderung.id, nachricht: offenePlugAnforderung.nachricht, endetAt: offenePlugAnforderung.endetAt, overdue: !!offenePlugAnforderung.endetAt && offenePlugAnforderung.endetAt < now }
         : null,
@@ -202,7 +207,12 @@ export default async function AdminPage() {
             const hasAlarm = !!u.stats.offeneKontrolle || u.stats.hasOffeneAnforderung;
 
             return (
-              <div key={u.id} className="relative">
+              // `min-w-0` ist hier Pflicht, nicht Kosmetik: ein Grid-Item hat `min-width: auto`, die
+              // Spalte kann also nicht unter die Min-Content-Breite ihres Inhalts schrumpfen. Auf 390 px
+              // wuchs die einspaltige Spur dadurch auf 748 px und schob die GANZE Seite nach rechts —
+              // Kopfzeile und Karten links angeschnitten, weisser Streifen rechts. Die Karten-Innereien
+              // brechen und kürzen längst korrekt (v4.52.3); es fehlte allein die Erlaubnis zu schrumpfen.
+              <div key={u.id} className="relative min-w-0">
                 {/* Stretched link — covers whole card for navigation */}
                 <Link
                   href={`/admin/users/${u.id}`}
@@ -217,7 +227,7 @@ export default async function AdminPage() {
                       <UserAvatar username={u.username} size="lg" locked={isLocked} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="font-bold text-foreground">{u.username}</p>
+                          <p className="font-bold text-foreground truncate">{u.username}</p>
                           {hasAlarm && (
                             <span className="w-2 h-2 rounded-full bg-warn flex-shrink-0" />
                           )}
@@ -251,20 +261,21 @@ export default async function AdminPage() {
                         withdrawAction={<WithdrawButton id={u.stats.offeneKontrolle.id} apiPath="/api/admin/kontrollen" titleKey="withdrawKontrolleTitle" colorToken="inspect" />}
                       />
                     )}
-                    {u.stats.offeneAnforderung && (
+                    {u.stats.offeneAnforderungen.map((a) => (
                       <LockRequestBanner
+                        key={a.id}
                         variant="compact"
                         colorScheme="request"
-                        label={u.stats.offeneAnforderung.overdue ? t("lockOverdue") : t("lockRequested")}
-                        overdue={u.stats.offeneAnforderung.overdue}
-                        endetAt={u.stats.offeneAnforderung.endetAt}
+                        label={a.overdue ? t("lockOverdue") : t("lockRequested")}
+                        overdue={a.overdue}
+                        endetAt={a.endetAt}
                         locale={dl}
                         tz={rowTz}
                         viewerTz={viewerTz}
                         subTimePrefix={subLabel}
-                        withdrawAction={<WithdrawButton id={u.stats.offeneAnforderung.id} apiPath="/api/admin/verschluss-anforderung" titleKey="withdrawLockTitle" colorToken="sperrzeit" />}
+                        withdrawAction={<WithdrawButton id={a.id} apiPath="/api/admin/verschluss-anforderung" titleKey="withdrawLockTitle" colorToken="sperrzeit" />}
                       />
-                    )}
+                    ))}
                     {u.stats.offenePlugAnforderung && (
                       <LockRequestBanner
                         variant="compact"
@@ -328,11 +339,18 @@ export default async function AdminPage() {
                           const apiPath = s.kind === "inspection" ? "/api/admin/kontrollen" : "/api/admin/verschluss-anforderung";
                           const colorToken = s.kind === "inspection" ? "inspect" as const : "sperrzeit" as const;
                           return (
-                            <div key={s.id} className="flex items-center gap-2 text-xs text-foreground-muted">
-                              <span className="font-semibold text-foreground">{kindLabel}</span>
-                              <span className="text-foreground-faint">{t("scheduledForPrefix")} {formatDateTimeDual(s.wirksamAb, dl, viewerTz, rowTz, subLabel)}</span>
-                              {s.message && <span className="truncate opacity-80">· {s.message}</span>}
-                              <span className="ml-auto flex-shrink-0">
+                            // items-start + min-w-0-Textspalte: auf Mobile brechen Label/Datum um und die
+                            // Nachricht kürzt sich (truncate wirkt nur mit min-w-0), statt die Zeile — und
+                            // damit die ganze Seite — horizontal über den Viewport zu schieben.
+                            <div key={s.id} className="flex items-start gap-2 text-xs text-foreground-muted">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                                  <span className="font-semibold text-foreground">{kindLabel}</span>
+                                  <span className="text-foreground-faint">{t("scheduledForPrefix")} {formatDateTimeDual(s.wirksamAb, dl, viewerTz, rowTz, subLabel)}</span>
+                                </div>
+                                {s.message && <p className="truncate opacity-80 mt-0.5">{s.message}</p>}
+                              </div>
+                              <span className="flex-shrink-0">
                                 <WithdrawButton id={s.id} apiPath={apiPath} titleKey="scheduledWithdrawTitle" colorToken={colorToken} />
                               </span>
                             </div>
@@ -350,7 +368,6 @@ export default async function AdminPage() {
                         userId={u.id}
                         hasEmail={!!u.email}
                         isLocked={isLocked}
-                        hasOffeneAnforderung={u.stats.hasOffeneAnforderung}
                         hasActiveSperrzeit={u.stats.hasActiveSperrzeit}
                         tz={rowTz}
                         minNow={nowDatetimeLocal(rowTz)}

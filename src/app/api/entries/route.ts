@@ -8,7 +8,7 @@ import { deriveSealCode } from "@/lib/kontrolleService";
 import { validateEntryPayload, TYPE_EMAIL_COLORS, VALID_ROTATIONS, parseOrgasmusArtBase, type Rotation } from "@/lib/constants";
 import { orgasmusValueAllowed, validOeffnenCodes, effectiveOrgasmusArten, effectiveOeffnenGruende, resolveOrgasmusArtDisplay, resolveReasonLabel } from "@/lib/reasonsService";
 import { isDevBypassEnabled } from "@/lib/devMode";
-import { validateDeviceOwnership, releaseSperrzeitenOnOpen, prepareWearEntry, activeVerschlussAnforderungWhere, aktiveKontrolleWhere, getLatestKgEntry } from "@/lib/queries";
+import { validateDeviceOwnership, releaseSperrzeitenOnOpen, prepareWearEntry, activeVerschlussAnforderungWhere, openLockRequestWhere, LOCK_REQUEST_ORDER, aktiveKontrolleWhere, getLatestKgEntry } from "@/lib/queries";
 import { entryGuardError, entryGuardCode } from "@/lib/entryErrors";
 import { setBoxCommandForUser, boxCommandForEntry } from "@/lib/boxCommand";
 import { notifyHeimdall } from "@/lib/heimdallNotify";
@@ -84,7 +84,9 @@ export async function POST(req: NextRequest) {
 
   let withdrawnSperrzeit = false;
   let lockStartTime: Date | null = null;
-  let fulfilledAnforderungDeviceId: string | null = null;
+  // Upstream v4.52.0: mehrere Anforderungen können verschiedene Pflicht-Geräte verlangen — der Sub
+  // gilt als korrekt, sobald sein Gerät IRGENDEINE trifft (Falsch-Gerät-Erkennung unten).
+  let requiredAnforderungDeviceIds: string[] = [];
 
   // Region-Exklusivitaet VORAB (ausserhalb der Transaktion) berechnen: findRegionConflict nutzt den
   // globalen prisma-Client. INNERHALB der interaktiven $transaction (connection_limit=1 -> nur EINE
@@ -324,42 +326,55 @@ export async function POST(req: NextRequest) {
 
       // VerschlussAnforderung (ANFORDERUNG) als erfüllt markieren + ggf. SPERRZEIT erstellen
       if (type === "VERSCHLUSS") {
-        const offeneAnforderung = await tx.verschlussAnforderung.findFirst({
-          // Nur bereits ausgelöste (wirksamAb erreicht) Anforderungen — eine geplante, noch
-          // nicht versendete darf nicht vorzeitig als erfüllt markiert werden.
-          // KG only: deviceCategoryId = null
-          where: { userId: session.user.id, art: "ANFORDERUNG", deviceCategoryId: null, fulfilledAt: null, withdrawnAt: null, ...activeVerschlussAnforderungWhere(new Date()) },
+        // ALLE offenen, bereits ausgelösten KG-Anforderungen (deviceCategoryId = null) — mehrere
+        // dürfen koexistieren, und dieser eine Verschluss erfüllt sie alle: jede verlangte „sei
+        // verschlossen", und das ist er jetzt. Liesse man die übrigen offen, würden sie bei
+        // Fristablauf zu „zu spät verschlossen"-Vergehen im Strafbuch, obwohl der Sub genau das
+        // Verlangte getan hat. Plug-Anforderungen (deviceCategoryId gesetzt) bleiben aussen vor —
+        // die erfüllt der WEAR_BEGIN-Pfad unten. Geplante, noch nicht versendete zählen nicht.
+        const offeneAnforderungen = await tx.verschlussAnforderung.findMany({
+          where: { ...openLockRequestWhere(session.user.id), deviceCategoryId: null, ...activeVerschlussAnforderungWhere(new Date()) },
+          orderBy: LOCK_REQUEST_ORDER,
         });
-        if (offeneAnforderung) {
-          await tx.verschlussAnforderung.update({
-            where: { id: offeneAnforderung.id },
+        if (offeneAnforderungen.length > 0) {
+          await tx.verschlussAnforderung.updateMany({
+            where: { id: { in: offeneAnforderungen.map((a) => a.id) } },
             data: { fulfilledAt: new Date() },
           });
-          fulfilledAnforderungDeviceId = offeneAnforderung.deviceId;
-          // SPERRZEIT-Ende: absolutes sperrEndetAt (Wanduhr) gewinnt und bleibt fix, egal wann tatsächlich
-          // verschlossen wurde; sonst dauerH relativ zur Verschlusszeit (Bestandsverhalten).
-          const sperrEnde =
-            offeneAnforderung.sperrEndetAt ??
-            (offeneAnforderung.dauerH
-              ? new Date(Date.now() + offeneAnforderung.dauerH * 60 * 60 * 1000)
-              : null);
-          // Anders als `createVerschlussAnforderung` (Keyholder-Pfad) zieht das hier KEINE bestehenden
-          // Sperrzeiten zurück — bewusst. Dort ERSETZT die Keyholderin ihre eigene Direktive; hier
-          // handelt der Sub, und dass er sich zwischendurch selbst einschliesst, darf eine geplante
-          // Anweisung der Keyholderin nicht stillschweigend löschen — er kennt sie ja nicht einmal,
-          // es fiele also niemandem auf. Die Koexistenz ist damit gewollt; wie mehrere Sperrzeiten
-          // aufgelöst werden, steht bei `foldActiveSperrzeiten` (queries.ts).
-          if (sperrEnde) {
-            await tx.verschlussAnforderung.create({
-              data: {
+          // Die GEFORDERTEN Geräte aller erfüllten Anforderungen einsammeln (Anforderungen OHNE
+          // Gerätevorgabe stellen keine und fallen weg). Mehrere können verschiedene Geräte verlangen;
+          // der Sub kann aber nur EINES tragen. Er gilt als korrekt, sobald sein Gerät irgendeine der
+          // GEFORDERTEN Vorgaben trifft — sonst würde er für einen Konflikt bestraft, den er gar nicht
+          // auflösen konnte (zwei Anforderungen, zwei verschiedene Pflicht-Geräte). Trifft er KEINE der
+          // geforderten, greift die Falsch-Gerät-Ahndung unten; eine geforderte Vorgabe wird also nicht
+          // dadurch entwertet, dass daneben eine geräte-freie Anforderung offen ist.
+          requiredAnforderungDeviceIds = offeneAnforderungen.map((a) => a.deviceId).filter((d): d is string => d !== null);
+        }
+        // SPERRZEIT-Ende je Anforderung: absolutes sperrEndetAt (Wanduhr) gewinnt und bleibt fix, egal
+        // wann tatsächlich verschlossen wurde; sonst dauerH relativ zur Verschlusszeit (Bestandsverhalten).
+        //
+        // Anders als `createVerschlussAnforderung` (Keyholder-Pfad) zieht das hier KEINE bestehenden
+        // Sperrzeiten zurück — bewusst. Dort ERSETZT die Keyholderin ihre eigene Direktive; hier
+        // handelt der Sub, und dass er sich zwischendurch selbst einschliesst, darf eine geplante
+        // Anweisung der Keyholderin nicht stillschweigend löschen — er kennt sie ja nicht einmal,
+        // es fiele also niemandem auf. Dasselbe gilt für mehrere hier erzeugte Sperrzeiten: wie sie
+        // zur EFFEKTIVEN aufgelöst werden, steht bei `foldActiveSperrzeiten` (queries.ts).
+        const neueSperrzeiten = offeneAnforderungen.flatMap((a) => {
+          const sperrEnde = a.sperrEndetAt ?? (a.dauerH ? new Date(Date.now() + a.dauerH * 60 * 60 * 1000) : null);
+          return sperrEnde
+            ? [{
                 userId: session.user.id,
                 art: "SPERRZEIT",
-                nachricht: offeneAnforderung.nachricht,
+                nachricht: a.nachricht,
                 endetAt: sperrEnde,
-                reinigungErlaubt: offeneAnforderung.reinigungErlaubt,
-              },
-            });
-          }
+                reinigungErlaubt: a.reinigungErlaubt,
+              }]
+            : [];
+        });
+        // Ein Insert statt einer je Anforderung — der POST-Pfad des Subs ist heiss genug, dass sich
+        // N Round-Trips innerhalb der Transaktion nicht lohnen.
+        if (neueSperrzeiten.length > 0) {
+          await tx.verschlussAnforderung.createMany({ data: neueSperrzeiten });
         }
       }
 
@@ -486,9 +501,11 @@ export async function POST(req: NextRequest) {
   // buildStrafbuch abgeleitet); ob sie geahndet wird, entscheidet die Keyholderin oder der Admin.
 
   // Falsches Gerät wird NICHT mehr automatisch bestraft: verschließt der Nutzer mit einem anderen
-  // Gerät als die Anforderung vorgab, markieren wir den Eintrag nur (falschesGeraet). Das Strafbuch
-  // ERKENNT den Verstoß daraus; das Urteil fällt die Keyholderin (AI) oder der Admin.
-  if (type === "VERSCHLUSS" && fulfilledAnforderungDeviceId && fulfilledAnforderungDeviceId !== (deviceId || null)) {
+  // Gerät als die Anforderung(en) vorgaben, markieren wir den Eintrag nur (falschesGeraet). Das
+  // Strafbuch ERKENNT den Verstoß daraus; das Urteil fällt die Keyholderin (AI) oder der Admin.
+  // Mehrere Anforderungen können verschiedene Pflicht-Geräte verlangen — er gilt als korrekt, sobald
+  // sein Gerät IRGENDEINE trifft (requiredAnforderungDeviceIds, siehe oben).
+  if (type === "VERSCHLUSS" && requiredAnforderungDeviceIds.length > 0 && !requiredAnforderungDeviceIds.includes(deviceId || "")) {
     try {
       await prisma.entry.update({ where: { id: entry.id }, data: { falschesGeraet: true } });
     } catch { /* best-effort */ }

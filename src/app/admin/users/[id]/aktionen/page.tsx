@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { assertKeyholderOrAdmin } from "@/lib/authGuards";
 import { getIsLocked, getActiveSperrzeit, getActiveWearSessions, getActivePlugAnforderung, getActivePlugSperrzeit } from "@/lib/queries";
 import { deviceCategoriesEnabled } from "@/lib/constants";
-import { categoryStyle } from "@/lib/categoryConstants";
+import { categoryStyle, wearActionHref } from "@/lib/categoryConstants";
 import { plugCategoryId } from "@/lib/deviceCategories";
 import CategoryIconRender from "@/app/components/CategoryIcon";
 import { getTranslations } from "next-intl/server";
@@ -56,7 +56,6 @@ export default async function AktionenPage({ params }: { params: Promise<{ id: s
   const activeByCategory = new Map(activeWear.map((s) => [s.categoryId, s]));
 
   const hasEmail = !!user.email;
-  const hasOffeneAnforderung = !!offeneAnforderung;
   const hasActiveSperrzeit = !!activeSperrzeit;
   const hasPlug = (categories as CategoryRow[]).some((c) => c.slug === "plug");
   const hasSessionCategories = sessionCategories.length > 0;
@@ -102,8 +101,8 @@ export default async function AktionenPage({ params }: { params: Promise<{ id: s
             </div>
           )}
 
-          {/* Verschluss anfordern */}
-          {!isLocked && hasEmail && !hasOffeneAnforderung ? (
+          {/* Verschluss anfordern — mehrere offene Anforderungen sind erlaubt, kein Gate darauf */}
+          {!isLocked && hasEmail ? (
             <Link
               href={`/admin/users/${id}/aktionen/verschluss-anforderung`}
               className="flex items-center gap-4 px-5 py-4 hover:bg-surface-raised transition active:scale-[0.98]"
@@ -125,7 +124,7 @@ export default async function AktionenPage({ params }: { params: Promise<{ id: s
               <div>
                 <p className="text-sm font-semibold text-foreground-muted">{t("requestLock")}</p>
                 <p className="text-xs text-foreground-faint">
-                  {isLocked ? t("alreadyLocked") : hasOffeneAnforderung ? t("alreadyHasAnforderung") : t("noEmail")}
+                  {isLocked ? t("alreadyLocked") : t("noEmail")}
                 </p>
               </div>
             </div>
@@ -365,8 +364,8 @@ export default async function AktionenPage({ params }: { params: Promise<{ id: s
             const active = activeByCategory.get(c.id);
             const isLast = i === categories.length - 1;
             const href = active
-              ? `/admin/users/${id}/aktionen/wear-end?category=${c.id}`
-              : `/admin/users/${id}/aktionen/wear-begin?category=${c.id}`;
+              ? wearActionHref({ categoryId: c.id, active: true, adminUserId: id })
+              : wearActionHref({ categoryId: c.id, active: false, adminUserId: id });
             const subLabel = active ? `${tw("endShort")} · ${active.deviceName}` : tw("titleBegin");
             const style = categoryStyle(c.color ?? "#6366f1");
             return (

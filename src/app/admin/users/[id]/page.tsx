@@ -148,7 +148,7 @@ export default async function AdminUserOverview({ params }: { params: Promise<{ 
   // Ziele prorata auf die Überschneidung der Vorgabe mit der jeweiligen Periode (wie im Sub-Dashboard).
   const proratedVorgabe = activeVorgabe ? proratedVorgabeTargets(activeVorgabe, now, tz) : null;
 
-  const wearSessionRows = buildWearSessionRows(allNonKgCategories, buildWearSessions(entries, now), dl);
+  const wearSessionRows = buildWearSessionRows(allNonKgCategories, buildWearSessions(entries, now), dl, entries);
 
   return (
     <>
@@ -209,6 +209,7 @@ export default async function AdminUserOverview({ params }: { params: Promise<{ 
             imageUrl: s.imageUrl,
           }))}
           serverNow={now.toISOString()}
+          adminUserId={id}
         />
       )}
 
@@ -301,7 +302,7 @@ export default async function AdminUserOverview({ params }: { params: Promise<{ 
 
       <CategoryGoalsToday userId={id} />
 
-      <SessionList pairs={pairs} orgasmusEntries={orgasmusEntries} userHasDevices={userHasDevices} tz={tz} orgasmusArtenConfig={user.orgasmusArtenConfig} oeffnenGruendeConfig={user.oeffnenGruendeConfig} />
+      <SessionList keyholderView pairs={pairs} orgasmusEntries={orgasmusEntries} userHasDevices={userHasDevices} tz={tz} orgasmusArtenConfig={user.orgasmusArtenConfig} oeffnenGruendeConfig={user.oeffnenGruendeConfig} />
 
       {wearSessionRows.length > 0 && (
         <div className="flex flex-col gap-3">
