@@ -10,9 +10,8 @@ import {
   mcpRequestOrgasm, mcpJudgeOffense,
   mcpGrantReward, mcpCreditReward, mcpRequestSession,
 } from "@/lib/mcpWrite";
-import { ORGASMUS_ARTEN } from "@/lib/constants";
+import { ORGASMUS_ARTEN, VALID_TYPES, CLEANING_MAX_MINUTES_RANGE, CLEANING_MAX_PER_DAY_RANGE } from "@/lib/constants";
 import { verifyAccessToken } from "@/lib/oauth";
-import { VALID_TYPES } from "@/lib/constants";
 // ── MCP V2 ──
 import { getSession } from "@/lib/mcp/sessions";
 import { queryNotes, upsertNoteDef, linkNoteDef, NOTE_TYPES, NOTE_STATUS, NOTE_SOURCE, NOTE_CONFIDENCE, ENTITY_TYPES } from "@/lib/mcp/notes";
@@ -239,7 +238,7 @@ function registerTools(server: McpServer) {
           "full situation: each entry's type, timestamp, free-text note/comment, opening reason " +
           "(oeffnenGrund), orgasm type (orgasmusArt), control code, code verification status, device, " +
           "the device-check (deviceCheck: was the locked device recognised in the control photo — " +
-          "status ok/wrong/missing + detected/expected device), " +
+          "status ok/wrong/missing/not_checked — wrong NUR mit benanntem detected, sonst not_checked), " +
           "whether a photo exists (+ its EXIF capture time) and whether the time was back-/post-dated. " +
           "Newest first. Use this for the narrative context that the aggregate tools (keyholder_dashboard, " +
           "get_session, get_offenses) leave out.",
@@ -540,6 +539,17 @@ function registerTools(server: McpServer) {
           "explizit true sein UND die Box darf sich nicht seit dem letzten Sync selbst geöffnet " +
           "haben, kein Fallback auf locked wie bei hardwareEnforced. Nicht selbst aus " +
           "reportedLocked+keyInBox zusammenrechnen (A-06, MCP-Befundliste 2026-07-17). " +
+          "failsafeWarnings = VORWARNUNG vor einer autonomen Selbst-Öffnung, fertig gerechnet: " +
+          "offlineOpen (Funkstille — hoursOffline, thresholdHours = das Fenster der Box, hoursLeft, " +
+          "dueAt) und lowBatteryOpen (percent, opensAtPercent). severity info/warn/due bei " +
+          "offlineOpen, nur warn/due bei lowBatteryOpen; due heisst, die Not-Öffnung ist erfolgt ODER " +
+          "steht unmittelbar bevor. [] heisst 'kein Anlass ODER keine Datenbasis' — eine nie " +
+          "gesynchronisierte Box und eine Alt-Zeile ohne gemeldete Schwellen schweigen ebenfalls, " +
+          "Stille ist also kein Beleg für Ungefährlichkeit. Verhindern " +
+          "lässt sie sich NUR, indem rechtzeitig jemand für Netz bzw. Strom sorgt — wenn hier etwas " +
+          "steht, gehört es dem Sub gesagt. ACHTUNG: hardwareEnforced/keySecured/staleLock kennen nur " +
+          "den Funkstille-Öffner; ein lowBatteryOpen:due kann neben hardwareEnforced:true stehen — " +
+          "dann gilt die Warnung. " +
           "boxState:null = keine Box registriert. Auch im keyholder_dashboard enthalten.",
         inputSchema: {},
       },
@@ -903,8 +913,8 @@ function registerTools(server: McpServer) {
           "pause, and the max pauses per day (0 = unlimited). Only provided fields change." + KEYHOLDER_SILENT,
         inputSchema: {
           allowed: z.boolean().optional().describe("Allow cleaning pauses?"),
-          maxMinutes: z.number().int().nonnegative().optional().describe("Max minutes per cleaning pause (clamped to 1–120)."),
-          maxPerDay: z.number().int().nonnegative().optional().describe("Max pauses per day, 0 = unlimited (clamped to 0–20)."),
+          maxMinutes: z.number().int().nonnegative().optional().describe(`Max minutes per cleaning pause (clamped to ${CLEANING_MAX_MINUTES_RANGE.min}–${CLEANING_MAX_MINUTES_RANGE.max}).`),
+          maxPerDay: z.number().int().nonnegative().optional().describe(`Max pauses per day, 0 = unlimited (clamped to ${CLEANING_MAX_PER_DAY_RANGE.min}–${CLEANING_MAX_PER_DAY_RANGE.max}).`),
           reason: reasonField,
           dryRun: dryRunFieldV1,
         },

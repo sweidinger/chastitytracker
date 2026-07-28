@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getOrgasmOverBudgetViolations } from "@/lib/orgasmBudgetService";
-import { mapAnforderungStatus, tzDateParts, isPastDeadlineUnfulfilled, dateAtLocalMinutes, APP_TZ } from "@/lib/utils";
+import { mapAnforderungStatus, tzDayKey, isPastDeadlineUnfulfilled, dateAtLocalMinutes, APP_TZ } from "@/lib/utils";
 import { activeVerschlussAnforderungWhere, cleaningBlockReason, type CleaningPermissionUser } from "@/lib/queries";
 import { aktivesReinigungsFenster } from "@/lib/reinigungService";
 import { hhmmToMinutes } from "@/lib/autoKontrolleService";
@@ -241,6 +241,32 @@ function isAllowedToiletteOpening(
 ): boolean {
   return !!sperre && o.oeffnenGrund === "TOILETTE" && userToiletteErlaubt && sperre.toiletteErlaubt;
 }
+/**
+ * Die Frist, bis zu der eine Reinigungsöffnung wieder verschlossen sein muss, DAMIT SIE KEIN
+ * VERGEHEN WIRD — oder `null`, wenn für diese Öffnung gar keine solche Pflicht besteht.
+ *
+ * `null` heisst also nicht „erledigt", sondern „hier gilt diese Pflicht nicht": kein aktiver
+ * Sperrzeit-Kontext, Reinigung nicht erlaubt, ausserhalb der Fenster, oder die Sperrzeit endet vor
+ * der Frist (dann bleibt nichts mehr zu verletzen).
+ *
+ * NICHT zu verwechseln mit {@link import("./utils").cleaningInterruptionDeadline} — der Frist, bis
+ * zu der ein Wiederverschluss die Session fortführt. Die hier ist strenger im Zugang (nur unter
+ * Sperrzeit) und zugleich grosszügiger in der Dauer (bei konfigurierten Fenstern bis ans
+ * Fensterende, also möglicherweise Stunden). Als Countdown im Dashboard gezeigt, verspräche sie
+ * dem Sub Zeit, die das Session-Modell längst nicht mehr gibt.
+ */
+export function cleaningRelockObligation(
+  opening: { oeffnenGrund: string | null; startTime: Date },
+  sperre: { reinigungErlaubt: boolean; endetAt: Date | null } | null,
+  user: CleaningPermissionUser,
+  maxMinuten: number,
+  enforcedFrom: Date,
+): Date | null {
+  if (!sperre || !isAllowedReinigungOpening(opening, sperre, user, enforcedFrom)) return null;
+  const deadline = reinigungRelockDeadline(opening.startTime, maxMinuten, user.reinigungsFenster, user.timezone);
+  const sperrzeitCoversDeadline = sperre.endetAt === null || sperre.endetAt >= deadline;
+  return sperrzeitCoversDeadline ? deadline : null;
+}
 
 /** Computes the Strafbuch for a user: unauthorized openings during Sperrzeiten, late and
  *  rejected Kontrollen, REINIGUNG-limit violations, late locks, missed cleaning re-locks, plus
@@ -358,10 +384,11 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
     entryId: e.id, startTime: e.startTime, note: e.note, deviceName: e.device?.name ?? null,
   }));
 
-  // REINIGUNG-Oeffnung ueber dem Tageskontingent ist eine Erkennung; ob sie bestraft wird,
-  // entscheidet die Keyholderin (punished = ein StrafeRecord referenziert den Eintrag).
-  // 0 = unbegrenzt -> keine Verstoesse. Geraete-Wechsel laufen ueber diesen Pfad und werden
-  // dadurch nicht mehr automatisch geahndet.
+  // REINIGUNG-Limit: NICHT mehr aus Auto-StrafeRecords, sondern LIVE abgeleitet — eine
+  // REINIGUNG-Öffnung über dem Tageskontingent (Kalendertag der SUB, `subTz`) ist eine Erkennung;
+  // ob sie bestraft wird, entscheidet die Keyholderin (punished = ein StrafeRecord referenziert den
+  // Eintrag). 0 = unbegrenzt → keine Verstösse. Wechsel laufen über diesen Pfad und werden so nicht
+  // mehr automatisch geahndet.
   const reinigungLimitViolations: { entryId: string; startTime: Date | null; note: string | null }[] = [];
   if (reinigungMaxProTag > 0) {
     const perDay = new Map<string, number>();
@@ -370,8 +397,9 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
       .slice()
       .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
     for (const o of reinigungAsc) {
-      const { year, month, day } = tzDateParts(o.startTime);
-      const key = `${year}-${month}-${day}`;
+      // Sub-Tag, nicht CH-Tag — dieselbe Grenze, die `reinigungVerbrauchtHeute` (midnightInTZ mit
+      // der Sub-Zeitzone) beim Zählen auf der Box-Karte zieht.
+      const key = tzDayKey(o.startTime, subTz);
       const n = (perDay.get(key) ?? 0) + 1;
       perDay.set(key, n);
       if (n > reinigungMaxProTag) reinigungLimitViolations.push({ entryId: o.id, startTime: o.startTime, note: o.note });
@@ -415,12 +443,11 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
   // already ended before the deadline: once the Sperrzeit is over there's no further re-lock
   // obligation left to violate, whether or not (or how late) the user eventually re-locks.
   const cleaningNotRelocked = oeffnungenMitSperre
-    .filter(({ o, sperre }) => isAllowedReinigungOpening(o, sperre, cleaningUser, enforcedFrom))
     .flatMap(({ o, sperre }) => {
-      const deadline = reinigungRelockDeadline(o.startTime, reinigungMaxMinuten, reinigungsFenster, subTz);
-      const sperrzeitCoversDeadline = sperre!.endetAt === null || sperre!.endetAt >= deadline;
+      const deadline = cleaningRelockObligation(o, sperre ?? null, cleaningUser, reinigungMaxMinuten, enforcedFrom);
+      if (!deadline) return [];
       const relockAt = verschluesse.find((v) => v.startTime > o.startTime)?.startTime ?? null;
-      return sperrzeitCoversDeadline && isCleaningNotRelocked(deadline, relockAt, now)
+      return isCleaningNotRelocked(deadline, relockAt, now)
         ? [{ entryId: o.id, startTime: o.startTime, deadline, relockAt, note: o.note }]
         : [];
     });

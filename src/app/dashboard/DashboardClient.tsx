@@ -1,9 +1,13 @@
 "use client";
 
+import { useEffect } from "react";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Lock, LockOpen } from "lucide-react";
 import { useTranslations, useLocale } from "next-intl";
 import TimerDisplay from "@/app/components/TimerDisplay";
+import Button from "@/app/components/Button";
 import EmptyState from "@/app/components/EmptyState";
 import KontrolleBanner from "@/app/components/KontrolleBanner";
 import LockRequestBanner from "@/app/components/LockRequestBanner";
@@ -15,6 +19,9 @@ import { useLiveHours } from "@/app/hooks/useLiveHours";
 // ── Types ────────────────────────────────────
 export interface DashboardProps {
   currentStatus: { type: "VERSCHLUSS" | "OEFFNEN"; since: string } | null;
+  /** Ende der laufenden Reinigungspause (ISO) — bis dahin führt ein Wiederverschluss dieselbe
+   *  Session fort. `null`, wenn keine läuft. Reine Anzeige: der Verschluss-Zustand ist unberührt. */
+  cleaningPauseUntil: string | null;
   hasEntries: boolean;
 
   // Kontrolle — je Gerät (CAGE/PLUG) kann eine aktiv sein
@@ -114,6 +121,7 @@ export default function DashboardClient(props: DashboardProps) {
   const locale = useLocale();
   const {
     currentStatus,
+    cleaningPauseUntil,
     hasEntries,
     offeneKontrollen,
     offeneVerschlussAnf,
@@ -132,7 +140,30 @@ export default function DashboardClient(props: DashboardProps) {
     tz,
   } = props;
 
+  const router = useRouter();
   const isLocked = currentStatus?.type === "VERSCHLUSS";
+
+  // Nach Fristablauf zurück in den normalen „offen"-Zustand — EIN Timer, ausgelöst vom Effekt.
+  // Nicht über `onExpire` von TimerDisplay: das feuert aus dem Render heraus und im Sekundentakt,
+  // was React verbietet (setState einer fremden Komponente während des Renderns) und bei einer
+  // vorgehenden Client-Uhr sekündlich einen vollständigen Server-Render auslösen würde.
+  useEffect(() => {
+    if (!cleaningPauseUntil) return;
+    const restMs = new Date(cleaningPauseUntil).getTime() - Date.now();
+    // Schon abgelaufen (Uhr-Versatz): einmal refreshen, nicht wiederholt.
+    const timer = setTimeout(() => router.refresh(), Math.max(0, restMs) + 1000);
+    return () => clearTimeout(timer);
+  }, [cleaningPauseUntil, router]);
+  const isOpen = !isLocked;
+
+  // Der Timer im Status-Hero: während einer Reinigungspause die Restfrist, sonst die Dauer seit dem
+  // Öffnen. `format="short"` (mm:ss) für den Countdown — `long` zeigt unter einer Stunde nur volle
+  // Minuten und stünde die letzte, entscheidende Minute lang auf „0m".
+  const heroTimer = cleaningPauseUntil
+    ? { targetDate: cleaningPauseUntil, mode: "countdown" as const, format: "short" as const }
+    : currentStatus
+      ? { targetDate: currentStatus.since, mode: "countup" as const, format: "long" as const }
+      : null;
 
   const tagH = useLiveHours(baseTagH, serverNow, isLocked);
   const wocheH = useLiveHours(baseWocheH, serverNow, isLocked);

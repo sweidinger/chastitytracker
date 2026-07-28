@@ -4,8 +4,9 @@ import { requireApi } from "@/lib/authGuards";
 import { prisma } from "@/lib/prisma";
 import { markLastAction } from "@/lib/appMeta";
 import { verifyKontrolleCodeDeduped } from "@/lib/verifyCache";
+import { detectKeyInBox } from "@/lib/verifyCode";
 import { deriveSealCode } from "@/lib/kontrolleService";
-import { validateEntryPayload, TYPE_EMAIL_COLORS, VALID_ROTATIONS, parseOrgasmusArtBase, type Rotation } from "@/lib/constants";
+import { validateEntryPayload, TYPE_EMAIL_COLORS, VALID_ROTATIONS, BOX_PHOTO_TYPES, parseOrgasmusArtBase, type Rotation } from "@/lib/constants";
 import { orgasmusValueAllowed, validOeffnenCodes, effectiveOrgasmusArten, effectiveOeffnenGruende, resolveOrgasmusArtDisplay, resolveReasonLabel } from "@/lib/reasonsService";
 import { isDevBypassEnabled } from "@/lib/devMode";
 import { validateDeviceOwnership, releaseSperrzeitenOnOpen, prepareWearEntry, activeVerschlussAnforderungWhere, openLockRequestWhere, LOCK_REQUEST_ORDER, aktiveKontrolleWhere, getLatestKgEntry } from "@/lib/queries";
@@ -54,7 +55,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
   // verifikationStatus is never accepted from client – set server-side only
-  const { type, startTime, imageUrl, imageExifTime, note, oeffnenGrund, orgasmusArt, kontrollCode, deviceId, imageRotation, codeImageUrl, codeReadable, keyInBox, erektionGemeldet, videoUrl, sessionGoalAchieved, pauseDevice } = body;
+  const { type, startTime, imageUrl, imageExifTime, note, oeffnenGrund, orgasmusArt, kontrollCode, deviceId, imageRotation, codeImageUrl, codeReadable, keyInBox, erektionGemeldet, videoUrl, sessionGoalAchieved, pauseDevice, boxImageUrl, boxImageRotation } = body;
 
   const devBypass = isDevBypassEnabled(req.headers.get("host"));
   // Reason-Codes gegen die (ggf. angepasste) Liste DES SESSION-USERS validieren; null-Config → Built-ins.
@@ -75,6 +76,16 @@ export async function POST(req: NextRequest) {
   // Reinigung/Toilette laufen ausschließlich über die Pause-Funktion — nicht über ein volles Öffnen/Trage-Ende.
   if ((type === "OEFFNEN" || type === "WEAR_END") && (oeffnenGrund === "REINIGUNG" || oeffnenGrund === "TOILETTE")) {
     return NextResponse.json({ error: "Reinigung/Toilette erfolgt über die Pause-Funktion, nicht über Öffnen/Trage-Ende." }, { status: 400 });
+  }
+
+  // Replay-Schutz fürs Box-Foto: dieselbe Aufnahme darf nicht ein zweites Mal als Nachweis dienen.
+  // Ohne diese Prüfung könnte der Sub die URL seines ersten Fotos aus dem Request-Body abschreiben
+  // und bei jeder Kontrolle erneut schicken — der Nachweis „der Schlüssel liegt NOCH drin" wäre
+  // dann eine Momentaufnahme von vor Wochen. Das Haupt-Foto ist über die EXIF-Zeit gedeckt, das
+  // Box-Foto hat keine; hier ist die Eindeutigkeit der Datei die Deckung.
+  if (BOX_PHOTO_TYPES.has(type) && boxImageUrl) {
+    const reused = await prisma.entry.findFirst({ where: { boxImageUrl }, select: { id: true } });
+    if (reused) return NextResponse.json({ error: "BOX_PHOTO_REUSED" }, { status: 400 });
   }
 
   // Wrap state-check + create in a transaction to prevent TOCTOU races
@@ -283,6 +294,8 @@ export async function POST(req: NextRequest) {
           // Session: Video-Beweis + Ziel-erreicht (nur SESSION_END)
           videoUrl: type === "SESSION_END" ? (videoUrl || null) : null,
           sessionGoalAchieved: type === "SESSION_END" && typeof sessionGoalAchieved === "boolean" ? sessionGoalAchieved : undefined,
+          // `keyDetected` bleibt hier ungesetzt (null) — das Urteil fällt nach dem Commit (siehe unten).
+          boxImageUrl: BOX_PHOTO_TYPES.has(type) ? (boxImageUrl || null) : null,
         },
       });
 
@@ -652,6 +665,17 @@ export async function POST(req: NextRequest) {
 
         details.push(`<strong>Foto:</strong> ${imageUrl ? "Ja ✓" : "Nein"}`);
 
+        // Schlüssel-Deklaration im Klartext, „nicht in der Box" in Rot: das ist die eine Angabe,
+        // die entscheidet, ob der Verschluss überhaupt hardware-gesichert ist. Bewusst die
+        // DEKLARATION, nicht das KI-Urteil — die Mail geht sofort raus, die Erkennung läuft erst.
+        if (type === "VERSCHLUSS" && keyInBoxDeclared !== null) {
+          details.push(
+            keyInBoxDeclared
+              ? `<strong>Schlüssel:</strong> in der Box`
+              : `<strong>Schlüssel:</strong> <span style="color:#dc2626;font-weight:bold">NICHT in der Box</span>`,
+          );
+        }
+
         if (note) {
           details.push(`<strong>Notiz:</strong> <em>${escHtml(note)}</em>`);
         }
@@ -728,6 +752,28 @@ export async function POST(req: NextRequest) {
         });
       } catch (err) {
         console.error("[POST /api/entries] verifikationStatus write failed for entry", entryId, err);
+      }
+    })();
+  }
+
+  // Schlüssel-Erkennung auf dem Box-Foto — wie die Code-Verifikation server-seitig und
+  // fire-and-forget. Der Client schickt NUR das Foto, nie das Urteil: ein Nachweis, den der
+  // Nachzuweisende selbst formuliert, ist keiner.
+  //
+  // Anders als bei `verifikationStatus` muss hier NICHT immer zurückgeschrieben werden: die Spalte
+  // startet auf null und `null` heisst genau dasselbe wie ihr Startwert („nicht geprüft"). Es gibt
+  // also keinen „pending"-Zustand, in dem ein Eintrag hängenbleiben könnte.
+  if (BOX_PHOTO_TYPES.has(type) && boxImageUrl) {
+    const entryId = entry.id;
+    const photoUrl = boxImageUrl;
+    const safeRotation: Rotation = VALID_ROTATIONS.includes(boxImageRotation) ? boxImageRotation : 0;
+    (async () => {
+      const detected = await detectKeyInBox(photoUrl, safeRotation);
+      if (detected === null) return;
+      try {
+        await prisma.entry.update({ where: { id: entryId }, data: { keyDetected: detected } });
+      } catch (err) {
+        console.error("[POST /api/entries] keyDetected write failed for entry", entryId, err);
       }
     })();
   }

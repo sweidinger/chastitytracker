@@ -252,7 +252,7 @@ export async function buildOverview(username: string, opts: McpFormatOptions = {
   const lastOrgasmus = entries.find((e) => e.type === "ORGASMUS") ?? null;
 
   // ── Wearing hours + KG training goal ──
-  const { tagH, wocheH, monatH } = calculateWearingHoursByRange(entries, now);
+  const { tagH, wocheH, monatH } = calculateWearingHoursByRange(entries, now, timezone);
 
   // ── Belohnungs-Ökonomie + Gesundheits-Stopp + Tagesform ──
   // Erreichte Trainingsziele in Guthaben verbuchen, BEVOR der Belohnungs-Stand gelesen wird — so
@@ -284,7 +284,7 @@ export async function buildOverview(username: string, opts: McpFormatOptions = {
     trainingGoalKg: activeVorgabe ? (() => {
       // Ziele prorata (wie die Kategorie-Ziele aus buildCategoryWearGoals) — sonst hätten KG und
       // Kategorien in derselben V1-Antwort unterschiedliche %-Nenner bei mitten-in-Periode-Vorgaben.
-      const t = proratedVorgabeTargets(activeVorgabe, now);
+      const t = proratedVorgabeTargets(activeVorgabe, now, timezone);
       return { ...goalProgress(tagH, wocheH, monatH, t.minProTagH, t.minProWocheH, t.minProMonatH), note: activeVorgabe.notiz };
     })() : null,
     reinigung: buildReinigungView(reinigungUser, cleaningUsedToday, now, timezone),

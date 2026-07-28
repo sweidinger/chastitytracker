@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
   formatDateTime, formatHours,
-  buildPairs, getOpenPair, interruptionPauseMs, buildKontrolleItems,
+  buildPairs, getOpenPair, interruptionPauseMs, buildKontrolleItems, runningCleaningPauseUntil,
   toDateLocale, calculateWearingHoursByRange,
   getMidnightToday, getWeekStart, getMonthStart,
   wearingHoursFromPairs, APP_TZ,
@@ -20,6 +20,8 @@ import { plugCategoryId } from "@/lib/deviceCategories";
 import { deviceCategoriesEnabled, heimdallEnabled } from "@/lib/constants";
 import { getActivePause, pauseBeginCountsToday, buildCagePauseQuota, buildPlugPauseQuota } from "@/lib/pauseService";
 import { buildReinigungView, reinigungVerbrauchtHeute, nextReinigungsFenster } from "@/lib/reinigungService";
+import { buildBoxReinigungView } from "@/lib/boxReinigung";
+import { loadTelemetryKeyProof } from "@/lib/boxKeyProof";
 import { effectiveOrgasmusArten, resolveReasonLabel, resolveOrgasmusArtDisplay } from "@/lib/reasonsService";
 import { getTranslations, getLocale } from "next-intl/server";
 import DashboardClient, { type DashboardProps } from "./DashboardClient";
@@ -131,24 +133,6 @@ export default async function DashboardPage() {
   const cagePauseQuota = userSettings ? buildCagePauseQuota(userSettings, cagePauseCounts) : [];
   // Analog für die Plug-Session (Plug-Toilette immer/unbegrenzt, Plug-Reinigung nur wenn aktiviert).
   const plugPauseQuota = userSettings ? buildPlugPauseQuota(userSettings, plugPauseCounts) : [];
-
-  // Reinigungs-Regeln für die Box-Karte: einmal je Seitenaufbau, nicht im 5s-Poll. Dieselbe Quelle
-  // wie `get_context.cleaning` im MCP — der Sub sah die Fenster bisher nirgends. `blockedBy` kommt
-  // aus derselben Regel wie die Durchsetzung und kennt als einziges die AKTIVE Sperrzeit: ohne es
-  // versprach die Karte Fenster, die eine reinigungsverbietende Sperre längst gesperrt hatte.
-  const jetzt = new Date();
-  const boxReinigung = heimdallEnabled() && userSettings
-    ? {
-        ...buildReinigungView(userSettings, await reinigungVerbrauchtHeute(userId, jetzt, tz), jetzt, tz),
-        nextWindow: nextReinigungsFenster(userSettings.reinigungsFenster, jetzt, tz),
-        blockedBy: cleaningBlockReason(
-          { reinigungErlaubt: userSettings.reinigungErlaubt, reinigungsFenster: userSettings.reinigungsFenster, timezone: tz },
-          activeSperrzeit ? [activeSperrzeit] : [],
-          jetzt,
-        ),
-      }
-    : null;
-
   // ── Compute derived state ──
   // Aktive (offene) Kontrollen — max. eine je Gerät (neueste), Cage-Legacy (device null) = CAGE.
   const aktiveKontrollen = alleAnforderungen.filter((k) => !k.entryId && !k.withdrawnAt);
@@ -173,6 +157,20 @@ export default async function DashboardPage() {
 
   // KG-Gerätename der aktiven Verschluss-Session (für die große KG-Karte)
   const cageDeviceName = latest?.type === "VERSCHLUSS" ? (latest.device?.name ?? null) : null;
+  // Reinigungspause: der jüngste KG-Eintrag ist eine Reinigungsöffnung, deren Wiederverschluss die
+  // Session noch fortführen würde. Ohne diese Ableitung sah der Sub in dieser Zeit „Geöffnet
+  // seit …" — nicht von einer wirklich beendeten Session zu unterscheiden (Rückmeldung 15.07.2026).
+  //
+  // Die Frist kommt aus `runningCleaningPauseUntil` — DERSELBEN Regel, nach der `buildPairs` die
+  // Öffnung als blosse Unterbrechung verbucht. Das ist der Kern: der Countdown beantwortet genau
+  // die Frage, die der Sub stellt („bleibt das dieselbe Session?"), und kann dem Zeitstrahl
+  // darunter gar nicht widersprechen. Die Strafbuch-Frist (`cleaningRelockObligation`) ist eine
+  // ANDERE Frist — siehe die Warnung an beiden Funktionen.
+  //
+  // BEWUSST nur Anzeige: `isLocked`, die Box-Kopplung und jede Statistik bleiben unberührt — die
+  // Box IST offen, und ein erzwungenes „verschlossen" bräche das Wiederverschluss-Formular und die
+  // Entry-Guards.
+  const cleaningPauseUntil = runningCleaningPauseUntil(latest, reinigung, now);
 
   // ── Build kontroll items for session events ──
   // Cage-Timeline: nur KG-Kontrollen (device CAGE/null) — Plug-Kontrollen erscheinen in der Plug-Karte.
@@ -194,12 +192,19 @@ export default async function DashboardPage() {
       })
     : null;
 
+  // ── Box-Ableitungen ──
+  // Die Reinigungs-Regeln der Box-Karte (Begründung in `buildBoxReinigungView`) zählen ihr
+  // Tageskontingent aus den oben geladenen `entries` — ohne DB. Nur der Schlüssel-Nachweis aus der
+  // Telemetrie (`boxKeyProof.ts`) fragt noch ab, deshalb hier kein `Promise.all` mehr.
+  const boxReinigung = buildBoxReinigungView(userSettings, entries, activeSperrzeit, now, tz);
+  const telemetryKeyProof = await loadTelemetryKeyProof(userId, pairs);
+
   const orgasmCfg = effectiveOrgasmusArten(userSettings?.orgasmusArtenConfig);
   const rawSessionEvents = activePair
-    ? buildSessionEvents(activePair, orgasmusEntries, dl, (art) => resolveOrgasmusArtDisplay(art, orgasmCfg, tOrgasm))
+    ? buildSessionEvents(activePair, orgasmusEntries, dl, (art) => resolveOrgasmusArtDisplay(art, orgasmCfg, tOrgasm), telemetryKeyProof)
     : [];
 
-  const { tagH, wocheH, monatH, jahrH } = calculateWearingHoursByRange(entries, now);
+  const { tagH, wocheH, monatH, jahrH } = calculateWearingHoursByRange(entries, now, tz);
 
   // "Offen"-Hero-Karte (Fork): zeigt beim geöffneten Käfig den Seit-Timer.
   const cageOpen = currentStatus?.type === "OEFFNEN";
@@ -285,6 +290,7 @@ export default async function DashboardPage() {
 
   const clientProps: DashboardProps = {
     currentStatus,
+    cleaningPauseUntil: cleaningPauseUntil?.toISOString() ?? null,
     hasEntries: entries.length > 0,
 
     offeneKontrollen,
@@ -402,6 +408,7 @@ export default async function DashboardPage() {
                 ? t(activeSperrzeit.reinigungErlaubt ? "cleaningNoteAllowed" : "cleaningNoteForbidden")
                 : null
             }
+            keyInBox={activePair.verschluss.keyInBox ?? null}
             activeVorgabe={activeVorgabe ? proratedVorgabeTargets(activeVorgabe, now, tz) : null}
             tagH={tagH}
             wocheH={wocheH}
@@ -506,7 +513,7 @@ export default async function DashboardPage() {
       <DashboardClient {...clientProps} tz={tz} />
       {pairs.length > 0 && (
         <DashboardBlock>
-          <SessionList pairs={pairs} orgasmusEntries={orgasmusEntries} userHasDevices={userHasDevices} tz={tz} orgasmusArtenConfig={userSettings?.orgasmusArtenConfig} oeffnenGruendeConfig={userSettings?.oeffnenGruendeConfig} />
+          <SessionList pairs={pairs} orgasmusEntries={orgasmusEntries} userHasDevices={userHasDevices} tz={tz} orgasmusArtenConfig={userSettings?.orgasmusArtenConfig} oeffnenGruendeConfig={userSettings?.oeffnenGruendeConfig} telemetryKeyProof={telemetryKeyProof} />
         </DashboardBlock>
       )}
       {wearSessionRows.length > 0 && (

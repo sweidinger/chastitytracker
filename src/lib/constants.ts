@@ -38,6 +38,17 @@ export const WEAR_ENTRY_TYPES: ReadonlySet<string> = new Set(["WEAR_BEGIN", "WEA
 export const SESSION_ENTRY_TYPES: ReadonlySet<string> = new Set(["SESSION_BEGIN", "SESSION_END"]);
 /** Entry types for pause tracking (applies to both KG/Cage and Plug). pauseDevice="CAGE"|"PLUG". */
 export const PAUSE_ENTRY_TYPES: ReadonlySet<string> = new Set(["PAUSE_BEGIN", "PAUSE_END"]);
+/** Entry types that may carry a box photo (`boxImageUrl`): der Schlüssel-Nachweis durchs
+ *  Sichtfenster der Heimdall-Box. Beim Einschliessen entsteht er, bei jeder Kontrolle wird er
+ *  wiederholt — und nur die Wiederholung belegt, dass der Schlüssel drin GEBLIEBEN ist. Die
+ *  Wiederholung darf seit `lib/boxKeyProof.ts` auch aus der Telemetrie kommen (unbewegter Riegel
+ *  seit dem letzten Nachweis) — das ersetzt aber nur ein FEHLENDES Foto, nie ein vorliegendes. */
+export const BOX_PHOTO_TYPES: ReadonlySet<string> = new Set(["VERSCHLUSS", "PRUEFUNG"]);
+/** `BoxEvent.type`: die Übergänge, die der Heimdall-Server melden darf (Ingest-Whitelist). */
+export const BOX_EVENT_TYPES = ["LOCKED", "UNLOCKED", "EARLY_OPEN", "UNAUTHORIZED_OPEN"] as const;
+/** Davon die Bewegungen AUS der Verschluss-Stellung — die Gegenprobe des Schlüssel-Nachweises aus der
+ *  Telemetrie (`lib/boxKeyProof.ts`). Abgeleitet, damit ein neuer Ereignis-Typ nur EINE Liste braucht. */
+export const BOLT_OPEN_EVENT_TYPES = BOX_EVENT_TYPES.filter((t) => t !== "LOCKED");
 /** Feature flag: gate WEAR_BEGIN/WEAR_END entry creation + categories UI.
  *  Default ON. Setze `ENABLE_DEVICE_CATEGORIES=false` um KG-only-Verhalten zu erzwingen
  *  (z.B. fuer eine Instanz die das Feature noch nicht ausrollen will).
@@ -201,6 +212,52 @@ export const NO_FIELDS_TO_UPDATE = "noFieldsToUpdate";
 /** Stabiler Fehler-Code für ein Feld, das keine gültige „HH:MM"-Uhrzeit ist. */
 export const INVALID_TIME = "invalidTime";
 
+/** Zulässiger Wertebereich EINES Zahlen-Feldes. `fallback` = Wert bei fehlender Eingabe — NICHT die
+ *  Untergrenze, deshalb ein eigenes Feld. Wann er greift, entscheidet die jeweilige Klemm-Funktion und
+ *  ist bewusst verschieden: `clamp` (Server) nimmt ihn auch für einen auf 0 gerundeten Wert,
+ *  `clampInputValue` (Formular) nur für eine leere/unlesbare Eingabe — eine getippte „0" landet dort
+ *  auf `min`. Siehe die Begründung bei `clampInputValue` in `utils.ts`. */
+export interface NumberRange {
+  readonly min: number;
+  readonly max: number;
+  readonly fallback: number;
+}
+
+/*
+ * Wertebereiche der Admin-Settings — EINE Quelle für alle Seiten: die Services klemmen damit beim
+ * Schreiben (`clamp`), die Formulare geben denselben Bereich an `NumberInput` weiter, und die
+ * MCP-Tool-Schemas/dryRun-Previews nennen bzw. zeigen denselben Bereich. Getrennte Kopien driften
+ * unbemerkt: klemmt das Formular auf einen veralteten Bereich, zerstört es die Eingabe, bevor der
+ * Server sie überhaupt sieht. Hier statt im jeweiligen Service, weil `NumberInput` ein Client-Modul
+ * ist und dieses hier — anders als die Services — keinen Prisma-Client mitzieht.
+ *
+ * JE FELD eine Konstante, auch wo zwei Felder einer „von – bis"-Zeile min/max teilen: der Fallback
+ * gehört zum Feld (er spiegelt dessen `@default` im Prisma-Schema), nicht zum Bereich. Ein optionaler
+ * Fallback hätte ihn stattdessen an jedes Call-Site zurückgereicht — genau die Kopie, die hier weg soll.
+ */
+
+/** Minuten je Reinigungspause. */
+export const CLEANING_MAX_MINUTES_RANGE = { min: 1, max: 120, fallback: 15 } as const satisfies NumberRange;
+/** Reinigungspausen pro Tag (0 = unbegrenzt). */
+export const CLEANING_MAX_PER_DAY_RANGE = { min: 0, max: 20, fallback: 0 } as const satisfies NumberRange;
+
+/** Grenzen beider Eskalationsstufen einer überfälligen Kontrolle: 5 min – 24 h. */
+const INSPECTION_ESCALATION_DELAY = { min: 5, max: 1440 } as const;
+/** Verzögerung bis zur Erinnerung (Stufe 1). */
+export const INSPECTION_REMINDER_DELAY_RANGE = { ...INSPECTION_ESCALATION_DELAY, fallback: 5 } as const satisfies NumberRange;
+/** Verzögerung bis zum automatischen Vermerk (Stufe 2). */
+export const INSPECTION_AUTO_MARK_DELAY_RANGE = { ...INSPECTION_ESCALATION_DELAY, fallback: 60 } as const satisfies NumberRange;
+
+/** Automatische Kontrollen pro Tag — Min und Max derselben Zeile teilen auch den Fallback. */
+export const AUTO_INSPECTION_PER_DAY_RANGE = { min: 0, max: 12, fallback: 0 } as const satisfies NumberRange;
+
+/** Grenzen der Erfüllungsfrist einer automatischen Kontrolle (Minuten). */
+const AUTO_INSPECTION_DEADLINE = { min: 5, max: 240 } as const;
+/** Untere Frist-Grenze („von"). */
+export const AUTO_INSPECTION_DEADLINE_FROM_RANGE = { ...AUTO_INSPECTION_DEADLINE, fallback: 15 } as const satisfies NumberRange;
+/** Obere Frist-Grenze („bis"). */
+export const AUTO_INSPECTION_DEADLINE_TO_RANGE = { ...AUTO_INSPECTION_DEADLINE, fallback: 60 } as const satisfies NumberRange;
+
 /** Call-to-Action-Button-Farben für HTML-Mails (in E-Mail keine CSS-Variablen → Hex).
  *  Bewusst getrennt von TYPE_EMAIL_COLORS: das ist der Akzent je Eintrags-TYP, nicht die
  *  Button-Farbe eines Benachrichtigungs-Mails (eine Orgasmus-ANWEISUNG ist kein Orgasmus-Eintrag). */
@@ -315,7 +372,7 @@ export function isValidImageUrl(url: string | null | undefined): boolean {
  * log entries without a photo. User-route requires a photo for PRUEFUNG.
  */
 export function validateEntryPayload(
-  body: { type?: string; startTime?: string; imageUrl?: string; oeffnenGrund?: string; orgasmusArt?: string; note?: string; keyInBox?: unknown },
+  body: { type?: string; startTime?: string; imageUrl?: string; boxImageUrl?: string; oeffnenGrund?: string; orgasmusArt?: string; note?: string; keyInBox?: unknown },
   opts: { requirePhotoForPruefung?: boolean; allowFuture?: boolean } = {},
   // Per-User Reason-Validierung (aus reasonsService). Fehlt sie, gelten die eingebauten Konstanten
   // (Default-Verhalten für null-Config / Aufrufer ohne User-Kontext) — unverändert. `orgasmAllowed`
@@ -323,7 +380,7 @@ export function validateEntryPayload(
   reasonCtx?: { orgasmAllowed?: (value: string) => boolean; openingCodes?: Set<string> },
 ): EntryValidationCode | null {
   const { requirePhotoForPruefung = true, allowFuture = false } = opts;
-  const { type, startTime, imageUrl, oeffnenGrund, orgasmusArt, note, keyInBox } = body;
+  const { type, startTime, imageUrl, boxImageUrl, oeffnenGrund, orgasmusArt, note, keyInBox } = body;
 
   // Schlüssel-Deklaration: nur ein echter Boolean oder gar nichts. Ein Client, der `"false"` schickt,
   // darf weder als "ja" durchrutschen (String ist truthy) noch als String in der Spalte landen.
@@ -331,6 +388,9 @@ export function validateEntryPayload(
     return "INVALID_KEY_IN_BOX";
   }
   if (!isValidImageUrl(imageUrl)) return "INVALID_IMAGE_URL";
+  // Box-Foto (Schlüssel im Sichtfenster): derselbe Pfad-Guard wie das Haupt-Foto. Es wird
+  // server-seitig an die Vision gereicht — eine fremde URL wäre hier direkt ein SSRF-Hebel.
+  if (!isValidImageUrl(boxImageUrl)) return "INVALID_IMAGE_URL";
   if (!startTime) return "START_TIME_REQUIRED";
   if (!allowFuture && new Date(startTime) > new Date()) return "TIME_IN_FUTURE";
   if (!type || !VALID_TYPES.includes(type as (typeof VALID_TYPES)[number])) {

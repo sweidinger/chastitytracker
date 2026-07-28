@@ -1,7 +1,9 @@
+import type { DeviceCheckStatus } from "@/lib/deviceCheck";
 import { loadUploadedImage, type ImageData } from "@/lib/imageUtils";
 import { visionDeviceMaxImagePx, visionMaxTotalRefs } from "@/lib/constants";
 import { structuredLog } from "@/lib/serverLog";
 import { visionComplete, visionConfigured, type VisionBlock } from "@/lib/vision";
+import { parseJsonObject } from "@/lib/vision/parse";
 
 function dlog(label: string, fields: Record<string, unknown>) {
   structuredLog("detect-device", label, fields);
@@ -74,17 +76,6 @@ function deviceImageBlocks(set: DeviceSet): VisionBlock[] {
   return content;
 }
 
-/** Erstes JSON-Objekt aus einer Modellantwort parsen, sonst null. */
-function parseJsonObject<T>(text: string): T | null {
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  try {
-    return JSON.parse(m[0]) as T;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Uses the vision model to identify which device appears in `newImageUrl` by comparing
  * it against the reference images per device. Returns the matched device, or null.
@@ -138,11 +129,13 @@ export async function detectDevice(
 }
 
 export type DeviceCheckResult = {
-  /** ok = passendes Gerät sichtbar · wrong = anderes/unklares Gerät · missing = kein Gerät sichtbar ·
-   *  error = NICHT PRÜFBAR (Bild/Referenzen nicht ladbar, keine Referenzbilder, oder Vision-Fehler) —
-   *  ein klarer „konnte nicht prüfen" statt eines stillen null, das mit „gar nicht geprüft" verschmilzt. */
-  status: "ok" | "wrong" | "missing" | "error";
-  /** Im Foto erkanntes Gerät (Name) oder null, wenn keins zugeordnet/sichtbar/prüfbar. */
+  /** ok = passendes Gerät sichtbar · wrong = ein ANDERES, benanntes Gerät sichtbar · missing = kein
+   *  Gerät sichtbar · error = NICHT PRÜFBAR (Bild/Referenzen nicht ladbar, keine Referenzbilder,
+   *  Vision-Fehler, oder ein Gerät sichtbar, das keiner Referenz zuzuordnen war) — ein klarer
+   *  „konnte nicht prüfen" statt eines stillen null, das mit „gar nicht geprüft" verschmilzt. */
+  status: DeviceCheckStatus;
+  /** Im Foto erkanntes Gerät (Name) oder null, wenn keins zugeordnet/sichtbar/prüfbar; bei "wrong"
+   *  immer gesetzt. */
   detected: string | null;
   /** Erwartetes (aktuell verschlossenes) Gerät — der Soll-Zustand; null, wenn bei „error" nicht auflösbar. */
   expected: string | null;
@@ -152,7 +145,8 @@ export type DeviceCheckResult = {
  * Kontroll-Geräte-Check: Ist das aktuell verschlossene Gerät (`lockedDeviceId`) im Kontroll-Foto
  * sichtbar? Presence + Match gegen die Referenzbilder aller Geräte. Advisory (Keyholder sieht es).
  * `status:"error"` = geprüft werden WOLLTE, ging aber nicht (Bild/Referenzen unladbar, keine
- * Referenzbilder, Vision-Fehler) — ein klarer „nicht prüfbar" statt eines stillen null. `null` NUR,
+ * Referenzbilder, Vision-Fehler, unlesbare Antwort, oder ein Gerät sichtbar, das keiner Referenz
+ * zuzuordnen war) — ein klarer „nicht prüfbar" statt eines stillen null. `null` NUR,
  * wenn gar kein Vision-Provider konfiguriert ist (Feature aus).
  */
 export async function checkDeviceInPhoto(
@@ -205,14 +199,23 @@ export async function checkDeviceInPhoto(
 
     const expected = lockedKey.deviceName;
     const parsed = parseJsonObject<{ present?: boolean; device?: string | null }>(response.text);
-    if (!parsed || !parsed.present) return { status: "missing", detected: null, expected };
+    // Unlesbare/abgeschnittene Antwort = nicht ausgewertet, NICHT „kein Gerät sichtbar" — sonst
+    // steht wieder ein Negativbefund ohne Beleg in der Zeile (Issue #44, gleiche Klasse).
+    if (!parsed) return { status: "error", detected: null, expected };
+    if (parsed.present !== true) return { status: "missing", detected: null, expected };
 
     const matched = parsed.device ? set.deviceKeys.find((d) => d.key === parsed.device) : undefined;
     if (matched?.key === lockedKey.key) {
       return { status: "ok", detected: expected, expected };
     }
-    // Gerät sichtbar, aber nicht das verschlossene (anderes erkannt oder keins zugeordnet).
-    return { status: "wrong", detected: matched?.deviceName ?? null, expected };
+    if (!matched) {
+      // Nicht zuordenbar heisst NICHT „anderes Gerät getragen", sondern „nichts feststellbar":
+      // Nicht-Befund, kein Negativbefund (Issue #44).
+      dlog("check:present_unattributed", { device: parsed.device ?? null });
+      return { status: "error", detected: null, expected };
+    }
+    // Ein anderes, benanntes Gerät ist sichtbar — der einzige echte Negativbefund.
+    return { status: "wrong", detected: matched.deviceName, expected };
   } catch (e) {
     const err = e as { message?: string; name?: string };
     dlog("check:exception", { error: err.message, name: err.name });

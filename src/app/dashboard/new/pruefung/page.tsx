@@ -3,7 +3,7 @@ import PruefungForm from "../../PruefungForm";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateKontrollCode, sealRequiredForCode } from "@/lib/kontrolleService";
-import { getLatestKgEntry } from "@/lib/queries";
+import { getLatestKgEntry, getBoxFormContext } from "@/lib/queries";
 import { getTranslations } from "next-intl/server";
 import { nowDatetimeLocal, APP_TZ } from "@/lib/utils";
 
@@ -12,9 +12,12 @@ export default async function NewPruefungPage({ searchParams }: { searchParams: 
   const userId = session?.user?.id;
   const tz = session?.user?.timezone ?? APP_TZ;
 
-  const [dbUser, latest] = await Promise.all([
+  const [dbUser, latest, box] = await Promise.all([
     userId ? prisma.user.findUnique({ where: { id: userId }, select: { mobileDesktopUpload: true } }) : null,
     userId ? getLatestKgEntry(userId) : null,
+    // Box-User: die Kontrolle verlangt zusätzlich ein Foto durchs Sichtfenster — der Nachweis,
+    // dass der Schlüssel seit dem Einschliessen drin GEBLIEBEN ist.
+    userId ? getBoxFormContext(userId) : null,
   ]);
 
   // Angeforderter Code (Mail-Link) hat Vorrang.
@@ -39,7 +42,7 @@ export default async function NewPruefungPage({ searchParams }: { searchParams: 
         {tf("title")}
         {deviceLabel && <span className="text-foreground-muted font-normal"> · {deviceLabel}</span>}
       </h1>
-      <PruefungForm tz={tz} nowDefault={nowDatetimeLocal(tz)} initialCode={effectiveCode} initialKommentar={kommentar} sealRequired={sealRequired} mobileDesktopMode={dbUser?.mobileDesktopUpload ?? false} />
+      <PruefungForm tz={tz} nowDefault={nowDatetimeLocal(tz)} initialCode={effectiveCode} initialKommentar={kommentar} sealRequired={sealRequired} mobileDesktopMode={dbUser?.mobileDesktopUpload ?? false} boxConfirm={box?.boxConfirm ?? false} />
     </div>
   );
 }

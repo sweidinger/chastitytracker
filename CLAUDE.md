@@ -210,6 +210,9 @@ Diese Regeln verhindern, dass gleiche Features unterschiedlich implementiert wer
 - `src/app/components/DashboardBlock.tsx` — ein gestapelter Block der Dashboard-Spalte (`w-full max-w-2xl mx-auto px-4`). **Trägt bewusst KEINE vertikalen Abstände** — der Abstand kommt vom `gap` des Elters (`dashboard/page.tsx`: `flex flex-col gap-4`), damit sich selbst ausblendende Blöcke ihren Abstand automatisch überspringen. Neue Dashboard-Blöcke nutzen ihn und ergänzen **kein** `pt-`/`pb-`/`py-`
 - `src/app/components/DateTimePicker.tsx` — Datetime-Input mit Label, Error, Hint, ARIA (statt `<Input type="datetime-local">`)
 - `src/app/components/DetailField.tsx` — beschriftetes Feld im Detail-Panel (Label über dem Wert, `tone="warn"` für Warn-Label); der Wert kommt als `children` und bleibt bewusst frei gestaltbar
+- `src/app/components/InlineSettingRow.tsx` — eine Zeile der Admin-Settings: Beschriftung – Eingabe(n) – Einheit. Zusammen mit `inputStyles.ts` (`inlineInputCls`/`inlineLabelCls`) die einzige Quelle dieses Zeilen-Layouts
+- `src/app/components/NumberInput.tsx` — schmale Zahl-Eingabe der Admin-Settings, klemmt und committet erst beim Verlassen des Feldes (statt `<input type="number">` mit Klemmen je Tastendruck — das macht das Feld auf dem Handy unleerbar)
+- `src/app/components/TimeInput.tsx` — „HH:MM"-Eingabe; `TimeInput` committet beim Verlassen des Feldes, `TimeField` ist die rohe Variante für Formulare mit eigenem Speichern-Knopf
 - `src/app/components/KontrolleBanner.tsx` — Kontroll-Status-Banner (compact + large)
 - `src/app/components/LockRequestBanner.tsx` — Verschluss-Anforderung-Banner
 - `src/app/components/FormError.tsx` — Styled Error-Card für Formulare
@@ -240,6 +243,8 @@ Diese Regeln verhindern, dass gleiche Features unterschiedlich implementiert wer
 
 **Hooks:**
 - `src/app/hooks/usePhotoUpload.ts` — Upload + EXIF + Seal-Detect (für alle Foto-Forms)
+- `src/app/hooks/useSyncedDraft.ts` — lokaler Tippstand einer erst beim Blur committenden Eingabe, der einer externen `value` folgt (genutzt von `TimeInput`/`NumberInput`)
+- `src/app/hooks/useUserSettingsSave.ts` — PATCH `/api/admin/users/[id]` + Toast/`saving` für die Admin-Settings-Toggles
 
 **Utilities:**
 - `src/lib/authGuards.ts` — `requireApi()` (Plain-Session-Guard, gibt die Session zurück), `requireAdminApi()`, `requireKeyholderOrAdminApi()`, `assertAdmin()`, `assertKeyholderOrAdmin()`
@@ -248,7 +253,7 @@ Diese Regeln verhindern, dass gleiche Features unterschiedlich implementiert wer
 - `src/lib/codedError.ts` — `codedError(code)`/`codeOf(e)`: Fehler mit stabilem `_code`-Tag, um eine Transaktion abzubrechen und den Code AUSSERHALB (auch über Modulgrenzen) wieder einzufangen. Bewusst **importfrei** (per Test abgesichert), damit es aus client-erreichbaren Modulen benutzbar bleibt (`constants.ts` → `entryErrors.ts` → hier) — **nie** wieder `Object.assign(new Error(…), { _code })` oder `(e as {_code?: string})?._code` von Hand
 - `src/lib/serviceResult.ts` — `ServiceResult<T>` + `serviceResponse()` (Result → `NextResponse`). Dazu die HTTP-förmige Fehler-Schicht über `codedError`: `serviceErrors(table)` bindet Wurf- und Fang-Seite an EINE Tabelle (nur Tabellen-Keys sind werfbar → Tippfehler = Compile-Fehler statt stillem 500), `mapServiceError(e, table)` übersetzt einen erwarteten Code in ein `ServiceResult` (`null` = echter Defekt, weiterwerfen)
 - `src/lib/entryErrors.ts` — Stabile Fehler-Codes der Entry-Routen (`ENTRY_GUARD_CODES`, `ENTRY_VALIDATION_CODES`, `ENTRY_ROUTE_CODES`) + `entryGuardError()`/`entryGuardCode()` (auf `codedError.ts` aufgesetzt, mit getypter Code-Whitelist). Jeder Code braucht einen Key im `errors`-Namespace beider `messages/*.json` — `entryErrors.test.ts` erzwingt das
-- `src/lib/constants.ts` — `VALID_TYPES`, `OEFFNEN_GRUENDE`, `ORGASMUS_ARTEN`, `isValidImageUrl()`, `validatePassword()`, `parseOrgasmusArtBase()`, `PASSWORD_MIN_LENGTH`, `BCRYPT_MAX_BYTES`
+- `src/lib/constants.ts` — `VALID_TYPES`, `OEFFNEN_GRUENDE`, `ORGASMUS_ARTEN`, `isValidImageUrl()`, `validatePassword()`, `parseOrgasmusArtBase()`, `PASSWORD_MIN_LENGTH`, `BCRYPT_MAX_BYTES`; dazu `NumberRange` + die `*_RANGE`-Konstanten der Admin-Settings (Reinigung/Eskalation/Auto-Kontrollen) — **eine** Quelle für das `clamp()` im Service UND das `range`-Prop von `NumberInput`. Ein neues geklemmtes Zahlen-Feld bekommt hier seine Konstante, nie ein Literal am Call-Site
 - `src/lib/utils.ts` — `buildWearPairs()`, `wearingHoursFromPairs()`, `isTimeCorrected()`, `formatDuration()`, `formatDateTime()`, `toDatetimeLocal()`, `tzOffsetMsAt()` (TZ-Offset-Mess-Primitiv, gecachte Formatter), `decomposeMs()` (ms → Tage/Std/Min/Sek) — **nie** wieder `Intl…formatToParts` für Offsets oder `% 86_400_000` von Hand
 - `src/lib/delayedTrigger.ts` — `computeDelayedTrigger()`: die `{wirksamAb, benachrichtigtAt}`-Konvention für terminierte Anforderungen (Kontrolle + Verschluss)
 - `src/lib/queries.ts` — `getIsLocked()`, `getActiveVorgabe()`

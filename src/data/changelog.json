@@ -1,5 +1,18 @@
 [
   {
+    "version": "4.123.0",
+    "date": "2026-07-28",
+    "changes": [
+      {
+        "type": "chore",
+        "text": {
+          "de": "Upstream trublue-2 bis v4.55.1 zusammengeführt: Schlüssel-Nachweis per Box-Foto durchs Sichtfenster (auch aus Telemetrie), Vorwarnung vor der Box-Not-Öffnung, diverse Zeitzonen-Korrekturen und am Handy editierbare Admin-Zahlenfelder.",
+          "en": "Merged upstream trublue-2 up to v4.55.1: key proof via box photo through the viewing window (also from telemetry), advance warning before the box emergency-opens, several timezone fixes, and mobile-editable admin number fields."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.122.0",
     "date": "2026-07-24",
     "changes": [

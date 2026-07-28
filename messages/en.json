@@ -141,7 +141,8 @@
     "PENALTY_UNKNOWN_ACTION": "Unknown penalty action",
     "INVALID_SESSION_CATEGORY": "Invalid session category",
     "NO_SESSION_CATEGORY": "No session-capable category available",
-    "lastAdmin": "The last admin cannot be demoted — otherwise nobody can reach the admin area anymore"
+    "lastAdmin": "The last admin cannot be demoted — otherwise nobody can reach the admin area anymore",
+    "BOX_PHOTO_REUSED": "This box photo already belongs to another entry. Please take a fresh one."
   },
   "appLock": {
     "subtitle": "Confirm your identity to continue",
@@ -237,7 +238,8 @@
     "start": "Start",
     "end": "End",
     "showToKeyholder": "Show the keyholder",
-    "showToKeyholderMsg": "I'm showing you this entry."
+    "showToKeyholderMsg": "I'm showing you this entry.",
+    "imageUnavailable": "Image unavailable"
   },
   "adminNav": {
     "overview": "Overview",
@@ -422,7 +424,17 @@
     "pauseGrundToilette": "Toilet",
     "pauseQuotaRemaining": "{remaining}/{max} left",
     "pauseQuotaUnlimited": "unlimited",
-    "wearSessionPhotoAlt": "Photo from start of wear: {category}"
+    "wearSessionPhotoAlt": "Photo from start of wear: {category}",
+    "keyDetected": "key detected",
+    "keyDetectedTelemetry": "key in box (telemetry)",
+    "keyNotDetected": "NO key detected",
+    "keyInBoxYes": "Key in the box",
+    "keyInBoxNo": "Key NOT in the box",
+    "photosLabel": "Photos",
+    "photoMain": "Entry",
+    "photoBox": "Box",
+    "cleaningPauseLabel": "Cleaning break – remaining",
+    "cleaningPauseRelock": "Lock up again"
   },
   "newEntry": {
     "title": "New entry",
@@ -471,11 +483,16 @@
     "lastSeenDays": "last seen {count} d ago",
     "pendingCloseAtDevice": "Box lock requested — a button press closes the bolt",
     "pendingOpenAtDevice": "Open approved — pressing the button at the box opens the bolt",
+    "failsafeOfflineWarn": "Box out of contact for {hours} h — emergency opening in {left} h. Get it back into network range.",
+    "failsafeOfflineDue": "Box out of contact for {hours} h — the emergency opening has happened or is imminent.",
+    "failsafeBatteryWarn": "Battery {percent}% — at {opensAt}% the box opens itself. Charge it.",
+    "failsafeBatteryDue": "Battery {percent}% — the box may open itself at any moment (threshold {opensAt}%). Charge it now.",
     "cleaningBlockedByLockPeriod": "This lock period allows no cleaning",
     "cleaningWindowOpen": "Cleaning window open until {until}",
     "cleaningWindowNext": "Next cleaning window: {start}–{end}",
     "cleaningNoWindows": "Cleaning not tied to specific times",
-    "cleaningQuota": "{count} of {max} used today"
+    "cleaningQuota": "{count} of {max} used today",
+    "subTimePrefix": "sub"
   },
   "lockForm": {
     "title": "Log lock",
@@ -504,7 +521,14 @@
     "wrongDeviceWarning": "Choosing a different CB will result in a log entry.",
     "deviceDetecting": "Detecting device…",
     "deviceDetected": "Detected: {name}",
-    "deviceNotDetected": "Device could not be identified"
+    "deviceNotDetected": "Device could not be identified",
+    "boxPhotoLabel": "Photo of the box",
+    "boxPhotoHint": "Shoot through the viewing window so the key is clearly visible.",
+    "confirmKeyOutsideTitle": "Key not in the box?",
+    "confirmKeyOutsideText": "Are you sure the key does not go into the box? The box will not lock then.",
+    "confirmNoBoxPhotoTitle": "No photo of the box",
+    "confirmNoBoxPhotoText": "Save without a photo of the box? Without one, there is nothing showing the key is really inside.",
+    "confirmSaveAnyway": "Save anyway"
   },
   "feedback": {
     "title": "Feedback",
@@ -1688,6 +1712,8 @@
     "inspectionResolvedWithdrawnMessage": "The keyholder has withdrawn the requested inspection.",
     "inspectionRequestedSubject": "Inspection requested",
     "inspectionRequestedIntro": "An inspection has been requested. Please create an inspection entry with a photo within the next {hours, plural, one {# hour} other {# hours}}.",
+    "inspectionRequestedIntroMinutes": "An inspection has been requested. Please create an inspection entry with a photo within the next {minutes, plural, one {# minute} other {# minutes}}.",
+    "inspectionRequestedIntroHoursMinutes": "An inspection has been requested. Please create an inspection entry with a photo within the next {hours, plural, one {# hour} other {# hours}} and {minutes, plural, one {# minute} other {# minutes}}.",
     "inspectionAdminLabel": "Keyholder's instruction:",
     "inspectionCodeLabelSeal": "Your seal number (must be visible in the photo):",
     "inspectionCodeLabelControl": "Your inspection code (must be visible in the photo):",

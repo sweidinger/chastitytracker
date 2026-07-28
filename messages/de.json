@@ -141,7 +141,8 @@
     "PENALTY_UNKNOWN_ACTION": "Unbekannte Straf-Aktion",
     "INVALID_SESSION_CATEGORY": "Ungültige Session-Kategorie",
     "NO_SESSION_CATEGORY": "Keine Session-fähige Kategorie vorhanden",
-    "lastAdmin": "Der letzte Admin kann sich die Rechte nicht selbst entziehen — sonst kommt niemand mehr in den Adminbereich"
+    "lastAdmin": "Der letzte Admin kann sich die Rechte nicht selbst entziehen — sonst kommt niemand mehr in den Adminbereich",
+    "BOX_PHOTO_REUSED": "Dieses Box-Foto gehört bereits zu einem anderen Eintrag. Bitte eine frische Aufnahme machen."
   },
   "appLock": {
     "subtitle": "Identität bestätigen um fortzufahren",
@@ -237,7 +238,8 @@
     "start": "Start",
     "end": "Ende",
     "showToKeyholder": "Der Keyholderin zeigen",
-    "showToKeyholderMsg": "Ich zeige dir diesen Eintrag."
+    "showToKeyholderMsg": "Ich zeige dir diesen Eintrag.",
+    "imageUnavailable": "Bild nicht verfügbar"
   },
   "adminNav": {
     "overview": "Übersicht",
@@ -422,7 +424,17 @@
     "pauseGrundToilette": "Toilette",
     "pauseQuotaRemaining": "{remaining}/{max} übrig",
     "pauseQuotaUnlimited": "unbegrenzt",
-    "wearSessionPhotoAlt": "Foto vom Trage-Beginn: {category}"
+    "wearSessionPhotoAlt": "Foto vom Trage-Beginn: {category}",
+    "keyDetected": "Schlüssel erkannt",
+    "keyDetectedTelemetry": "Schlüssel in Box (Telemetrie)",
+    "keyNotDetected": "KEIN Schlüssel erkannt",
+    "keyInBoxYes": "Schlüssel in der Box",
+    "keyInBoxNo": "Schlüssel NICHT in der Box",
+    "photosLabel": "Fotos",
+    "photoMain": "Eintrag",
+    "photoBox": "Box",
+    "cleaningPauseLabel": "Reinigungspause – noch",
+    "cleaningPauseRelock": "Wieder einschliessen"
   },
   "newEntry": {
     "title": "Neu erfassen",
@@ -471,11 +483,16 @@
     "lastSeenDays": "zuletzt vor {count} Tg",
     "pendingCloseAtDevice": "Schliessen der Box angefordert — ein Knopfdruck fährt den Riegel zu",
     "pendingOpenAtDevice": "Öffnung freigegeben — Knopfdruck an der Box öffnet den Riegel",
+    "failsafeOfflineWarn": "Box seit {hours} Std ohne Kontakt — Not-Öffnung in {left} Std. Netz in Reichweite bringen.",
+    "failsafeOfflineDue": "Box seit {hours} Std ohne Kontakt — die Not-Öffnung ist erfolgt oder steht unmittelbar bevor.",
+    "failsafeBatteryWarn": "Akku {percent} % — ab {opensAt} % öffnet sich die Box von selbst. Laden.",
+    "failsafeBatteryDue": "Akku {percent} % — die Box öffnet sich jederzeit von selbst (Schwelle {opensAt} %). Sofort laden.",
     "cleaningBlockedByLockPeriod": "Diese Sperre erlaubt keine Reinigung",
     "cleaningWindowOpen": "Reinigungsfenster offen bis {until}",
     "cleaningWindowNext": "Nächstes Reinigungsfenster: {start}–{end}",
     "cleaningNoWindows": "Reinigung nicht an Uhrzeiten gebunden",
-    "cleaningQuota": "heute {count} von {max}"
+    "cleaningQuota": "heute {count} von {max}",
+    "subTimePrefix": "Sub"
   },
   "lockForm": {
     "title": "Verschluss erfassen",
@@ -504,7 +521,14 @@
     "wrongDeviceWarning": "Bei Wahl eines anderen KG wird ein Eintrag im Strafbuch erstellt.",
     "deviceDetecting": "Gerät wird erkannt…",
     "deviceDetected": "Erkannt: {name}",
-    "deviceNotDetected": "Gerät konnte nicht erkannt werden"
+    "deviceNotDetected": "Gerät konnte nicht erkannt werden",
+    "boxPhotoLabel": "Foto der Box",
+    "boxPhotoHint": "Durch das Sichtfenster fotografieren, sodass der Schlüssel gut erkennbar ist.",
+    "confirmKeyOutsideTitle": "Schlüssel nicht in der Box?",
+    "confirmKeyOutsideText": "Sicher, dass der Schlüssel nicht in die Box muss? Die Box verriegelt dann nicht.",
+    "confirmNoBoxPhotoTitle": "Kein Foto der Box",
+    "confirmNoBoxPhotoText": "Sicher ohne Foto der Box speichern? Ohne Foto ist nicht belegt, dass der Schlüssel wirklich drin liegt.",
+    "confirmSaveAnyway": "Trotzdem speichern"
   },
   "feedback": {
     "title": "Feedback",
@@ -1688,6 +1712,8 @@
     "inspectionResolvedWithdrawnMessage": "Der Keyholder hat die angeforderte Kontrolle zurückgezogen.",
     "inspectionRequestedSubject": "Kontrolle angefordert",
     "inspectionRequestedIntro": "Es wurde eine Kontrolle angefordert. Bitte erstelle innert der nächsten {hours, plural, one {# Stunde} other {# Stunden}} einen Kontroll-Eintrag mit Foto.",
+    "inspectionRequestedIntroMinutes": "Es wurde eine Kontrolle angefordert. Bitte erstelle innert der nächsten {minutes, plural, one {# Minute} other {# Minuten}} einen Kontroll-Eintrag mit Foto.",
+    "inspectionRequestedIntroHoursMinutes": "Es wurde eine Kontrolle angefordert. Bitte erstelle innert der nächsten {hours, plural, one {# Stunde} other {# Stunden}} und {minutes, plural, one {# Minute} other {# Minuten}} einen Kontroll-Eintrag mit Foto.",
     "inspectionAdminLabel": "Anweisung des Admins:",
     "inspectionCodeLabelSeal": "Deine Siegel-Nummer (muss auf dem Foto erkennbar sein):",
     "inspectionCodeLabelControl": "Dein Kontroll-Code (muss auf dem Foto erkennbar sein):",

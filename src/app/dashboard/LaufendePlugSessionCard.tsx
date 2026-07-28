@@ -145,6 +145,7 @@ export default async function LaufendePlugSessionCard({
       {/* ── Timeline (Pausen + Kontrollen) ── */}
       {events.length > 0 && (
         <SessionTimeline
+          tz={tz}
           events={events.map<SessionEventData>((ev) => {
             const dateStr = formatDate(ev.time, dl, tz);
             const timeStr = formatTime(ev.time, dl, tz);
