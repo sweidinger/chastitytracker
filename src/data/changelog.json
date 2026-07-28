@@ -1,4 +1,17 @@
 [
+    {
+    "version": "4.124.0",
+    "date": "2026-07-28",
+    "changes": [
+      {
+        "type": "feat",
+        "text": {
+          "de": "Während einer Reinigungspause zeigt die Status-Karte im Dashboard jetzt die verbleibende Frist als Countdown und einen „Wieder einschließen“-Button — statt wie ein normales „Geöffnet seit“. So ist auf einen Blick klar, dass die Session nur unterbrochen ist und bis wann wieder verschlossen sein muss.",
+          "en": "During a cleaning break the dashboard status card now shows the remaining deadline as a countdown plus a „Lock up again“ button — instead of a plain „open since“. Makes it clear at a glance that the session is only paused and by when it must be locked again."
+        }
+      }
+    ]
+  },
   {
     "version": "4.123.0",
     "date": "2026-07-28",

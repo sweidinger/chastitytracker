@@ -40,7 +40,9 @@ import StrafenBanner from "./StrafenBanner";
 import { getBelohnungState } from "@/lib/belohnung";
 import { getActiveHealthHold } from "@/lib/healthHoldService";
 import TimerDisplay from "@/app/components/TimerDisplay";
-import { LockOpen } from "lucide-react";
+import { LockOpen, Lock } from "lucide-react";
+import Link from "next/link";
+import Button from "@/app/components/Button";
 import TagesformWidget from "@/app/components/TagesformWidget";
 import InactiveCategories from "./InactiveCategories";
 import BoxStatusCard from "@/app/components/BoxStatusCard";
@@ -381,11 +383,22 @@ export default async function DashboardPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-widest opacity-60">
-                    {t("openSince")} · {t("deviceLabelCage")}
+                    {cleaningPauseUntil ? t("cleaningPauseLabel") : `${t("openSince")} · ${t("deviceLabelCage")}`}
                   </p>
-                  <TimerDisplay targetDate={currentStatus.since} mode="countup" format="long" className="!text-white text-2xl font-bold" />
+                  {cleaningPauseUntil ? (
+                    <TimerDisplay targetDate={cleaningPauseUntil} mode="countdown" format="short" className="!text-white text-2xl font-bold" />
+                  ) : (
+                    <TimerDisplay targetDate={currentStatus.since} mode="countup" format="long" className="!text-white text-2xl font-bold" />
+                  )}
                 </div>
               </div>
+              {cleaningPauseUntil && (
+                <Link href="/dashboard/new/verschluss" className="mt-4 block">
+                  <Button variant="semantic" semantic="lock" fullWidth icon={<Lock size={16} />}>
+                    {t("cleaningPauseRelock")}
+                  </Button>
+                </Link>
+              )}
             </div>
           </div>
         </div>
