@@ -5,6 +5,7 @@ import { activeVerschlussAnforderungWhere, cleaningBlockReason, type CleaningPer
 import { aktivesReinigungsFenster } from "@/lib/reinigungService";
 import { hhmmToMinutes } from "@/lib/autoKontrolleService";
 import { pauseReasonsForDevice, pauseSettingsForDevice, type PauseDevice } from "@/lib/pauseService";
+import { PAUSE_ABGELAUFEN_REASON } from "@/lib/constants";
 
 /** A Kontroll-based offense (late or rejected) — raw data, formatting left to consumers. */
 export interface StrafbuchControlOffense {
@@ -370,6 +371,33 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
       }
     }
     erektionViolations.sort((a, b) => (b.startTime?.getTime() ?? 0) - (a.startTime?.getTime() ?? 0));
+    pauseOverageViolations.sort((a, b) => (b.startTime?.getTime() ?? 0) - (a.startTime?.getTime() ?? 0));
+  }
+
+  // Zwangsgeoeffnete Pausen (PAUSE_ABGELAUFEN): der Poller oeffnet eine ueberzogene CAGE-Pause per
+  // OEFFNEN (KEIN PAUSE_END). Fuer jede solche Oeffnung die zugehoerige offene PAUSE_BEGIN finden und
+  // den Ueberzug erfassen — so erscheint er trotz fehlendem PAUSE_END im Strafbuch (Urteil: Keyholderin).
+  if (user) {
+    const cageBegins = pauseEntries.filter((e) => e.pauseDevice === "CAGE" && e.type === "PAUSE_BEGIN");
+    const cageEnds = pauseEntries.filter((e) => e.pauseDevice === "CAGE" && e.type === "PAUSE_END");
+    const reasonsCage = pauseReasonsForDevice(user, "CAGE");
+    const fallbackMaxCage = pauseSettingsForDevice(user, "CAGE").maxMinuten;
+    for (const o of oeffnungen) {
+      if (o.oeffnenGrund !== PAUSE_ABGELAUFEN_REASON) continue;
+      const begin = cageBegins
+        .filter((b) => b.startTime < o.startTime)
+        .sort((a, b) => b.startTime.getTime() - a.startTime.getTime())[0];
+      if (!begin) continue;
+      const endBetween = cageEnds.some((e) => e.startTime > begin.startTime && e.startTime < o.startTime);
+      if (endBetween) continue;
+      const grund = begin.oeffnenGrund;
+      const max = (grund ? reasonsCage.find((r) => r.grund === grund)?.maxMinuten : undefined) ?? fallbackMaxCage;
+      const dauerMin = (o.startTime.getTime() - begin.startTime.getTime()) / 60000;
+      pauseOverageViolations.push({
+        entryId: o.id, startTime: o.startTime, device: "CAGE", grund: grund ?? null,
+        dauerMin: Math.round(dauerMin), maxMin: max, note: o.note,
+      });
+    }
     pauseOverageViolations.sort((a, b) => (b.startTime?.getTime() ?? 0) - (a.startTime?.getTime() ?? 0));
   }
 

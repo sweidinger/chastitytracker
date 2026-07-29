@@ -1,4 +1,17 @@
 [
+  {
+    "version": "4.128.0",
+    "date": "2026-07-29",
+    "changes": [
+      {
+        "type": "feat",
+        "text": {
+          "de": "Laeuft eine Reinigungs-/Toilettenpause ueber die erlaubte Hoechstdauer, oeffnet der Tracker den Kaefig jetzt automatisch, beendet die Session und vermerkt den Ueberzug im Strafbuch — die KI-Keyholderin wird informiert und entscheidet ueber eine Strafe.",
+          "en": "If a cleaning/toilet pause runs past the allowed maximum duration, the tracker now opens the cage automatically, ends the session and records the overstay in the penalty log — the AI keyholder is notified and decides on a punishment."
+        }
+      }
+    ]
+  },
             {
     "version": "4.127.0",
     "date": "2026-07-29",

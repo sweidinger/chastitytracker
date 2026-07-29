@@ -6,6 +6,7 @@ import { sendVerschlussAnforderungNotifications, checkLockEnd } from "@/lib/vers
 import { ensureDailyAutoKontrollen, deleteWithdrawnAutoKontrollen } from "@/lib/autoKontrolleService";
 import { sendInspectionReminder, autoMarkInspectionRemoved, notifyInspectionAutoMarked } from "@/lib/inspectionEscalationService";
 import { maybeRunHealthChecks } from "@/lib/healthCheck";
+import { enforceExpiredCagePauses } from "@/lib/pauseOverstayService";
 
 // Verschickt fällige, zeitversetzte Kontroll-Anforderungen (wirksamAb erreicht, noch nicht
 // benachrichtigt). Ein Container pro Instanz → ein Poller je Prozess genügt; der Zustand liegt
@@ -91,6 +92,9 @@ async function processDue(): Promise<void> {
 
     // Kontroll-Eskalation (Mahnung, dann ggf. automatisch als abgelegt markieren) im selben Tick.
     await processInspectionEscalation(now);
+
+    // Ueberzogene CAGE-Pausen automatisch oeffnen (Strafbuch-Vermerk + AI-Benachrichtigung) im selben Tick.
+    await enforceExpiredCagePauses(now).catch((e) => console.error("[pauseOverstay]", e));
 
     // Zeitversetzte VerschlussAnforderungen (ANFORDERUNG/SPERRZEIT) im selben Tick — kein zweiter Timer.
     await processDueVerschlussAnforderungen(now);

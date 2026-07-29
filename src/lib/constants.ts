@@ -128,14 +128,17 @@ export function orgasmusAnforderungArtLabel(art: OrgasmusAnforderungArt, t: (key
 // (reservedCodes() covers all of OEFFNEN_GRUENDE), but unlike REINIGUNG it must never be
 // user-selectable — see SYSTEM_ONLY_OPENING_CODES below, filtered out of the sub's own dropdown.
 export const AUTO_ENTFERNT_REASON = "AUTO_ENTFERNT";
-export const OEFFNEN_GRUENDE = ["REINIGUNG", "TOILETTE", "KEYHOLDER", "NOTFALL", "ANDERES", AUTO_ENTFERNT_REASON] as const;
+// PAUSE_ABGELAUFEN: system-only reason for the auto-created OEFFNEN when a CAGE cleaning/toilet
+// pause runs past its maximum duration (see pauseOverstayService.ts). System-only like AUTO_ENTFERNT.
+export const PAUSE_ABGELAUFEN_REASON = "PAUSE_ABGELAUFEN";
+export const OEFFNEN_GRUENDE = ["REINIGUNG", "TOILETTE", "KEYHOLDER", "NOTFALL", "ANDERES", AUTO_ENTFERNT_REASON, PAUSE_ABGELAUFEN_REASON] as const;
 export type OeffnenGrund = typeof OEFFNEN_GRUENDE[number];
 /** Standard-Öffnungsgründe für das Öffnen/Trage-Ende. Reinigung/Toilette laufen ausschließlich über
  *  die Pause-Funktion und sind hier bewusst ausgenommen — ihre Codes/Labels bleiben in OEFFNEN_GRUENDE
  *  erhalten (Pause-Labels + Bestands-Einträge). AUTO_ENTFERNT ist system-only (siehe unten). */
 export const DEFAULT_OEFFNEN_GRUENDE = ["KEYHOLDER", "NOTFALL", "ANDERES"] as const;
 /** Reserved AND hidden from the user-facing opening-reason picker — system-only codes. */
-export const SYSTEM_ONLY_OPENING_CODES: readonly string[] = [AUTO_ENTFERNT_REASON];
+export const SYSTEM_ONLY_OPENING_CODES: readonly string[] = [AUTO_ENTFERNT_REASON, PAUSE_ABGELAUFEN_REASON];
 
 /** Wer einen Eintrag verursacht hat. `system` = niemand hat gehandelt, der Tracker hat gebucht
  *  (Eskalation einer unbeantworteten Kontrolle). Spiegelt die `Entry.source`-Spalte; die Regel
@@ -171,6 +174,7 @@ export const GRUND_I18N_KEYS: Record<typeof OEFFNEN_GRUENDE[number], string> = {
   NOTFALL: "grundNotfall",
   ANDERES: "grundAnderes",
   AUTO_ENTFERNT: "grundAutoEntfernt",
+  PAUSE_ABGELAUFEN: "grundPauseAbgelaufen",
 };
 
 // ── Entry display constants (shared by dashboard + admin entry lists) ─────────
