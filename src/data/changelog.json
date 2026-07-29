@@ -1,5 +1,18 @@
 [
-        {
+          {
+    "version": "4.126.0",
+    "date": "2026-07-29",
+    "changes": [
+      {
+        "type": "feat",
+        "text": {
+          "de": "Beta-Instanzen kennzeichnen sich jetzt sichtbar: roter Rahmen + 'BETA'-Badge in der App, eigenes rotes App-Icon und Name 'KG Tracker BETA' auf dem iPhone-Homescreen sowie rotes Theme. Gesteuert ueber die Env-Variable INSTANCE_LABEL - die Produktion bleibt unveraendert.",
+          "en": "Beta instances now mark themselves visibly: a red frame plus a 'BETA' badge in the app, a dedicated red app icon and the name 'KG Tracker BETA' on the iPhone home screen, and a red theme. Controlled via the INSTANCE_LABEL env var - production is unaffected."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.125.0",
     "date": "2026-07-29",
     "changes": [
