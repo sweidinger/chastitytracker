@@ -77,6 +77,10 @@ server {
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_ciphers         HIGH:!aNULL:!MD5;
 
+    # iPhone-Fotos koennen mehrere MB gross sein — der nginx-Default (1M) blockt sie
+    # mit 413, bevor sie die App (10M-Limit) erreichen. Muss >= App-Limit sein.
+    client_max_body_size 12M;
+
     # Für SSE (Streaming-Chat der KI-Keyholderin)
     proxy_buffering     off;
     proxy_read_timeout  300s;

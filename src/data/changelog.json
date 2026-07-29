@@ -1,5 +1,18 @@
 [
-    {
+      {
+    "version": "4.124.1",
+    "date": "2026-07-29",
+    "changes": [
+      {
+        "type": "fix",
+        "text": {
+          "de": "Grosse Fotos (z.B. vom iPhone) lassen sich wieder hochladen. Die HTTPS-Setup-Referenz setzt jetzt das nginx-Upload-Limit (client_max_body_size) auf 12 MB — vorher blockte der nginx-Standard von 1 MB grosse Uploads mit einem Fehler, bevor sie die App erreichten.",
+          "en": "Large photos (e.g. from an iPhone) can be uploaded again. The HTTPS setup reference now sets the nginx upload limit (client_max_body_size) to 12 MB — previously the 1 MB nginx default blocked large uploads with an error before they reached the app."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.124.0",
     "date": "2026-07-28",
     "changes": [
