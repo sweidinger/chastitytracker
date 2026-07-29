@@ -225,6 +225,17 @@ export async function getActivePause(
   // Active if there's no PAUSE_END after the latest PAUSE_BEGIN
   const latestEnd = ends[0];
   if (!latestEnd || latestEnd.startTime <= latest.startTime) {
+    // Eine Pause zählt nur für die AKTUELLE Session. Wurde der Käfig nach diesem PAUSE_BEGIN
+    // geöffnet (OEFFNEN) oder neu verschlossen (VERSCHLUSS) — z.B. weil die Session durch eine
+    // unbeantwortete Kontrolle zwangs-geöffnet wurde, was NIE ein PAUSE_END schreibt — ist die
+    // Pause veraltet und darf nicht als aktiv gelten (sonst „Pause läuft" über Session-Grenzen).
+    // Für den Plug bilden WEAR_BEGIN/WEAR_END die Session-Grenze.
+    const boundaryTypes = device === "PLUG" ? ["WEAR_BEGIN", "WEAR_END"] : ["VERSCHLUSS", "OEFFNEN"];
+    const boundaryAfter = await (db as typeof prisma).entry.findFirst({
+      where: { userId, type: { in: boundaryTypes }, startTime: { gt: latest.startTime } },
+      select: { id: true },
+    });
+    if (boundaryAfter) return null;
     return latest;
   }
   return null;

@@ -1,5 +1,18 @@
 [
-          {
+            {
+    "version": "4.127.0",
+    "date": "2026-07-29",
+    "changes": [
+      {
+        "type": "fix",
+        "text": {
+          "de": "Behoben: Eine Pause aus einer bereits beendeten Session wurde faelschlich als noch laufend angezeigt (z.B. 'Pause laeuft ...' auf einer frisch verschlossenen Session). Der Tracker ignoriert eine Pause jetzt, wenn danach der Kaefig wieder geoeffnet/verschlossen wurde (bzw. beim Plug ein Trage-Ende/-Beginn lag).",
+          "en": "Fixed: a pause from an already-ended session was wrongly shown as still running (e.g. 'pause active ...' on a freshly locked session). A pause is now ignored if the cage was reopened/relocked afterwards (or, for the plug, a wear end/begin occurred)."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.126.0",
     "date": "2026-07-29",
     "changes": [
