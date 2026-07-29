@@ -3,7 +3,7 @@
 import { Lock, LockOpen, AlertTriangle } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { formatDateTimeDual, toDateLocale, APP_TZ } from "@/lib/utils";
-import { boxIsPhysicallyLocked, boxIstLabel, boxPendingTransition, boxSollLabel, boxSollLocked, boxFreshnessLabel, boxReinigungLabel, boxReinigungQuotaLabel, boxFailsafeWarnings, boxFailsafeLabel, type BoxReinigungView } from "@/lib/boxStatus";
+import { boxIsPhysicallyLocked, boxIstLabel, boxPendingTransition, boxSollLabel, boxSollLocked, boxFreshnessLabel, boxBatteryLabel, boxReinigungLabel, boxReinigungQuotaLabel, boxFailsafeWarnings, boxFailsafeLabel, type BoxReinigungView } from "@/lib/boxStatus";
 import { useBoxStatus } from "@/app/hooks/useBoxStatus";
 import DashboardBlock from "@/app/components/DashboardBlock";
 
@@ -47,6 +47,11 @@ export default function BoxStatusCard({ tz = APP_TZ, reinigung, userId, viewerTz
           const istLocked = boxIsPhysicallyLocked(b);
           const conflict = !istLocked && boxSollLocked(b);
           const transition = boxPendingTransition(b);
+          const failsafes = boxFailsafeWarnings(b, now);
+          // Sobald die Akku-Warnung steht, entfällt die grobe Stufe: die Warnung sagt dasselbe mit
+          // Zahl und Handlungsanweisung, „Akku niedrig" daneben wäre nur eine zweite, ärmere Fassung
+          // derselben Aussage. Die Frische-Zeile bleibt.
+          const batteryLabel = failsafes.some((w) => w.kind === "lowBatteryOpen") ? null : boxBatteryLabel(b, t);
           const scheme = conflict
             ? { bg: "bg-warn-bg", border: "border-warn-border", accent: "text-warn", text: "text-warn-text", Icon: AlertTriangle }
             : istLocked
@@ -54,40 +59,63 @@ export default function BoxStatusCard({ tz = APP_TZ, reinigung, userId, viewerTz
               : { bg: "bg-background-subtle", border: "border-border", accent: "text-unlock", text: "text-foreground", Icon: LockOpen };
           const Icon = scheme.Icon;
           return (
-            <div key={b.boxId} className={`flex flex-col gap-1.5 ${scheme.bg} border ${scheme.border} rounded-2xl px-5 py-4`}>
+            <div key={b.boxId} className={`@container flex flex-col gap-1.5 ${scheme.bg} border ${scheme.border} rounded-2xl px-5 py-4`}>
               <div className="flex items-center gap-2">
                 <Icon size={15} className={`${scheme.accent} shrink-0`} />
                 <p className={`text-sm font-bold ${scheme.text}`}>{b.name}</p>
+                {/* Firmware direkt am Namen: bei jeder Rückfrage zu einer Box ist die Version die
+                    erste Frage — sie stand bisher nirgends in der App. */}
+                {b.fwVersion && <span className={`text-xs ${scheme.accent}`}>({b.fwVersion})</span>}
                 <span className={`text-sm ${scheme.accent}`}>· {boxIstLabel(b, t)}</span>
               </div>
-              <p className={`text-xs ${scheme.accent}`}>{t("sollLabel")}: {boxSollLabel(b, t, fmtDateTime)}</p>
-              {/* Übergangs-Zustand (Präsenz-Gate): sofort nach dem Eintrag sichtbar (pendingCommand,
-                  tracker-lokal), danach über den Soll/Ist-Mismatch bis zur Riegel-Bestätigung —
-                  dieselbe Sprache wie die Heimdall-Karte. (Am Consume-Sync selbst kann die Zeile
-                  für einen Poll-Takt verschwinden, bis der Push den Mismatch nachliefert.) */}
-              {transition && (
-                <p className="text-xs font-medium text-sperrzeit-text">
-                  {transition === "closing" ? t("pendingCloseAtDevice") : t("pendingOpenAtDevice")}
-                </p>
-              )}
-              {reinigungLabel && (
-                <p className="text-xs text-foreground-muted">
-                  {reinigungLabel}{quotaLabel ? ` · ${quotaLabel}` : ""}
-                </p>
-              )}
-              {/* Failsafe-Vorwarnung: die Box öffnet nach genug Funkstille oder bei leerem Akku von
-                  SELBST. Ohne diese Zeile war der Zustand bis zur Not-Öffnung nirgends sichtbar
-                  (heimdall#1) — und verhindern lässt sie sich nur rechtzeitig. Deshalb steht sie
-                  über der Frische-Zeile: sie ist die dringlichere Lesart derselben Stille. */}
-              {boxFailsafeWarnings(b, now).map((w) => (
-                <p
-                  key={w.kind}
-                  className={`text-xs ${w.severity === "info" ? "text-foreground-muted" : "font-medium text-warn"}`}
-                >
-                  {boxFailsafeLabel(w, t)}
-                </p>
-              ))}
-              <p className="text-xs text-foreground-faint">{boxFreshnessLabel(b.lastSyncAt, now, t)}</p>
+              {/* Zwei Gruppen nebeneinander, sobald die KARTE breit genug ist (`@container`, nicht
+                  das Fenster — dieselbe Karte ist im Sub-Dashboard schmaler als in der
+                  Keyholder-Sicht, und ein Viewport-Breakpoint würde sie dort in zu enge Spalten
+                  brechen und damit HÖHER machen statt flacher).
+                  Links „was gilt", rechts „wie steht die Box da". Bewusst zwei feste Gruppen statt
+                  eines durchlaufenden Rasters: bei Zeilenfluss wandert jede Zeile mit, sobald eine
+                  optionale wegfällt — die Failsafe-Warnung stünde mal über, mal neben der
+                  Frische-Zeile. Genau die muss aber ihren festen Platz haben. */}
+              <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 @xl:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <p className={`text-xs ${scheme.accent}`}>{t("sollLabel")}: {boxSollLabel(b, t, fmtDateTime)}</p>
+                  {/* Übergangs-Zustand (Präsenz-Gate): sofort nach dem Eintrag sichtbar (pendingCommand,
+                      tracker-lokal), danach über den Soll/Ist-Mismatch bis zur Riegel-Bestätigung —
+                      dieselbe Sprache wie die Heimdall-Karte. (Am Consume-Sync selbst kann die Zeile
+                      für einen Poll-Takt verschwinden, bis der Push den Mismatch nachliefert.) */}
+                  {transition && (
+                    <p className="text-xs font-medium text-sperrzeit-text">
+                      {transition === "closing" ? t("pendingCloseAtDevice") : t("pendingOpenAtDevice")}
+                    </p>
+                  )}
+                  {reinigungLabel && (
+                    <p className="text-xs text-foreground-muted">
+                      {reinigungLabel}{quotaLabel ? ` · ${quotaLabel}` : ""}
+                    </p>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {/* Failsafe-Vorwarnung: die Box öffnet nach genug Funkstille oder bei leerem Akku von
+                      SELBST. Ohne diese Zeile war der Zustand bis zur Not-Öffnung nirgends sichtbar
+                      (heimdall#1) — und verhindern lässt sie sich nur rechtzeitig. Deshalb steht sie
+                      über der Frische-Zeile: sie ist die dringlichere Lesart derselben Stille. */}
+                  {failsafes.map((w) => (
+                    <p
+                      key={w.kind}
+                      className={`text-xs ${w.severity === "info" ? "text-foreground-muted" : "font-medium text-warn"}`}
+                    >
+                      {boxFailsafeLabel(w, t)}
+                    </p>
+                  ))}
+                  {/* Frische UND grober Akkustand in EINER Zeile — nicht aus Platzgründen, sondern weil
+                      der Akkuwert genau so alt ist wie der letzte Kontakt. Nebeneinander liest man die
+                      Alterung automatisch mit („zuletzt online vor 19 Std · Akku niedrig"); zwei
+                      getrennte Zeilen liessen den Akkustand aktuell wirken. */}
+                  <p className="text-xs text-foreground-faint">
+                    {[boxFreshnessLabel(b.lastSyncAt, now, t), batteryLabel].filter(Boolean).join(" · ")}
+                  </p>
+                </div>
+              </div>
             </div>
           );
         })}

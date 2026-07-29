@@ -1,5 +1,18 @@
 [
+        {
+    "version": "4.125.0",
+    "date": "2026-07-29",
+    "changes": [
       {
+        "type": "chore",
+        "text": {
+          "de": "Upstream trublue-2 v4.55.3 zusammengefuehrt: Box-Karte zeigt Kontakt und Akkustand dauerhaft und ist zweispaltig; alle Dashboard-Bloecke gleich breit.",
+          "en": "Merged upstream trublue-2 v4.55.3: box card shows contact and battery persistently, now two-column; all dashboard blocks equal width."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.124.1",
     "date": "2026-07-29",
     "changes": [
