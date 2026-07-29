@@ -1,5 +1,18 @@
 [
   {
+    "version": "4.129.0",
+    "date": "2026-07-29",
+    "changes": [
+      {
+        "type": "feat",
+        "text": {
+          "de": "Neu: das Schicksalsrad (Zufalls-Engine). Die Keyholderin legt gewichtete Pools mit Konsequenzen an (Sperrzeit verlängern/verkürzen, Strafe, Belohnung, Orgasmus-Anweisung oder Aufgabe); Sub und Keyholderin können eine Ziehung auslösen. Die Wahrscheinlichkeiten bleiben vor dem Sub verborgen, und bei aktiver Gesundheits-Zurückhaltung fallen harte Konsequenzen automatisch weg.",
+          "en": "New: the wheel of fate (random engine). The keyholder creates weighted pools of outcomes (extend/shorten lock, penalty, reward, orgasm directive or task); both sub and keyholder can trigger a draw. The probabilities stay hidden from the sub, and while a health hold is active hard outcomes are dropped automatically."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.128.0",
     "date": "2026-07-29",
     "changes": [

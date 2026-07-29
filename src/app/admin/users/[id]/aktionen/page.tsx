@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Lock, LockOpen, ClipboardCheck, Droplets, Bell, ChevronRight, Anchor, PlayCircle } from "lucide-react";
+import { Lock, LockOpen, ClipboardCheck, Droplets, Bell, ChevronRight, Anchor, PlayCircle, Dices } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { assertKeyholderOrAdmin } from "@/lib/authGuards";
 import { getIsLocked, getActiveSperrzeit, getActiveWearSessions, getActivePlugAnforderung, getActivePlugSperrzeit } from "@/lib/queries";
@@ -13,9 +13,10 @@ import { getTranslations } from "next-intl/server";
 export default async function AktionenPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   await assertKeyholderOrAdmin(id);
-  const [t, tw] = await Promise.all([
+  const [t, tw, tz] = await Promise.all([
     getTranslations("admin"),
     getTranslations("wearForm"),
+    getTranslations("zufall"),
   ]);
 
   const user = await prisma.user.findUnique({ where: { id } });
@@ -389,6 +390,26 @@ export default async function AktionenPage({ params }: { params: Promise<{ id: s
             );
           })}
 
+        </div>
+      </div>
+
+      {/* Schicksalsrad einrichten */}
+      <div>
+        <p className="text-xs font-semibold text-foreground-faint uppercase tracking-wider px-1 mb-2">{tz("adminTitle")}</p>
+        <div className="bg-surface rounded-2xl border border-border-subtle divide-y divide-border-subtle">
+          <Link
+            href={`/admin/users/${id}/zufall`}
+            className="flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-surface-raised transition active:scale-[0.98]"
+          >
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "var(--color-sperrzeit-bg)" }}>
+              <Dices size={20} strokeWidth={2} style={{ color: "var(--color-sperrzeit)" }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-foreground">{tz("manageLink")}</p>
+              <p className="text-xs text-foreground-faint">{tz("manageLinkHint")}</p>
+            </div>
+            <ChevronRight size={16} className="text-foreground-faint flex-shrink-0" />
+          </Link>
         </div>
       </div>
     </>

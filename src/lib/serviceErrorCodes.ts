@@ -173,6 +173,15 @@ export const SETTINGS_CODES = [
   "invalidTime",
 ] as const;
 
+/** zufallService (Zufalls-Engine): Ziehung + Pool-/Options-CRUD. */
+export const ZUFALL_CODES = [
+  "ZUFALL_POOL_NOT_FOUND",
+  "ZUFALL_NO_OPTIONS",
+  "ZUFALL_COOLDOWN_ACTIVE",
+  "ZUFALL_INVALID_OUTCOME",
+  "ZUFALL_INVALID_INPUT",
+] as const;
+
 /** Every code the service layer can return — the set the i18n parity test iterates. */
 export const SERVICE_ERROR_CODES = [
   ...new Set<string>([
@@ -186,6 +195,7 @@ export const SERVICE_ERROR_CODES = [
     ...DEVICE_CODES,
     ...BOX_CODES,
     ...SETTINGS_CODES,
+    ...ZUFALL_CODES,
   ]),
 ] as readonly string[];
 
@@ -203,4 +213,5 @@ export type ServiceErrorCode =
   | (typeof REFERENCE_CODES)[number]
   | (typeof DEVICE_CODES)[number]
   | (typeof BOX_CODES)[number]
-  | (typeof SETTINGS_CODES)[number];
+  | (typeof SETTINGS_CODES)[number]
+  | (typeof ZUFALL_CODES)[number];

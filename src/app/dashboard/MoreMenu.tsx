@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import { ClipboardList, Droplets } from "lucide-react";
+import { ClipboardList, Droplets, Dices } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 export default function MoreMenu() {
@@ -44,6 +44,15 @@ export default function MoreMenu() {
             <div>
               <p className="font-semibold text-foreground">{t("orgasmusTitle")}</p>
               <p className="text-xs text-foreground-faint">{t("orgasmusDesc")}</p>
+            </div>
+          </Link>
+          <div className="border-t border-border-subtle" />
+          <Link href="/dashboard/zufall" onClick={() => setOpen(false)}
+            className="flex items-center gap-3 px-4 py-3 hover:bg-surface-raised transition text-sm text-foreground-muted">
+            <Dices size={18} className="text-[var(--color-sperrzeit)] flex-shrink-0" />
+            <div>
+              <p className="font-semibold text-foreground">{t("zufallTitle")}</p>
+              <p className="text-xs text-foreground-faint">{t("zufallDesc")}</p>
             </div>
           </Link>
         </div>

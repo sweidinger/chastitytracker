@@ -122,6 +122,8 @@ model User {
   tagesformen             Tagesform[]
   belohnungGutschriften   OrgasmusBelohnungGutschrift[]
   belohnungEvents         BelohnungEvent[]
+  zufallsPools            ZufallsPool[]
+  zufallsZiehungen        ZufallsZiehung[]
 }
 
 // Belohnungs-Ökonomie: Ereignis-Protokoll (Kontoauszug des Guthabens). Jede Bewegung wird hier
@@ -1054,4 +1056,65 @@ model MoodEvent {
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt])
+}
+
+// ── Zufalls-Engine ───────────────────────────────────────────────────────────
+// Gewichtete Zufallsziehungen, die eine Konsequenz auslösen (Sperrzeit verlängern/verkürzen,
+// Strafe, Belohnung, Orgasmus-Direktive, Aufgabe …). Ein Pool bündelt gewichtete Optionen; jede
+// Ziehung wählt EINE Option und wendet ihr Ergebnis über die bestehenden Konsequenz-Services an.
+// Die Gewichte sind vor dem Sub verborgen — er sieht nur die Labels, nie die Wahrscheinlichkeiten.
+model ZufallsPool {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  aktiv       Boolean  @default(true)
+  triggerType String   @default("MANUAL") // aktuell nur "MANUAL"
+  cooldownMin Int?     // Mindestabstand zwischen zwei Ziehungen (Minuten); null/0 = kein Cooldown
+  maxAddH     Float?   // Obergrenze für TIME_ADD-Stunden EINER Ziehung; null = keine Deckelung
+  createdBy   String   // "admin" | "keyholder" — wer den Pool angelegt hat
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  options   ZufallsOption[]
+  ziehungen ZufallsZiehung[]
+
+  @@index([userId, aktiv])
+}
+
+// Eine gewichtete Option eines Pools. `outcomeType` bestimmt die Konsequenz, `outcomeJson` trägt die
+// typspezifischen Parameter (siehe zufallService.ts). `weight` ist relativ; die Summe braucht nicht 100.
+model ZufallsOption {
+  id          String  @id @default(cuid())
+  poolId      String
+  pool        ZufallsPool @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  label       String
+  weight      Int     @default(1)
+  outcomeType String  // ZUFALL_OUTCOME_TYPES
+  outcomeJson String?
+  sort        Int     @default(0)
+
+  @@index([poolId])
+}
+
+// Protokoll einer erfolgten Ziehung (Kontoauszug der Zufalls-Engine). Label + outcomeType werden
+// eingefroren, damit eine spätere Pool-Änderung die Historie nicht rückwirkend umschreibt.
+// `appliedRefType`/`appliedRefId` zeigen auf die erzeugte Konsequenz (SPERRZEIT, StrafeRecord …).
+model ZufallsZiehung {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  poolId         String
+  pool           ZufallsPool @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  optionId       String
+  optionLabel    String
+  outcomeType    String
+  drawnBy        String   // "sub" | "keyholder" | "ai" | "system"
+  drawnAt        DateTime @default(now())
+  appliedRefType String?  // z.B. "SPERRZEIT" | "STRAFE" | "ORGASMUS_ANFORDERUNG" | "KEYHOLDER_TASK"
+  appliedRefId   String?
+  detail         String?
+
+  @@index([userId, drawnAt])
+  @@index([poolId])
 }

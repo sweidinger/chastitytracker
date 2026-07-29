@@ -262,6 +262,33 @@ export const AUTO_INSPECTION_DEADLINE_FROM_RANGE = { ...AUTO_INSPECTION_DEADLINE
 /** Obere Frist-Grenze („bis"). */
 export const AUTO_INSPECTION_DEADLINE_TO_RANGE = { ...AUTO_INSPECTION_DEADLINE, fallback: 60 } as const satisfies NumberRange;
 
+// ── Zufalls-Engine ────────────────────────────────────────────────────────────
+/** Konsequenz-Typen einer Zufalls-Option (String-Enum, in ZufallsOption.outcomeType gespeichert).
+ *  Die typspezifischen Parameter liegen als JSON in outcomeJson — siehe zufallService.ts. */
+export const ZUFALL_OUTCOME_TYPES = [
+  "TIME_ADD",         // Sperrzeit verlängern
+  "TIME_SUB",         // Sperrzeit verkürzen
+  "PENALTY",          // Strafe (Straf-Aktion oder freier StrafeRecord)
+  "REWARD",           // Belohnungs-Fenster (ohne Guthaben-Gate)
+  "ORGASM_DIRECTIVE", // Orgasmus-Anweisung
+  "TASK",             // Keyholder-Aufgabe (WRITE_RESPONSE)
+  "NOTHING",          // nichts passiert (Nieten füllen das Rad)
+] as const;
+export type ZufallOutcomeType = typeof ZUFALL_OUTCOME_TYPES[number];
+
+/** Auslöse-Arten eines Pools. Aktuell nur manuelle Ziehung (Sub oder Keyholder). */
+export const ZUFALL_TRIGGER_TYPES = ["MANUAL"] as const;
+export type ZufallTriggerType = typeof ZUFALL_TRIGGER_TYPES[number];
+
+/** Gewicht einer Option (relativ; Summe muss nicht 100 sein). */
+export const ZUFALL_WEIGHT_RANGE = { min: 1, max: 1000, fallback: 1 } as const satisfies NumberRange;
+/** Cooldown zwischen zwei Ziehungen in Minuten (0 = kein Cooldown, max = eine Woche). */
+export const ZUFALL_COOLDOWN_MIN_RANGE = { min: 0, max: 10080, fallback: 0 } as const satisfies NumberRange;
+/** Obergrenze für TIME_ADD-Stunden EINER Ziehung (0 = keine Deckelung). */
+export const ZUFALL_MAXADD_H_RANGE = { min: 0, max: 168, fallback: 24 } as const satisfies NumberRange;
+/** Stunden-Parameter einer zeit-/fensterbezogenen Option (TIME_ADD/SUB/REWARD/ORGASM_DIRECTIVE). */
+export const ZUFALL_OPTION_HOURS_RANGE = { min: 0, max: 168, fallback: 3 } as const satisfies NumberRange;
+
 /** Call-to-Action-Button-Farben für HTML-Mails (in E-Mail keine CSS-Variablen → Hex).
  *  Bewusst getrennt von TYPE_EMAIL_COLORS: das ist der Akzent je Eintrags-TYP, nicht die
  *  Button-Farbe eines Benachrichtigungs-Mails (eine Orgasmus-ANWEISUNG ist kein Orgasmus-Eintrag). */
