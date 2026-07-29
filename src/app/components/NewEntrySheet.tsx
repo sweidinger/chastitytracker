@@ -1,7 +1,8 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Lock, LockOpen, ClipboardCheck, Droplets, KeyRound } from "lucide-react";
+import { Lock, LockOpen, ClipboardCheck, Droplets, KeyRound, Dices } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Sheet from "./Sheet";
 import CategoryIconRender from "./CategoryIcon";
@@ -30,6 +31,17 @@ export default function NewEntrySheet({ open, onClose, isLocked, categoryRows = 
   const t = useTranslations("newEntry");
   const tw = useTranslations("wearForm");
   const router = useRouter();
+
+  // Schicksalsrad nur zeigen, wenn für diesen Sub ein aktiver (manueller) Zufalls-Pool existiert.
+  const [hasZufall, setHasZufall] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/zufall")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && Array.isArray(d) && d.length > 0) setHasZufall(true); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const options = [
     {
@@ -112,6 +124,20 @@ export default function NewEntrySheet({ open, onClose, isLocked, categoryRows = 
             </button>
           );
         })}
+
+        {hasZufall && (
+          <button
+            type="button"
+            onClick={() => handleSelect("/dashboard/zufall")}
+            className="flex items-center gap-4 px-4 py-3.5 rounded-xl hover:bg-background-subtle active:bg-background-subtle transition-colors text-left w-full"
+          >
+            <Dices size={22} className="text-sperrzeit shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-foreground">{t("zufall")}</p>
+              <p className="text-xs text-foreground-muted">{t("zufallSubtitle")}</p>
+            </div>
+          </button>
+        )}
 
         {/* Per-Category wear actions (begin or end based on state). */}
         {categoryRows.map((c) => {

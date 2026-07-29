@@ -443,6 +443,8 @@
   },
   "newEntry": {
     "title": "Neu erfassen",
+    "zufall": "Schicksalsrad",
+    "zufallSubtitle": "Drehen & Konsequenz ziehen",
     "lock": "Verschluss",
     "lockSubtitle": "Datum, Zeit & Foto",
     "bildersafeAction": "Schlüsselbox-Code versiegeln",

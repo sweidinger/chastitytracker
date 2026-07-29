@@ -1,5 +1,18 @@
 [
   {
+    "version": "4.129.1",
+    "date": "2026-07-29",
+    "changes": [
+      {
+        "type": "fix",
+        "text": {
+          "de": "Das Schicksalsrad erscheint jetzt beim Sub im „Neu erfassen“-Menü (über „+ Neu“), sobald ein aktiver Pool existiert — vorher lag der Eintrag versehentlich in einem ungenutzten Menü.",
+          "en": "The Wheel of Fate now appears for the sub in the “New entry” menu (via “+ New”) once an active pool exists — previously the entry sat in an unused menu."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.129.0",
     "date": "2026-07-29",
     "changes": [
@@ -25,7 +38,7 @@
       }
     ]
   },
-            {
+  {
     "version": "4.127.0",
     "date": "2026-07-29",
     "changes": [
@@ -129,7 +142,7 @@
     "changes": [
       {
         "type": "feat",
-        "text": "Stimmungs-Ereignisse: Erreicht der Stimmungsstand der KI-Keyholderin ein Extrem, meldet sie sich spontan \u2013 bei sehr hoher Stimmung mit einer warmen Geste, bei sehr niedriger mit einer ernsten Ermahnung. Mit Zeitdrossel (max. alle 12 h) und nur bei Band-Wechsel; ernste Ermahnungen entfallen bei aktivem Gesundheits-Stopp."
+        "text": "Stimmungs-Ereignisse: Erreicht der Stimmungsstand der KI-Keyholderin ein Extrem, meldet sie sich spontan – bei sehr hoher Stimmung mit einer warmen Geste, bei sehr niedriger mit einer ernsten Ermahnung. Mit Zeitdrossel (max. alle 12 h) und nur bei Band-Wechsel; ernste Ermahnungen entfallen bei aktivem Gesundheits-Stopp."
       }
     ]
   },
@@ -159,7 +172,7 @@
     "changes": [
       {
         "type": "feat",
-        "text": "Stimmungsstand der KI-Keyholderin (Stufe 3): Die Keyholderin hat jetzt einen Beziehungs-/Stimmungsstand (0\u2013100), der sich aus euren Interaktionen entwickelt \u2013 Belohnungen heben ihn, Strafen senken ihn \u2013 und mit der Zeit Richtung neutral zerf\u00e4llt. Er f\u00e4rbt ihren Ton UND ihre autonome Neigung (gro\u00dfz\u00fcgiger vs. strenger), \u00e4ndert aber nie die Sicherheitsregeln. Der Sub sieht im Chat einen dezenten Hinweis auf ihre Stimmung; im Admin l\u00e4sst sie sich anzeigen und manuell setzen."
+        "text": "Stimmungsstand der KI-Keyholderin (Stufe 3): Die Keyholderin hat jetzt einen Beziehungs-/Stimmungsstand (0–100), der sich aus euren Interaktionen entwickelt – Belohnungen heben ihn, Strafen senken ihn – und mit der Zeit Richtung neutral zerfällt. Er färbt ihren Ton UND ihre autonome Neigung (großzügiger vs. strenger), ändert aber nie die Sicherheitsregeln. Der Sub sieht im Chat einen dezenten Hinweis auf ihre Stimmung; im Admin lässt sie sich anzeigen und manuell setzen."
       }
     ]
   },
@@ -169,7 +182,7 @@
     "changes": [
       {
         "type": "feat",
-        "text": "Orgasmus-Budget (Stufe 2c): Ein Orgasmus \u00fcber dem Budget erscheint jetzt automatisch als Vergehen im Strafbuch (Kategorie \u201eOrgasmus \u00fcber Budget\u201c) und kann von Keyholder/KI beurteilt werden. Feuchte Tr\u00e4ume und von einer Anforderung/Belohnung gedeckte Orgasmen z\u00e4hlen nicht; ein mitten im Zeitraum gesetztes/gesenktes Budget wirkt nie r\u00fcckwirkend (Stichtag beim Setzen)."
+        "text": "Orgasmus-Budget (Stufe 2c): Ein Orgasmus über dem Budget erscheint jetzt automatisch als Vergehen im Strafbuch (Kategorie „Orgasmus über Budget“) und kann von Keyholder/KI beurteilt werden. Feuchte Träume und von einer Anforderung/Belohnung gedeckte Orgasmen zählen nicht; ein mitten im Zeitraum gesetztes/gesenktes Budget wirkt nie rückwirkend (Stichtag beim Setzen)."
       }
     ]
   },
@@ -179,7 +192,7 @@
     "changes": [
       {
         "type": "feat",
-        "text": "Orgasmus-Budget (Stufe 2b): Die KI-Keyholderin kann das Budget jetzt selbst setzen \u2013 im Chat und in ihren autonomen L\u00e4ufen (Aktion set_orgasm_budget), z.B. als Belohnung erh\u00f6hen oder als Strafe senken. Bei aktivem Gesundheits-Stopp ist die Aktion blockiert."
+        "text": "Orgasmus-Budget (Stufe 2b): Die KI-Keyholderin kann das Budget jetzt selbst setzen – im Chat und in ihren autonomen Läufen (Aktion set_orgasm_budget), z.B. als Belohnung erhöhen oder als Strafe senken. Bei aktivem Gesundheits-Stopp ist die Aktion blockiert."
       }
     ]
   },
@@ -189,7 +202,7 @@
     "changes": [
       {
         "type": "feat",
-        "text": "Orgasmus-Budget (Stufe 2a): Der Keyholder kann pro Sub ein Budget an Orgasmen pro Woche oder Monat festlegen (Admin \u2192 Einstellungen). Das Dashboard zeigt Verbrauch und Rest in der Denial-Karte. Feuchte Tr\u00e4ume und von einer Anforderung/Belohnung gedeckte Orgasmen z\u00e4hlen nicht mit. Durchsetzung (Strafbuch) und KI-Steuerung folgen in den n\u00e4chsten Schritten."
+        "text": "Orgasmus-Budget (Stufe 2a): Der Keyholder kann pro Sub ein Budget an Orgasmen pro Woche oder Monat festlegen (Admin → Einstellungen). Das Dashboard zeigt Verbrauch und Rest in der Denial-Karte. Feuchte Träume und von einer Anforderung/Belohnung gedeckte Orgasmen zählen nicht mit. Durchsetzung (Strafbuch) und KI-Steuerung folgen in den nächsten Schritten."
       }
     ]
   },

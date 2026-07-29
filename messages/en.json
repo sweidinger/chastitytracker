@@ -443,6 +443,8 @@
   },
   "newEntry": {
     "title": "New entry",
+    "zufall": "Wheel of Fate",
+    "zufallSubtitle": "Spin & draw a consequence",
     "lock": "Lock",
     "lockSubtitle": "Date, time & photo",
     "bildersafeAction": "Seal lockbox code",
