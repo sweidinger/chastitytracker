@@ -80,3 +80,7 @@ AGENTS.md
 .nas_key
 # Persönlicher Keyholder-Rollentext — nicht ins öffentliche Repo
 keyholder-instructions.md
+
+# Legacy statische Uploads — hier NIE Nutzerbilder committen.
+# Echte Uploads liegen in data/uploads (Volume, nicht im Repo). Siehe PR trublue-2#48.
+/public/uploads/
