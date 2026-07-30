@@ -1965,6 +1965,7 @@
     "noPools": "Aktuell ist kein Schicksalsrad für dich eingerichtet.",
     "selectPool": "Rad wählen",
     "error": "Die Ziehung hat nicht geklappt. Versuch es gleich noch einmal.",
+    "cooldownActive": "Wieder möglich in {time}",
     "adminTitle": "Schicksalsrad",
     "adminIntro": "Lege gewichtete Pools an. Die Wahrscheinlichkeiten bleiben vor dem Sub verborgen.",
     "newPool": "Neuer Pool",

@@ -374,11 +374,36 @@ export async function listZufallsPools(userId: string) {
   });
 }
 
-/** Aktive, manuell auslösbare Pools (nur id + name) — für die Sub-Sicht, OHNE Gewichte/Optionen. */
-export async function listActiveManualPools(userId: string): Promise<{ id: string; name: string }[]> {
-  return prisma.zufallsPool.findMany({
+/** Aktive, manuell auslösbare Pools (id + name + Cooldown-Status) — für die Sub-Sicht, OHNE
+ *  Gewichte/Optionen. `nextDrawAt` (ISO) = frühester nächster Zug wegen Cooldown; null = jetzt erlaubt. */
+export async function listActiveManualPools(userId: string): Promise<{ id: string; name: string; cooldownMin: number; nextDrawAt: string | null }[]> {
+  const pools = await prisma.zufallsPool.findMany({
     where: { userId, aktiv: true, triggerType: "MANUAL" },
     orderBy: { createdAt: "desc" },
-    select: { id: true, name: true },
+    select: { id: true, name: true, cooldownMin: true },
+  });
+  if (pools.length === 0) return [];
+  const cooldownPoolIds = pools.filter((p) => p.cooldownMin && p.cooldownMin > 0).map((p) => p.id);
+  const lastByPool = new Map<string, Date>();
+  if (cooldownPoolIds.length > 0) {
+    const grouped = await prisma.zufallsZiehung.groupBy({
+      by: ["poolId"],
+      where: { poolId: { in: cooldownPoolIds } },
+      _max: { drawnAt: true },
+    });
+    for (const g of grouped) if (g._max.drawnAt) lastByPool.set(g.poolId, g._max.drawnAt);
+  }
+  const nowMs = Date.now();
+  return pools.map((p) => {
+    const cd = p.cooldownMin ?? 0;
+    let nextDrawAt: string | null = null;
+    if (cd > 0) {
+      const last = lastByPool.get(p.id);
+      if (last) {
+        const next = last.getTime() + cd * 60 * 1000;
+        if (next > nowMs) nextDrawAt = new Date(next).toISOString();
+      }
+    }
+    return { id: p.id, name: p.name, cooldownMin: cd, nextDrawAt };
   });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Dices } from "lucide-react";
 import Card from "@/app/components/Card";
@@ -12,6 +12,10 @@ import { hapticMedium } from "@/lib/haptics";
 interface Pool {
   id: string;
   name: string;
+  /** Mindestabstand zwischen zwei Ziehungen (Minuten); 0 = kein Cooldown. */
+  cooldownMin: number;
+  /** ISO-Zeitpunkt, ab dem wieder gezogen werden darf; null = jetzt erlaubt. */
+  nextDrawAt: string | null;
 }
 
 /** Alle Tuning-Zahlen der Spin-Animation an EINER Stelle (keine verstreuten Magic Numbers). */
@@ -25,6 +29,14 @@ const SPIN = {
   faces: ["🎲", "🔒", "🎁", "💧", "⏱️", "❓", "⭐️", "🔓"],
 } as const;
 
+/** m:ss aus verbleibenden Millisekunden (auf ganze Sekunden aufgerundet). */
+function formatRemaining(ms: number): string {
+  const total = Math.ceil(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 export default function ZufallsRad({ pools }: { pools: Pool[] }) {
   const t = useTranslations("zufall");
   const [poolId, setPoolId] = useState(pools[0]?.id ?? "");
@@ -34,6 +46,18 @@ export default function ZufallsRad({ pools }: { pools: Pool[] }) {
   const [error, setError] = useState(false);
   const busy = useRef(false);
 
+  // Cooldown-Ende je Pool (ms-Timestamp | null). Aus den Server-Props initialisiert und nach jeder
+  // eigenen Ziehung lokal fortgeschrieben, damit der Countdown sofort startet — ohne Refetch.
+  const [nextDrawByPool, setNextDrawByPool] = useState<Record<string, number | null>>(() =>
+    Object.fromEntries(pools.map((p) => [p.id, p.nextDrawAt ? new Date(p.nextDrawAt).getTime() : null])),
+  );
+  // Sekündlicher Tick, damit der Countdown läuft und der Button bei 0 wieder freigeschaltet wird.
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const iv = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(iv);
+  }, []);
+
   if (pools.length === 0) {
     return (
       <Card>
@@ -42,8 +66,13 @@ export default function ZufallsRad({ pools }: { pools: Pool[] }) {
     );
   }
 
+  const selectedPool = pools.find((p) => p.id === poolId) ?? null;
+  const nextAt = nextDrawByPool[poolId] ?? null;
+  const remainingMs = nextAt ? Math.max(0, nextAt - nowMs) : 0;
+  const cooling = remainingMs > 0;
+
   async function spin() {
-    if (!poolId || busy.current) return;
+    if (!poolId || busy.current || cooling) return;
     busy.current = true;
     setSpinning(true);
     setResult(null);
@@ -73,6 +102,8 @@ export default function ZufallsRad({ pools }: { pools: Pool[] }) {
 
     if (ok && data?.optionLabel) {
       setResult({ optionLabel: data.optionLabel, outcomeType: data.outcomeType ?? "NOTHING" });
+      const cd = selectedPool?.cooldownMin ?? 0;
+      if (cd > 0) setNextDrawByPool((prev) => ({ ...prev, [poolId]: Date.now() + cd * 60 * 1000 }));
       hapticMedium();
     } else {
       setError(true);
@@ -108,12 +139,27 @@ export default function ZufallsRad({ pools }: { pools: Pool[] }) {
             <p className="text-xs text-foreground-faint mt-2">{t("resultHint")}</p>
           </div>
         ) : (
-          <p className="text-sm text-foreground-faint">{spinning ? t("spinning") : " "}</p>
+          <p className="text-sm text-foreground-faint">{spinning ? t("spinning") : " "}</p>
         )}
 
         {error && <p className="text-sm text-warn">{t("error")}</p>}
 
-        <Button semantic="sperrzeit" variant="semantic" size="lg" fullWidth loading={spinning} onClick={spin} icon={<Dices size={20} />}>
+        {cooling && (
+          <p className="text-sm font-medium text-foreground-faint tabular-nums" aria-live="polite">
+            {t("cooldownActive", { time: formatRemaining(remainingMs) })}
+          </p>
+        )}
+
+        <Button
+          semantic="sperrzeit"
+          variant="semantic"
+          size="lg"
+          fullWidth
+          loading={spinning}
+          disabled={cooling}
+          onClick={spin}
+          icon={<Dices size={20} />}
+        >
           {result ? t("again") : t("spin")}
         </Button>
       </Card>

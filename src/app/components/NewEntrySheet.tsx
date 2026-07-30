@@ -38,7 +38,7 @@ export default function NewEntrySheet({ open, onClose, isLocked, categoryRows = 
     let cancelled = false;
     fetch("/api/zufall")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (!cancelled && Array.isArray(d) && d.length > 0) setHasZufall(true); })
+      .then((d) => { if (!cancelled && Array.isArray(d?.pools) && d.pools.length > 0) setHasZufall(true); })
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);

@@ -1,5 +1,25 @@
 [
   {
+    "version": "4.131.0",
+    "date": "2026-07-30",
+    "changes": [
+      {
+        "type": "new",
+        "text": {
+          "de": "Schicksalsrad: Der Drehen-Button ist während der eingestellten Wartezeit gesperrt und zeigt einen Countdown, wann wieder gedreht werden kann.",
+          "en": "Wheel of Fate: the spin button is now locked during the configured cooldown and shows a countdown until the next spin is possible."
+        }
+      },
+      {
+        "type": "fix",
+        "text": {
+          "de": "Schicksalsrad erscheint jetzt zuverlässig im \u201eNeu erfassen\u201c-Sheet (die Verfügbarkeitsprüfung las die Pool-Liste falsch aus).",
+          "en": "The Wheel of Fate now reliably appears in the \u201cNew entry\u201d sheet (the availability check parsed the pool list incorrectly)."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.130.0",
     "date": "2026-07-30",
     "changes": [
