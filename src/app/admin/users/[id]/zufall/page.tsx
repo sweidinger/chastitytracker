@@ -3,8 +3,9 @@ import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { assertKeyholderOrAdmin } from "@/lib/authGuards";
 import { listZufallsPools } from "@/lib/zufallService";
+import { SEVERITY_PENALTY_SUGGESTIONS } from "@/lib/strafurteilService";
 import AdminActionFormShell from "@/app/components/AdminActionFormShell";
-import ZufallPoolEditor, { type EditorPool, type SessionCategory } from "./ZufallPoolEditor";
+import ZufallPoolEditor, { type EditorPool, type SessionCategory, type PenaltySuggestionMap } from "./ZufallPoolEditor";
 
 export default async function AdminZufallPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -31,6 +32,10 @@ export default async function AdminZufallPage({ params }: { params: Promise<{ id
     devices: c.devices.map((d) => ({ id: d.id, name: d.name })),
   }));
 
+  // Strafbuch-Schwere + Vorschläge serverseitig laden und als reine Daten an den Client-Editor geben
+  // (die Quelle zieht serverseitige Module mit und darf nicht direkt im Client importiert werden).
+  const penaltySuggestions = SEVERITY_PENALTY_SUGGESTIONS as unknown as PenaltySuggestionMap;
+
   const initial: EditorPool[] = pools.map((p) => ({
     id: p.id,
     name: p.name,
@@ -55,7 +60,7 @@ export default async function AdminZufallPage({ params }: { params: Promise<{ id
       iconColor="var(--color-sperrzeit)"
       title={t("adminTitle")}
     >
-      <ZufallPoolEditor userId={id} initialPools={initial} categories={categories} />
+      <ZufallPoolEditor userId={id} initialPools={initial} categories={categories} penaltySuggestions={penaltySuggestions} />
     </AdminActionFormShell>
   );
 }

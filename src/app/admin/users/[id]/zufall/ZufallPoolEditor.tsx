@@ -14,7 +14,16 @@ import { hapticMedium } from "@/lib/haptics";
 import {
   ZUFALL_OUTCOME_TYPES, ZUFALL_WEIGHT_RANGE, ZUFALL_COOLDOWN_MIN_RANGE, ZUFALL_MAXADD_MIN_RANGE,
 } from "@/lib/constants";
-import { SEVERITY_PENALTY_SUGGESTIONS, type OffenseSeverity } from "@/lib/strafurteilService";
+
+// Strafbuch-Schwere + Vorschläge kommen als Prop vom Server (die Quelle `strafurteilService` zieht
+// serverseitige Module mit und darf NICHT direkt in diese Client-Komponente importiert werden).
+export type OffenseSeverity = "leicht" | "mittel" | "schwer";
+export interface PenaltySuggestion {
+  label: string;
+  action?: string;
+  param?: { field: "hours" | "windowHours"; label: string; default: number };
+}
+export type PenaltySuggestionMap = Record<OffenseSeverity, PenaltySuggestion[]>;
 
 // ── Serialisierbare Editor-Formen ─────────────────────────────────────────────
 export interface EditorOption {
@@ -87,7 +96,7 @@ interface DraftPool {
 let keySeq = 0;
 const nextKey = () => `opt-${keySeq++}`;
 
-function toDraftOption(o: EditorOption): DraftOption {
+function toDraftOption(o: EditorOption, sugg: PenaltySuggestionMap): DraftOption {
   let p: Record<string, unknown> = {};
   if (o.outcomeJson) { try { p = JSON.parse(o.outcomeJson) ?? {}; } catch { p = {}; } }
   const s = (v: unknown) => (typeof v === "number" || typeof v === "string" ? String(v) : "");
@@ -98,7 +107,7 @@ function toDraftOption(o: EditorOption): DraftOption {
   let penaltyParam = "";
   if (o.outcomeType === "PENALTY") {
     if (typeof p.severity === "string" && (SEVERITIES as string[]).includes(p.severity)) penaltySeverity = p.severity as OffenseSeverity;
-    const arr = SEVERITY_PENALTY_SUGGESTIONS[penaltySeverity];
+    const arr = sugg[penaltySeverity] ?? [];
     const found = arr.findIndex((x) => x.label === p.penaltyLabel);
     penaltyIdx = found >= 0 ? found : 0;
     const sug = arr[penaltyIdx];
@@ -128,12 +137,12 @@ function toDraftOption(o: EditorOption): DraftOption {
     istStrafe: !!p.istStrafe,
   };
 }
-function toDraftPool(p: EditorPool): DraftPool {
-  return { id: p.id, name: p.name, aktiv: p.aktiv, cooldownMin: p.cooldownMin, maxAddH: p.maxAddH, options: p.options.map(toDraftOption), saving: false, saved: false };
+function toDraftPool(p: EditorPool, sugg: PenaltySuggestionMap): DraftPool {
+  return { id: p.id, name: p.name, aktiv: p.aktiv, cooldownMin: p.cooldownMin, maxAddH: p.maxAddH, options: p.options.map((o) => toDraftOption(o, sugg)), saving: false, saved: false };
 }
 
 /** Baut outcomeJson aus den Draft-Parametern je Typ (spiegelt validateOptions im Service). */
-function buildOutcomeJson(o: DraftOption): string | null {
+function buildOutcomeJson(o: DraftOption, sugg: PenaltySuggestionMap): string | null {
   const p: Record<string, unknown> = {};
   switch (o.outcomeType) {
     case "TIME_ADD":
@@ -148,7 +157,7 @@ function buildOutcomeJson(o: DraftOption): string | null {
       if (o.windowHours) p.windowHours = Number(o.windowHours);
       break;
     case "PENALTY": {
-      const sug = SEVERITY_PENALTY_SUGGESTIONS[o.penaltySeverity]?.[o.penaltyIdx];
+      const sug = sugg[o.penaltySeverity]?.[o.penaltyIdx];
       if (sug) {
         p.severity = o.penaltySeverity;
         p.penaltyLabel = sug.label;
@@ -187,9 +196,11 @@ const emptyOption = (): DraftOption => ({
 const OUTCOME_OPTIONS = (t: (k: string) => string) =>
   ZUFALL_OUTCOME_TYPES.map((v) => ({ value: v, label: t(`outcomes.${v}`) }));
 
-export default function ZufallPoolEditor({ userId, initialPools, categories = [] }: { userId: string; initialPools: EditorPool[]; categories?: SessionCategory[] }) {
+export default function ZufallPoolEditor({
+  userId, initialPools, categories = [], penaltySuggestions,
+}: { userId: string; initialPools: EditorPool[]; categories?: SessionCategory[]; penaltySuggestions: PenaltySuggestionMap }) {
   const t = useTranslations("zufall");
-  const [pools, setPools] = useState<DraftPool[]>(initialPools.map(toDraftPool));
+  const [pools, setPools] = useState<DraftPool[]>(initialPools.map((p) => toDraftPool(p, penaltySuggestions)));
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
@@ -266,7 +277,7 @@ export default function ZufallPoolEditor({ userId, initialPools, categories = []
             label: o.label.trim(),
             weight: o.weight,
             outcomeType: o.outcomeType,
-            outcomeJson: buildOutcomeJson(o),
+            outcomeJson: buildOutcomeJson(o, penaltySuggestions),
             sort: i,
           })),
         }),
@@ -363,7 +374,7 @@ export default function ZufallPoolEditor({ userId, initialPools, categories = []
             <p className="text-xs font-semibold uppercase tracking-wider text-foreground-faint">{t("options")}</p>
             {pool.options.length === 0 && <p className="text-xs text-foreground-faint">{t("noOptionsYet")}</p>}
             {pool.options.map((o, idx) => {
-              const penaltyList = SEVERITY_PENALTY_SUGGESTIONS[o.penaltySeverity] ?? [];
+              const penaltyList = penaltySuggestions[o.penaltySeverity] ?? [];
               const penaltySug = penaltyList[o.penaltyIdx];
               const selectedCat = categories.find((c) => c.id === o.categoryId) ?? null;
               return (
@@ -401,10 +412,10 @@ export default function ZufallPoolEditor({ userId, initialPools, categories = []
                 {(o.outcomeType === "PENALTY") && (
                   <div className="flex flex-col gap-2">
                     <Select label={t("penaltySeverity")} value={o.penaltySeverity}
-                      options={SEVERITIES.map((s) => ({ value: s, label: t(`severity.${s}`) }))}
+                      options={SEVERITIES.map((sv) => ({ value: sv, label: t(`severity.${sv}`) }))}
                       onChange={(e) => updateOption(pool.id, o.key, { penaltySeverity: e.target.value as OffenseSeverity, penaltyIdx: 0, penaltyParam: "" })} />
                     <Select label={t("penaltyChoice")} value={String(o.penaltyIdx)}
-                      options={penaltyList.map((s, i) => ({ value: String(i), label: s.label }))}
+                      options={penaltyList.map((sg, i) => ({ value: String(i), label: sg.label }))}
                       onChange={(e) => updateOption(pool.id, o.key, { penaltyIdx: Number(e.target.value), penaltyParam: "" })} />
                     {penaltySug?.param && (
                       <Input type="number" inputMode="numeric" min={0} label={penaltySug.param.label}
