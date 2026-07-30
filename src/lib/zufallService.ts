@@ -20,12 +20,12 @@ import { notifyUser } from "@/lib/notify";
  * weil es dafür keinen Service gibt). Jede Ziehung wird als eingefrorenes Protokoll festgehalten.
  *
  * outcomeJson-Formen je outcomeType:
- *   TIME_ADD          { hours }
- *   TIME_SUB          { hours }
- *   PENALTY           { action?: PenaltyActionType, hours?, windowHours?, text? }
+ *   TIME_ADD          { minutes }
+ *   TIME_SUB          { minutes }
+ *   PENALTY           { severity?, penaltyLabel?, action?: PenaltyActionType, hours?, windowHours?, text? }
  *   REWARD            { windowHours? }
  *   ORGASM_DIRECTIVE  { windowHours, vorgegebeneArt?, ruined? }
- *   TASK              { text, dueH? }
+ *   SESSION_REQUEST   { categoryId, minMinuten?, delayMinutes?, deviceId?, requireVideo?, orgasmusZiel?, orgasmusRuiniert?, deadlineHours?, nachricht?, istStrafe? }
  *   NOTHING           {}
  */
 
@@ -41,12 +41,25 @@ export type ZufallDrawnBy = "sub" | "keyholder" | "ai" | "system";
 /** Parsed typspezifische Parameter einer Option (tolerant; ungültig = {}). */
 interface OutcomeParams {
   hours?: number;
+  minutes?: number;
   windowHours?: number;
   action?: PenaltyActionType;
   text?: string;
+  severity?: string;
+  penaltyLabel?: string;
   vorgegebeneArt?: string | null;
   ruined?: boolean;
-  dueH?: number;
+  // SESSION_REQUEST
+  categoryId?: string;
+  minMinuten?: number;
+  delayMinutes?: number;
+  deviceId?: string;
+  requireVideo?: boolean;
+  orgasmusZiel?: string;
+  orgasmusRuiniert?: boolean;
+  deadlineHours?: number;
+  nachricht?: string;
+  istStrafe?: boolean;
 }
 
 function parseOutcomeJson(raw: string | null | undefined): OutcomeParams {
@@ -95,27 +108,32 @@ async function applyOutcome(
 
   switch (opt.outcomeType as ZufallOutcomeType) {
     case "TIME_ADD": {
-      let hours = num(p.hours);
-      if (pool.maxAddH != null && pool.maxAddH > 0) hours = Math.min(hours, pool.maxAddH);
-      if (!Number.isFinite(hours) || hours <= 0) return nothing("Keine gültige Verlängerung.");
-      const res = await executePenaltyAction(userId, { type: "extend_lock", hours });
+      let minutes = num(p.minutes);
+      if (pool.maxAddH != null && pool.maxAddH > 0) minutes = Math.min(minutes, pool.maxAddH);
+      if (!Number.isFinite(minutes) || minutes <= 0) return nothing("Keine gültige Verlängerung.");
+      const res = await executePenaltyAction(userId, { type: "extend_lock", hours: minutes / 60 });
       return { appliedRefType: "SPERRZEIT", appliedRefId: null, outcomeType: "TIME_ADD", message: res.ok ? res.data.message : `Verlängerung fehlgeschlagen (${res.error}).` };
     }
     case "TIME_SUB": {
-      const hours = num(p.hours);
-      if (!Number.isFinite(hours) || hours <= 0) return nothing("Keine gültige Verkürzung.");
+      const minutes = num(p.minutes);
+      if (!Number.isFinite(minutes) || minutes <= 0) return nothing("Keine gültige Verkürzung.");
       const sperr = await getActiveSperrzeit(userId);
       if (!sperr || !sperr.endetAt) return nothing("Keine befristete Sperrzeit aktiv — nichts zu verkürzen.");
       const floor = new Date(now.getTime() + MIN_LOCK_BUFFER_MIN * 60 * 1000);
-      const target = new Date(sperr.endetAt.getTime() - hours * MS_PER_HOUR);
+      const target = new Date(sperr.endetAt.getTime() - minutes * 60 * 1000);
       const clamped = target < floor ? floor : target;
       const res = await updateSperrzeitEnde(sperr.id, clamped);
-      return { appliedRefType: "SPERRZEIT", appliedRefId: sperr.id, outcomeType: "TIME_SUB", message: res.ok ? `Sperrzeit auf ${clamped.toISOString()} verkürzt.` : `Verkürzung fehlgeschlagen (${res.error}).` };
+      return { appliedRefType: "SPERRZEIT", appliedRefId: sperr.id, outcomeType: "TIME_SUB", message: res.ok ? `Sperrzeit um ${minutes} Min verkürzt.` : `Verkürzung fehlgeschlagen (${res.error}).` };
     }
     case "PENALTY": {
+      // Der gewählte Strafbuch-Vorschlag (penaltyLabel) ist der Strafgrund; eine ggf. hinterlegte
+      // Aktion wird zusätzlich ausgeführt. IMMER ein Strafbuch-Eintrag, gekennzeichnet als
+      // "per Schicksalsrad" (judgedBy).
+      const strafText = p.penaltyLabel?.trim() || p.text?.trim() || opt.label;
+      let actionMsg = "";
       if (p.action) {
         const res = await executePenaltyAction(userId, { type: p.action, hours: p.hours, windowHours: p.windowHours });
-        return { appliedRefType: "STRAFE", appliedRefId: null, outcomeType: "PENALTY", message: res.ok ? res.data.message : `Straf-Aktion fehlgeschlagen (${res.error}).` };
+        actionMsg = res.ok ? ` ${res.data.message}` : ` (Aktion fehlgeschlagen: ${res.error})`;
       }
       const rec = await prisma.strafeRecord.create({
         data: {
@@ -124,12 +142,13 @@ async function applyOutcome(
           refId: `zufall:${randomUUID()}`,
           bestraftDatum: now,
           status: "PUNISHED",
-          reason: p.text?.trim() || opt.label,
-          judgedBy: "system",
+          reason: strafText,
+          notiz: p.severity ? `Schwere: ${p.severity}` : null,
+          judgedBy: "schicksalsrad",
           erledigtAt: null,
         },
       });
-      return { appliedRefType: "STRAFE", appliedRefId: rec.id, outcomeType: "PENALTY", message: `Strafe verhängt: ${rec.reason ?? opt.label}.` };
+      return { appliedRefType: "STRAFE", appliedRefId: rec.id, outcomeType: "PENALTY", message: `Strafe verhängt: ${strafText}.${actionMsg}` };
     }
     case "REWARD": {
       // Belohnungs-Fenster OHNE das verdiente-Guthaben-Gate (bewusst NICHT grantBelohnung, das
@@ -156,14 +175,34 @@ async function applyOutcome(
       if (!res.ok) return nothing(`Orgasmus-Anweisung nicht anwendbar (${res.error}).`);
       return { appliedRefType: "ORGASMUS_ANFORDERUNG", appliedRefId: res.data.id, outcomeType: "ORGASM_DIRECTIVE", message: `Orgasmus-Anweisung angeordnet (Fenster ${windowH} h).` };
     }
-    case "TASK": {
-      const text = p.text?.trim();
-      if (!text) return nothing("Keine Aufgaben-Beschreibung.");
-      const dueH = num(p.dueH);
-      const task = await prisma.keyholderTask.create({
-        data: { userId, type: "WRITE_RESPONSE", message: text, dueAt: Number.isFinite(dueH) && dueH > 0 ? new Date(now.getTime() + dueH * MS_PER_HOUR) : null },
+    case "SESSION_REQUEST": {
+      const catId = typeof p.categoryId === "string" ? p.categoryId : "";
+      const cat = catId
+        ? await prisma.deviceCategory.findFirst({ where: { id: catId, userId, isSessionCategory: true }, select: { id: true, name: true, maxSessionMinutes: true, requiresVideo: true, orgasmusZiel: true } })
+        : null;
+      if (!cat) return nothing("Session-Anforderung nicht anwendbar (Kategorie fehlt).");
+      let sessDeviceId: string | null = null;
+      if (typeof p.deviceId === "string" && p.deviceId) {
+        const dev = await prisma.device.findFirst({ where: { id: p.deviceId, userId, categoryId: cat.id, archivedAt: null }, select: { id: true } });
+        sessDeviceId = dev?.id ?? null;
+      }
+      const delayMin = num(p.delayMinutes) > 0 ? num(p.delayMinutes) : 0;
+      const wirksamAb = delayMin > 0 ? new Date(now.getTime() + delayMin * 60 * 1000) : null;
+      const startBase = wirksamAb ? wirksamAb.getTime() : now.getTime();
+      const deadlineH = num(p.deadlineHours);
+      const endetAt = deadlineH > 0 ? new Date(startBase + deadlineH * MS_PER_HOUR) : null;
+      const minMin = num(p.minMinuten) > 0 ? Math.min(Math.round(num(p.minMinuten)), cat.maxSessionMinutes) : null;
+      const ziel = typeof p.orgasmusZiel === "string" && ["KEINE", "ERFORDERLICH", "VERBOTEN"].includes(p.orgasmusZiel) ? p.orgasmusZiel : cat.orgasmusZiel;
+      const ruiniert = ziel === "ERFORDERLICH" && !!p.orgasmusRuiniert;
+      const anf = await prisma.sessionAnforderung.create({
+        data: {
+          userId, deviceCategoryId: cat.id,
+          nachricht: (typeof p.nachricht === "string" && p.nachricht.trim()) ? p.nachricht.trim() : "Zufall: Session-Anforderung",
+          endetAt, minMinuten: minMin, requireVideo: !!p.requireVideo || cat.requiresVideo,
+          orgasmusZiel: ziel, orgasmusRuiniert: ruiniert, wirksamAb, deviceId: sessDeviceId, istStrafe: !!p.istStrafe,
+        },
       });
-      return { appliedRefType: "KEYHOLDER_TASK", appliedRefId: task.id, outcomeType: "TASK", message: "Aufgabe zugewiesen." };
+      return { appliedRefType: "SESSION_ANFORDERUNG", appliedRefId: anf.id, outcomeType: "SESSION_REQUEST", message: `Session angefordert: ${cat.name}${minMin ? `, min. ${minMin} Min` : ""}${endetAt ? `, Frist ${deadlineH} h` : ""}.` };
     }
     case "NOTHING":
     default:
@@ -284,10 +323,10 @@ export function validateOptions(options: ZufallsOptionInput[]): "ZUFALL_INVALID_
       if (parsed === null || typeof parsed !== "object") return "ZUFALL_INVALID_INPUT";
       const p = parsed as OutcomeParams;
       // Typspezifische Pflichtfelder.
-      if ((o.outcomeType === "TIME_ADD" || o.outcomeType === "TIME_SUB") && !(num(p.hours) > 0)) return "ZUFALL_INVALID_OUTCOME";
-      if (o.outcomeType === "TASK" && !(p.text && String(p.text).trim())) return "ZUFALL_INVALID_OUTCOME";
+      if ((o.outcomeType === "TIME_ADD" || o.outcomeType === "TIME_SUB") && !(num(p.minutes) > 0)) return "ZUFALL_INVALID_OUTCOME";
+      if (o.outcomeType === "SESSION_REQUEST" && !(p.categoryId && String(p.categoryId).trim())) return "ZUFALL_INVALID_OUTCOME";
       if (o.outcomeType === "ORGASM_DIRECTIVE" && !(num(p.windowHours) > 0)) return "ZUFALL_INVALID_OUTCOME";
-    } else if (o.outcomeType === "TIME_ADD" || o.outcomeType === "TIME_SUB" || o.outcomeType === "TASK" || o.outcomeType === "ORGASM_DIRECTIVE") {
+    } else if (o.outcomeType === "TIME_ADD" || o.outcomeType === "TIME_SUB" || o.outcomeType === "SESSION_REQUEST" || o.outcomeType === "ORGASM_DIRECTIVE" || o.outcomeType === "PENALTY") {
       // Diese Typen brauchen zwingend Parameter.
       return "ZUFALL_INVALID_OUTCOME";
     }
@@ -406,4 +445,17 @@ export async function listActiveManualPools(userId: string): Promise<{ id: strin
     }
     return { id: p.id, name: p.name, cooldownMin: cd, nextDrawAt };
   });
+}
+
+export interface ZiehungListItem { id: string; optionLabel: string; outcomeType: string; drawnAt: string; detail: string | null; }
+
+/** Letzte Ziehungen eines Subs (neueste zuerst) — für die Historie-Ansicht. */
+export async function listZiehungen(userId: string, limit = 10): Promise<ZiehungListItem[]> {
+  const rows = await prisma.zufallsZiehung.findMany({
+    where: { userId },
+    orderBy: { drawnAt: "desc" },
+    take: limit,
+    select: { id: true, optionLabel: true, outcomeType: true, drawnAt: true, detail: true },
+  });
+  return rows.map((r) => ({ id: r.id, optionLabel: r.optionLabel, outcomeType: r.outcomeType, drawnAt: r.drawnAt.toISOString(), detail: r.detail }));
 }

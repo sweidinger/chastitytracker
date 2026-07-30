@@ -12,8 +12,9 @@ import NumberInput from "@/app/components/NumberInput";
 import InlineSettingRow from "@/app/components/InlineSettingRow";
 import { hapticMedium } from "@/lib/haptics";
 import {
-  ZUFALL_OUTCOME_TYPES, ZUFALL_WEIGHT_RANGE, ZUFALL_COOLDOWN_MIN_RANGE, ZUFALL_MAXADD_H_RANGE,
+  ZUFALL_OUTCOME_TYPES, ZUFALL_WEIGHT_RANGE, ZUFALL_COOLDOWN_MIN_RANGE, ZUFALL_MAXADD_MIN_RANGE,
 } from "@/lib/constants";
+import { SEVERITY_PENALTY_SUGGESTIONS, type OffenseSeverity } from "@/lib/strafurteilService";
 
 // ── Serialisierbare Editor-Formen ─────────────────────────────────────────────
 export interface EditorOption {
@@ -28,9 +29,21 @@ export interface EditorPool {
   name: string;
   aktiv: boolean;
   cooldownMin: number;
+  /** Deckel für Sperrzeit-Verlängerung EINER Ziehung — jetzt in MINUTEN (Spaltenname maxAddH historisch). */
   maxAddH: number;
   options: EditorOption[];
 }
+export interface SessionCategory {
+  id: string;
+  name: string;
+  maxSessionMinutes: number;
+  requiresVideo: boolean;
+  orgasmusZiel: string;
+  devices: { id: string; name: string }[];
+}
+
+const SEVERITIES: OffenseSeverity[] = ["leicht", "mittel", "schwer"];
+const ORGASM_ZIELE = ["KEINE", "ERFORDERLICH", "VERBOTEN"] as const;
 
 /** Lokaler Bearbeitungs-Stand einer Option — die typspezifischen Parameter als Strings, damit die
  *  Eingabefelder frei bearbeitbar bleiben; beim Speichern werden sie zu outcomeJson serialisiert. */
@@ -39,11 +52,26 @@ interface DraftOption {
   label: string;
   weight: number;
   outcomeType: string;
-  hours: string;
+  // TIME_ADD / TIME_SUB (Minuten)
+  minutes: string;
+  // REWARD / ORGASM_DIRECTIVE
   windowHours: string;
-  text: string;
-  dueH: string;
   ruined: boolean;
+  // PENALTY (Strafbuch-Auswahl)
+  penaltySeverity: OffenseSeverity;
+  penaltyIdx: number;
+  penaltyParam: string;
+  // SESSION_REQUEST
+  categoryId: string;
+  minMinuten: string;
+  delayMinutes: string;
+  deviceId: string;
+  requireVideo: boolean;
+  orgasmusZiel: string;
+  orgasmusRuiniert: boolean;
+  deadlineHours: string;
+  nachricht: string;
+  istStrafe: boolean;
 }
 interface DraftPool {
   id: string;
@@ -63,16 +91,41 @@ function toDraftOption(o: EditorOption): DraftOption {
   let p: Record<string, unknown> = {};
   if (o.outcomeJson) { try { p = JSON.parse(o.outcomeJson) ?? {}; } catch { p = {}; } }
   const s = (v: unknown) => (typeof v === "number" || typeof v === "string" ? String(v) : "");
+
+  // PENALTY: Schwere + gewählter Vorschlag aus dem eingefrorenen Label rekonstruieren.
+  let penaltySeverity: OffenseSeverity = "mittel";
+  let penaltyIdx = 0;
+  let penaltyParam = "";
+  if (o.outcomeType === "PENALTY") {
+    if (typeof p.severity === "string" && (SEVERITIES as string[]).includes(p.severity)) penaltySeverity = p.severity as OffenseSeverity;
+    const arr = SEVERITY_PENALTY_SUGGESTIONS[penaltySeverity];
+    const found = arr.findIndex((x) => x.label === p.penaltyLabel);
+    penaltyIdx = found >= 0 ? found : 0;
+    const sug = arr[penaltyIdx];
+    if (sug?.param) penaltyParam = s(p[sug.param.field] ?? sug.param.default);
+  }
+
   return {
     key: nextKey(),
     label: o.label,
     weight: o.weight,
     outcomeType: o.outcomeType,
-    hours: s(p.hours),
+    minutes: s(p.minutes),
     windowHours: s(p.windowHours),
-    text: typeof p.text === "string" ? p.text : "",
-    dueH: s(p.dueH),
     ruined: !!p.ruined,
+    penaltySeverity,
+    penaltyIdx,
+    penaltyParam,
+    categoryId: typeof p.categoryId === "string" ? p.categoryId : "",
+    minMinuten: s(p.minMinuten),
+    delayMinutes: s(p.delayMinutes),
+    deviceId: typeof p.deviceId === "string" ? p.deviceId : "",
+    requireVideo: !!p.requireVideo,
+    orgasmusZiel: typeof p.orgasmusZiel === "string" ? p.orgasmusZiel : "KEINE",
+    orgasmusRuiniert: !!p.orgasmusRuiniert,
+    deadlineHours: s(p.deadlineHours),
+    nachricht: typeof p.nachricht === "string" ? p.nachricht : "",
+    istStrafe: !!p.istStrafe,
   };
 }
 function toDraftPool(p: EditorPool): DraftPool {
@@ -85,7 +138,7 @@ function buildOutcomeJson(o: DraftOption): string | null {
   switch (o.outcomeType) {
     case "TIME_ADD":
     case "TIME_SUB":
-      p.hours = Number(o.hours) || 0;
+      p.minutes = Number(o.minutes) || 0;
       break;
     case "ORGASM_DIRECTIVE":
       p.windowHours = Number(o.windowHours) || 24;
@@ -94,12 +147,27 @@ function buildOutcomeJson(o: DraftOption): string | null {
     case "REWARD":
       if (o.windowHours) p.windowHours = Number(o.windowHours);
       break;
-    case "PENALTY":
-      if (o.text.trim()) p.text = o.text.trim();
+    case "PENALTY": {
+      const sug = SEVERITY_PENALTY_SUGGESTIONS[o.penaltySeverity]?.[o.penaltyIdx];
+      if (sug) {
+        p.severity = o.penaltySeverity;
+        p.penaltyLabel = sug.label;
+        if (sug.action) p.action = sug.action;
+        if (sug.param) p[sug.param.field] = Number(o.penaltyParam) || sug.param.default;
+      }
       break;
-    case "TASK":
-      p.text = o.text.trim();
-      if (o.dueH) p.dueH = Number(o.dueH);
+    }
+    case "SESSION_REQUEST":
+      if (o.categoryId) p.categoryId = o.categoryId;
+      if (o.minMinuten) p.minMinuten = Number(o.minMinuten);
+      if (o.delayMinutes) p.delayMinutes = Number(o.delayMinutes);
+      if (o.deviceId) p.deviceId = o.deviceId;
+      if (o.requireVideo) p.requireVideo = true;
+      p.orgasmusZiel = o.orgasmusZiel;
+      if (o.orgasmusZiel === "ERFORDERLICH" && o.orgasmusRuiniert) p.orgasmusRuiniert = true;
+      if (o.deadlineHours) p.deadlineHours = Number(o.deadlineHours);
+      if (o.nachricht.trim()) p.nachricht = o.nachricht.trim();
+      if (o.istStrafe) p.istStrafe = true;
       break;
     case "NOTHING":
     default:
@@ -108,17 +176,52 @@ function buildOutcomeJson(o: DraftOption): string | null {
   return Object.keys(p).length ? JSON.stringify(p) : null;
 }
 
-const emptyOption = (): DraftOption => ({ key: nextKey(), label: "", weight: ZUFALL_WEIGHT_RANGE.fallback, outcomeType: "NOTHING", hours: "", windowHours: "", text: "", dueH: "", ruined: false });
+const emptyOption = (): DraftOption => ({
+  key: nextKey(), label: "", weight: ZUFALL_WEIGHT_RANGE.fallback, outcomeType: "NOTHING",
+  minutes: "", windowHours: "", ruined: false,
+  penaltySeverity: "mittel", penaltyIdx: 0, penaltyParam: "",
+  categoryId: "", minMinuten: "", delayMinutes: "", deviceId: "", requireVideo: false,
+  orgasmusZiel: "KEINE", orgasmusRuiniert: false, deadlineHours: "", nachricht: "", istStrafe: false,
+});
 
 const OUTCOME_OPTIONS = (t: (k: string) => string) =>
   ZUFALL_OUTCOME_TYPES.map((v) => ({ value: v, label: t(`outcomes.${v}`) }));
 
-export default function ZufallPoolEditor({ userId, initialPools }: { userId: string; initialPools: EditorPool[] }) {
+export default function ZufallPoolEditor({ userId, initialPools, categories = [] }: { userId: string; initialPools: EditorPool[]; categories?: SessionCategory[] }) {
   const t = useTranslations("zufall");
   const [pools, setPools] = useState<DraftPool[]>(initialPools.map(toDraftPool));
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+
+  /** Editor-seitige Prüfung (spiegelt validateOptions). Gibt eine Liste von Problemen zurück; ist sie
+   *  nicht leer, bleibt „Speichern" gesperrt. */
+  function optionIssue(o: DraftOption): string | null {
+    if (!o.label.trim()) return t("valNeedLabel");
+    switch (o.outcomeType) {
+      case "TIME_ADD":
+      case "TIME_SUB":
+        if (!(Number(o.minutes) > 0)) return t("valNeedMinutes");
+        return null;
+      case "ORGASM_DIRECTIVE":
+        if (!(Number(o.windowHours) > 0)) return t("valNeedWindow");
+        return null;
+      case "SESSION_REQUEST":
+        if (!o.categoryId) return t("valNeedCategory");
+        return null;
+      default:
+        return null;
+    }
+  }
+  function poolIssues(pool: DraftPool): string[] {
+    const issues: string[] = [];
+    if (pool.options.length === 0) issues.push(t("valNeedOption"));
+    for (const o of pool.options) {
+      const iss = optionIssue(o);
+      if (iss && !issues.includes(iss)) issues.push(iss);
+    }
+    return issues;
+  }
 
   function patchPool(id: string, fn: (p: DraftPool) => DraftPool) {
     setPools((ps) => ps.map((p) => (p.id === id ? fn(p) : p)));
@@ -146,6 +249,7 @@ export default function ZufallPoolEditor({ userId, initialPools }: { userId: str
   }
 
   async function savePool(pool: DraftPool) {
+    if (poolIssues(pool).length > 0) return;
     patchPool(pool.id, (p) => ({ ...p, saving: true, saved: false }));
     setError("");
     try {
@@ -225,7 +329,9 @@ export default function ZufallPoolEditor({ userId, initialPools }: { userId: str
 
       {pools.length === 0 && <p className="text-sm text-foreground-faint">{t("emptyPools")}</p>}
 
-      {pools.map((pool) => (
+      {pools.map((pool) => {
+        const issues = poolIssues(pool);
+        return (
         <Card key={pool.id} padding="compact" className="flex flex-col gap-3">
           {/* Kopf: Name + aktiv */}
           <div className="flex items-center gap-2">
@@ -248,7 +354,7 @@ export default function ZufallPoolEditor({ userId, initialPools }: { userId: str
           </InlineSettingRow>
 
           <InlineSettingRow label={t("maxAddLabel")} unit={t("maxAddUnit")}>
-            <NumberInput value={pool.maxAddH} range={ZUFALL_MAXADD_H_RANGE} disabled={false} ariaLabel={t("maxAddLabel")}
+            <NumberInput value={pool.maxAddH} range={ZUFALL_MAXADD_MIN_RANGE} disabled={false} ariaLabel={t("maxAddLabel")}
               onCommit={(n) => patchPool(pool.id, (p) => ({ ...p, maxAddH: n, saved: false }))} />
           </InlineSettingRow>
 
@@ -256,7 +362,11 @@ export default function ZufallPoolEditor({ userId, initialPools }: { userId: str
           <div className="flex flex-col gap-2 pt-1">
             <p className="text-xs font-semibold uppercase tracking-wider text-foreground-faint">{t("options")}</p>
             {pool.options.length === 0 && <p className="text-xs text-foreground-faint">{t("noOptionsYet")}</p>}
-            {pool.options.map((o, idx) => (
+            {pool.options.map((o, idx) => {
+              const penaltyList = SEVERITY_PENALTY_SUGGESTIONS[o.penaltySeverity] ?? [];
+              const penaltySug = penaltyList[o.penaltyIdx];
+              const selectedCat = categories.find((c) => c.id === o.categoryId) ?? null;
+              return (
               <div key={o.key} className="rounded-lg border border-border-subtle p-3 flex flex-col gap-2">
                 <div className="flex items-center gap-2">
                   <Input placeholder={t("optionLabelPlaceholder")} value={o.label} onChange={(e) => updateOption(pool.id, o.key, { label: e.target.value })} className="!h-9" />
@@ -277,7 +387,7 @@ export default function ZufallPoolEditor({ userId, initialPools }: { userId: str
 
                 {/* typspezifische Parameter */}
                 {(o.outcomeType === "TIME_ADD" || o.outcomeType === "TIME_SUB") && (
-                  <Input type="number" inputMode="numeric" min={0} label={t("hours")} value={o.hours} onChange={(e) => updateOption(pool.id, o.key, { hours: e.target.value })} className="!h-9" />
+                  <Input type="number" inputMode="numeric" min={0} label={t("minutes")} value={o.minutes} onChange={(e) => updateOption(pool.id, o.key, { minutes: e.target.value })} className="!h-9" />
                 )}
                 {(o.outcomeType === "REWARD") && (
                   <Input type="number" inputMode="numeric" min={0} label={t("windowHours")} value={o.windowHours} onChange={(e) => updateOption(pool.id, o.key, { windowHours: e.target.value })} className="!h-9" />
@@ -289,25 +399,70 @@ export default function ZufallPoolEditor({ userId, initialPools }: { userId: str
                   </div>
                 )}
                 {(o.outcomeType === "PENALTY") && (
-                  <Input label={t("text")} value={o.text} onChange={(e) => updateOption(pool.id, o.key, { text: e.target.value })} className="!h-9" />
-                )}
-                {(o.outcomeType === "TASK") && (
                   <div className="flex flex-col gap-2">
-                    <Input label={t("text")} value={o.text} onChange={(e) => updateOption(pool.id, o.key, { text: e.target.value })} className="!h-9" />
-                    <Input type="number" inputMode="numeric" min={0} label={t("dueHours")} value={o.dueH} onChange={(e) => updateOption(pool.id, o.key, { dueH: e.target.value })} className="!h-9" />
+                    <Select label={t("penaltySeverity")} value={o.penaltySeverity}
+                      options={SEVERITIES.map((s) => ({ value: s, label: t(`severity.${s}`) }))}
+                      onChange={(e) => updateOption(pool.id, o.key, { penaltySeverity: e.target.value as OffenseSeverity, penaltyIdx: 0, penaltyParam: "" })} />
+                    <Select label={t("penaltyChoice")} value={String(o.penaltyIdx)}
+                      options={penaltyList.map((s, i) => ({ value: String(i), label: s.label }))}
+                      onChange={(e) => updateOption(pool.id, o.key, { penaltyIdx: Number(e.target.value), penaltyParam: "" })} />
+                    {penaltySug?.param && (
+                      <Input type="number" inputMode="numeric" min={0} label={penaltySug.param.label}
+                        value={o.penaltyParam} placeholder={String(penaltySug.param.default)}
+                        onChange={(e) => updateOption(pool.id, o.key, { penaltyParam: e.target.value })} className="!h-9" />
+                    )}
+                  </div>
+                )}
+                {(o.outcomeType === "SESSION_REQUEST") && (
+                  <div className="flex flex-col gap-2">
+                    {categories.length === 0 ? (
+                      <p className="text-xs text-warn">{t("valNeedCategory")}</p>
+                    ) : (
+                      <>
+                        <Select label={t("sessionCategory")} value={o.categoryId}
+                          placeholder={t("sessionCategoryPlaceholder")}
+                          options={categories.map((c) => ({ value: c.id, label: `${c.name} (max. ${c.maxSessionMinutes} Min.)` }))}
+                          onChange={(e) => updateOption(pool.id, o.key, { categoryId: e.target.value, deviceId: "" })} />
+                        <div className="flex flex-wrap gap-2">
+                          <Input type="number" inputMode="numeric" min={0} label={t("sessionMinDuration")} value={o.minMinuten} onChange={(e) => updateOption(pool.id, o.key, { minMinuten: e.target.value })} className="!h-9" />
+                          <Input type="number" inputMode="numeric" min={0} label={t("sessionNotBefore")} value={o.delayMinutes} onChange={(e) => updateOption(pool.id, o.key, { delayMinutes: e.target.value })} className="!h-9" />
+                        </div>
+                        <Select label={t("sessionDevice")} value={o.deviceId}
+                          options={[{ value: "", label: t("sessionAnyDevice") }, ...(selectedCat?.devices ?? []).map((d) => ({ value: d.id, label: d.name }))]}
+                          onChange={(e) => updateOption(pool.id, o.key, { deviceId: e.target.value })} />
+                        <Select label={t("sessionOrgasmGoal")} value={o.orgasmusZiel}
+                          options={ORGASM_ZIELE.map((z) => ({ value: z, label: t(`orgasmGoal.${z}`) }))}
+                          onChange={(e) => updateOption(pool.id, o.key, { orgasmusZiel: e.target.value })} />
+                        {o.orgasmusZiel === "ERFORDERLICH" && (
+                          <Toggle label={t("ruined")} checked={o.orgasmusRuiniert} onChange={(v) => updateOption(pool.id, o.key, { orgasmusRuiniert: v })} />
+                        )}
+                        <Toggle label={t("sessionRequireProof")} checked={o.requireVideo} onChange={(v) => updateOption(pool.id, o.key, { requireVideo: v })} />
+                        <Toggle label={t("sessionAsPenalty")} checked={o.istStrafe} onChange={(v) => updateOption(pool.id, o.key, { istStrafe: v })} />
+                        <Input type="number" inputMode="numeric" min={0} label={t("sessionDeadline")} value={o.deadlineHours} onChange={(e) => updateOption(pool.id, o.key, { deadlineHours: e.target.value })} className="!h-9" />
+                        <Input label={t("sessionInstruction")} placeholder={t("sessionInstructionPlaceholder")} value={o.nachricht} onChange={(e) => updateOption(pool.id, o.key, { nachricht: e.target.value })} className="!h-9" />
+                      </>
+                    )}
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
             <Button variant="secondary" size="sm" onClick={() => addOption(pool.id)} icon={<Plus size={16} />}>{t("addOption")}</Button>
           </div>
 
+          {issues.length > 0 && (
+            <ul className="flex flex-col gap-0.5">
+              {issues.map((iss, i) => <li key={i} className="text-xs text-warn">• {iss}</li>)}
+            </ul>
+          )}
+
           <div className="flex items-center gap-3 pt-1">
-            <Button variant="primary" onClick={() => savePool(pool)} loading={pool.saving}>{t("save")}</Button>
+            <Button variant="primary" onClick={() => savePool(pool)} loading={pool.saving} disabled={issues.length > 0}>{t("save")}</Button>
             {pool.saved && <span className="text-sm text-ok">{t("saved")}</span>}
           </div>
         </Card>
-      ))}
+        );
+      })}
     </div>
   );
 }

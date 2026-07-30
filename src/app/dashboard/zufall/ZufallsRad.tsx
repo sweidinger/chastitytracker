@@ -18,6 +18,14 @@ interface Pool {
   nextDrawAt: string | null;
 }
 
+interface HistoryItem {
+  id: string;
+  optionLabel: string;
+  outcomeType: string;
+  drawnAt: string;
+  detail: string | null;
+}
+
 /** Alle Tuning-Zahlen der Spin-Animation an EINER Stelle (keine verstreuten Magic Numbers). */
 const SPIN = {
   /** Mindestdauer der Animation, auch wenn die Antwort früher da ist. */
@@ -37,13 +45,14 @@ function formatRemaining(ms: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-export default function ZufallsRad({ pools }: { pools: Pool[] }) {
+export default function ZufallsRad({ pools, initialHistory = [] }: { pools: Pool[]; initialHistory?: HistoryItem[] }) {
   const t = useTranslations("zufall");
   const [poolId, setPoolId] = useState(pools[0]?.id ?? "");
   const [spinning, setSpinning] = useState(false);
   const [face, setFace] = useState<string>(SPIN.faces[0]);
-  const [result, setResult] = useState<{ optionLabel: string; outcomeType: string } | null>(null);
+  const [result, setResult] = useState<{ optionLabel: string; outcomeType: string; message: string | null } | null>(null);
   const [error, setError] = useState(false);
+  const [history, setHistory] = useState<HistoryItem[]>(initialHistory);
   const busy = useRef(false);
 
   // Cooldown-Ende je Pool (ms-Timestamp | null). Aus den Server-Props initialisiert und nach jeder
@@ -81,7 +90,7 @@ export default function ZufallsRad({ pools }: { pools: Pool[] }) {
     const iv = setInterval(() => setFace(SPIN.faces[Math.floor(Math.random() * SPIN.faces.length)]), SPIN.tickMs);
 
     let ok = false;
-    let data: { optionLabel?: string; outcomeType?: string } | null = null;
+    let data: { ziehungId?: string; optionLabel?: string; outcomeType?: string; message?: string } | null = null;
     try {
       const res = await fetch("/api/zufall", {
         method: "POST",
@@ -101,7 +110,14 @@ export default function ZufallsRad({ pools }: { pools: Pool[] }) {
     busy.current = false;
 
     if (ok && data?.optionLabel) {
-      setResult({ optionLabel: data.optionLabel, outcomeType: data.outcomeType ?? "NOTHING" });
+      const outcomeType = data.outcomeType ?? "NOTHING";
+      const message = data.message ?? null;
+      setResult({ optionLabel: data.optionLabel, outcomeType, message });
+      // Historie sofort lokal fortschreiben (Server-Reihenfolge = neueste zuerst).
+      setHistory((h) => [
+        { id: data!.ziehungId ?? `local-${started}`, optionLabel: data!.optionLabel!, outcomeType, drawnAt: new Date().toISOString(), detail: message },
+        ...h,
+      ].slice(0, 10));
       const cd = selectedPool?.cooldownMin ?? 0;
       if (cd > 0) setNextDrawByPool((prev) => ({ ...prev, [poolId]: Date.now() + cd * 60 * 1000 }));
       hapticMedium();
@@ -136,7 +152,11 @@ export default function ZufallsRad({ pools }: { pools: Pool[] }) {
             <p className="text-xs font-semibold uppercase tracking-wider text-foreground-faint">{t("resultTitle")}</p>
             <p className="text-lg font-bold text-foreground mt-1">{result.optionLabel}</p>
             <p className="text-sm text-foreground-faint mt-1">{t(`outcomes.${result.outcomeType}` as `outcomes.${string}`)}</p>
-            <p className="text-xs text-foreground-faint mt-2">{t("resultHint")}</p>
+            {result.message ? (
+              <p className="text-sm text-foreground mt-2">{result.message}</p>
+            ) : (
+              <p className="text-xs text-foreground-faint mt-2">{t("resultHint")}</p>
+            )}
           </div>
         ) : (
           <p className="text-sm text-foreground-faint">{spinning ? t("spinning") : " "}</p>
@@ -162,6 +182,28 @@ export default function ZufallsRad({ pools }: { pools: Pool[] }) {
         >
           {result ? t("again") : t("spin")}
         </Button>
+      </Card>
+
+      {/* Ziehungs-Historie */}
+      <Card className="flex flex-col gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-foreground-faint">{t("historyTitle")}</p>
+        {history.length === 0 ? (
+          <p className="text-sm text-foreground-faint">{t("historyEmpty")}</p>
+        ) : (
+          <ul className="flex flex-col divide-y divide-border-subtle">
+            {history.map((h) => (
+              <li key={h.id} className="py-2 flex flex-col gap-0.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-foreground">{h.optionLabel}</span>
+                  <span className="text-xs text-foreground-faint tabular-nums shrink-0">{new Date(h.drawnAt).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                </div>
+                <span className="text-xs text-foreground-faint">
+                  {t(`outcomes.${h.outcomeType}` as `outcomes.${string}`)}{h.detail ? ` — ${h.detail}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </Card>
     </div>
   );

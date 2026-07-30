@@ -202,6 +202,7 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
     strafbuchVerworfenBadge: t("strafbuchVerworfenBadge"),
     strafbuchBegruendung: t("strafbuchBegruendung"),
     strafbuchUrteilKI: t("strafbuchUrteilKI"),
+    strafbuchUrteilSchicksalsrad: t("strafbuchUrteilSchicksalsrad"),
     strafbuchStrafeLabel: t("strafbuchStrafeLabel"),
     strafbuchStrafePlaceholder: t("strafbuchStrafePlaceholder"),
     strafbuchStrafeVerhaengen: t("strafbuchStrafeVerhaengen"),

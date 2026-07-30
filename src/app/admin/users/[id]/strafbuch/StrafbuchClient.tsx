@@ -95,6 +95,7 @@ interface Labels {
   strafbuchVerworfenBadge: string;
   strafbuchBegruendung: string;
   strafbuchUrteilKI: string;
+  strafbuchUrteilSchicksalsrad: string;
   strafbuchStrafeLabel: string;
   strafbuchStrafePlaceholder: string;
   strafbuchStrafeVerhaengen: string;
@@ -547,7 +548,7 @@ export default function StrafbuchClient({ userId, offenses, strafeRecords, label
       <div className="mt-1.5 flex flex-col gap-1">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-semibold text-warn border border-warn px-2 py-0.5 rounded-lg flex items-center gap-1">{labels.strafbuchStrafeBadge}{straf ? `: ${straf}` : ""}</span>
-          {aiJudged && <span className="text-xs text-foreground-faint">{labels.strafbuchUrteilKI}</span>}
+          {record.judgedBy === "schicksalsrad" ? <span className="text-xs text-foreground-faint">{labels.strafbuchUrteilSchicksalsrad}</span> : aiJudged ? <span className="text-xs text-foreground-faint">{labels.strafbuchUrteilKI}</span> : null}
           <button type="button" onClick={() => handleUndo(refId)} className="text-xs text-foreground-faint underline hover:text-warn transition ml-auto">{labels.strafbuchRueckgaengig}</button>
         </div>
         {/* Meldung des Subs hat Vorrang: sie verlangt eine Entscheidung (bestätigen/ablehnen). */}
@@ -581,7 +582,7 @@ export default function StrafbuchClient({ userId, offenses, strafeRecords, label
     return (
       <div className="mt-1.5 flex items-center gap-2 flex-wrap">
         <span className="text-xs font-semibold text-foreground-faint border border-border px-2 py-0.5 rounded-lg flex items-center gap-1"><XCircle size={10} /> {labels.strafbuchVerworfenBadge}</span>
-        {aiJudged && <span className="text-xs text-foreground-faint">{labels.strafbuchUrteilKI}</span>}
+        {record.judgedBy === "schicksalsrad" ? <span className="text-xs text-foreground-faint">{labels.strafbuchUrteilSchicksalsrad}</span> : aiJudged ? <span className="text-xs text-foreground-faint">{labels.strafbuchUrteilKI}</span> : null}
         {record.reason && <span className="text-xs text-foreground-faint italic">„{record.reason}"</span>}
         <button type="button" onClick={() => handleUndo(refId)} className="text-xs text-foreground-faint underline hover:text-warn transition ml-auto">{labels.strafbuchRueckgaengig}</button>
       </div>

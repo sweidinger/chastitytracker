@@ -271,7 +271,7 @@ export const ZUFALL_OUTCOME_TYPES = [
   "PENALTY",          // Strafe (Straf-Aktion oder freier StrafeRecord)
   "REWARD",           // Belohnungs-Fenster (ohne Guthaben-Gate)
   "ORGASM_DIRECTIVE", // Orgasmus-Anweisung
-  "TASK",             // Keyholder-Aufgabe (WRITE_RESPONSE)
+  "SESSION_REQUEST",  // Session anfordern (SessionAnforderung)
   "NOTHING",          // nichts passiert (Nieten füllen das Rad)
 ] as const;
 export type ZufallOutcomeType = typeof ZUFALL_OUTCOME_TYPES[number];
@@ -286,6 +286,8 @@ export const ZUFALL_WEIGHT_RANGE = { min: 1, max: 1000, fallback: 1 } as const s
 export const ZUFALL_COOLDOWN_MIN_RANGE = { min: 0, max: 10080, fallback: 0 } as const satisfies NumberRange;
 /** Obergrenze für TIME_ADD-Stunden EINER Ziehung (0 = keine Deckelung). */
 export const ZUFALL_MAXADD_H_RANGE = { min: 0, max: 168, fallback: 24 } as const satisfies NumberRange;
+/** Deckel für die Sperrzeit-Verlängerung EINER Ziehung in MINUTEN (0 = keine Deckelung). */
+export const ZUFALL_MAXADD_MIN_RANGE = { min: 0, max: 10080, fallback: 60 } as const satisfies NumberRange;
 /** Stunden-Parameter einer zeit-/fensterbezogenen Option (TIME_ADD/SUB/REWARD/ORGASM_DIRECTIVE). */
 export const ZUFALL_OPTION_HOURS_RANGE = { min: 0, max: 168, fallback: 3 } as const satisfies NumberRange;
 

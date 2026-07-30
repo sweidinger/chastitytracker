@@ -1,5 +1,25 @@
 [
   {
+    "version": "4.132.0",
+    "date": "2026-07-30",
+    "changes": [
+      {
+        "type": "new",
+        "text": {
+          "de": "Schicksalsrad-Konsequenzen überarbeitet: Sperrzeit verlängern/verkürzen jetzt in Minuten, Strafe als Strafbuch-Auswahl (Schwere + Vorschläge, im Strafbuch als \u201eper Schicksalsrad\u201c vermerkt), und \u201eAufgabe\u201c ersetzt durch \u201eSession anfordern\u201c mit allen Optionen.",
+          "en": "Reworked Wheel of Fate consequences: extend/shorten lock now in minutes, penalty as a punishment-book selection (severity + suggestions, logged as \u201cby Wheel of Fate\u201d), and \u201cTask\u201d replaced by \u201cRequest session\u201d with all options."
+        }
+      },
+      {
+        "type": "new",
+        "text": {
+          "de": "Das Rad zeigt jetzt die konkrete Wirkung einer Ziehung an und listet die letzten Ziehungen; der Pool-Editor blockiert unvollständige Pools mit klaren Hinweisen.",
+          "en": "The wheel now shows the concrete effect of a draw and lists recent draws; the pool editor blocks incomplete pools with clear hints."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.131.0",
     "date": "2026-07-30",
     "changes": [
