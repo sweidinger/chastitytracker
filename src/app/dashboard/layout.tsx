@@ -30,7 +30,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const isKeyholder = (user as { controlsSubs?: boolean } | undefined)?.controlsSubs ?? false;
 
   const flagOn = deviceCategoriesEnabled();
-  const [isLocked, categories, activeWear, aiKeyholderCfg] = await Promise.all([
+  const [isLocked, categories, activeWear, aiKeyholderCfg, zufallPoolCount] = await Promise.all([
     userId ? getIsLocked(userId) : Promise.resolve(false),
     userId && flagOn
       ? prisma.deviceCategory.findMany({
@@ -43,8 +43,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
     userId
       ? prisma.aiKeyholderConfig.findUnique({ where: { userId }, select: { enabled: true } })
       : Promise.resolve(null),
+    userId
+      ? prisma.zufallsPool.count({ where: { userId, aktiv: true, triggerType: "MANUAL" } })
+      : Promise.resolve(0),
   ]);
   const aiKeyholderEnabled = aiKeyholderCfg?.enabled ?? false;
+  const zufallActive = zufallPoolCount > 0;
   const activeByCategory = new Map(activeWear.map((s) => [s.categoryId, s]));
   const categoryRows: NewEntryCategoryRow[] = categories.map((c) => ({
     id: c.id,
@@ -70,6 +74,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         categoryRows={categoryRows}
         bildersafe={bildersafeEnabled()}
         aiKeyholderEnabled={aiKeyholderEnabled}
+        zufallActive={zufallActive}
       />
 
       {/* Content area: offset for sidebar on desktop. Der Platz für die fixe Bottom-Nav (Mobile)

@@ -1,5 +1,18 @@
 [
   {
+    "version": "4.130.0",
+    "date": "2026-07-30",
+    "changes": [
+      {
+        "type": "new",
+        "text": {
+          "de": "Das Schicksalsrad hat jetzt einen eigenen Eintrag in der linken Seitenleiste (zwischen \u201eAI Keyholderin\u201c und \u201eAdmin\u201c) \u2014 er erscheint, sobald ein aktiver Pool existiert.",
+          "en": "The Wheel of Fate now has its own entry in the left sidebar (between \u201cAI Keyholder\u201d and \u201cAdmin\u201d) \u2014 it appears once an active pool exists."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.129.1",
     "date": "2026-07-29",
     "changes": [
