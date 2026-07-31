@@ -1546,7 +1546,9 @@
     "aikhMediaTestHint": "Legt einen Generierungs-Auftrag an und schickt ihn sofort ab. Der Status aktualisiert sich nicht automatisch — mit „Aktualisieren“ nachladen (fertige Bilder dauern beim gehosteten Anbieter meist einige Sekunden).",
     "aikhMediaTestQueued": "Auftrag erstellt — mit „Aktualisieren“ den Status prüfen.",
     "aikhMediaOpen": "Öffnen",
-    "roleSelfDemoteConfirm": "Du entziehst dir damit selbst die Adminrechte und verlierst den Zugang zum Adminbereich, sobald deine Sitzung die neue Rolle übernimmt. Fortfahren?"
+    "roleSelfDemoteConfirm": "Du entziehst dir damit selbst die Adminrechte und verlierst den Zugang zum Adminbereich, sobald deine Sitzung die neue Rolle übernimmt. Fortfahren?",
+    "airlockVerifiedBadge": "verifiziert ✓",
+    "airlockUnverifiedBadge": "unverifiziert"
   },
   "forgotPassword": {
     "title": "Passwort vergessen",

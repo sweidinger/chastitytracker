@@ -29,7 +29,7 @@ export default async function UserAirlockPage({ params }: { params: Promise<{ id
     ? null
     : (locksRes.unreachable ? "unreachable" : "error");
 
-  const assigned = assignedRows.map((r) => ({ code: r.code, status: r.status, nfcUid: r.nfcUid }));
+  const assigned = assignedRows.map((r) => ({ code: r.code, status: r.status, nfcUid: r.nfcUid, verified: !!r.verifiedAt }));
 
   return (
     <AirlockAssignmentForm

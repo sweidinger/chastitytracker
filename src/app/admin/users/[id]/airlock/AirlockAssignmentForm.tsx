@@ -14,6 +14,8 @@ interface LockLite {
   code: string;
   status: string | null;
   nfcUid: string | null;
+  /** Sicherheits-Feature: vom Sub per Tag-Scan verifiziert. */
+  verified?: boolean;
 }
 
 interface Props {
@@ -91,6 +93,9 @@ export default function AirlockAssignmentForm({ userId, assigned, activeCode, av
                       <div className="flex items-center gap-2">
                         <Badge variant="lock" label={`#${lock.code}`} />
                         <span className="font-mono text-xs text-foreground-faint">{lock.nfcUid ?? "—"}</span>
+                        {lock.verified
+                          ? <Badge variant="ok" label={t("airlockVerifiedBadge")} />
+                          : <Badge variant="warn" label={t("airlockUnverifiedBadge")} />}
                         {isActive && <span className="text-xs font-medium text-lock">{t("airlockActiveBadge")}</span>}
                       </div>
                       <Button

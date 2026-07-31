@@ -1546,7 +1546,9 @@
     "aikhMediaTestHint": "Queues a generation job and submits it immediately. Status does not auto-update — use Refresh (hosted images usually take a few seconds).",
     "aikhMediaTestQueued": "Job queued — use Refresh to check the status.",
     "aikhMediaOpen": "Open",
-    "roleSelfDemoteConfirm": "This removes your own admin rights; you will lose access to the admin area as soon as your session picks up the new role. Continue?"
+    "roleSelfDemoteConfirm": "This removes your own admin rights; you will lose access to the admin area as soon as your session picks up the new role. Continue?",
+    "airlockVerifiedBadge": "verified ✓",
+    "airlockUnverifiedBadge": "unverified"
   },
   "forgotPassword": {
     "title": "Forgot password",
