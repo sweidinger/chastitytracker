@@ -1,5 +1,18 @@
 [
   {
+    "version": "4.135.0",
+    "date": "2026-07-31",
+    "changes": [
+      {
+        "type": "feat",
+        "text": {
+          "de": "NFC-Lock antippen öffnet die App direkt in der offenen Kontrolle: Ein in den Airlock eingebetteter NFC-Tag trägt zusätzlich einen Universal-Link. Tippt man ihn bei geschlossener App an, springt die App direkt in die offene Kontrollanforderung für dieses Lock. Die Echtheitsprüfung bleibt unverändert der bestehende In-App-Scan.",
+          "en": "Tapping an NFC lock opens the app straight to the open inspection: an NFC tag embedded in the Airlock now also carries a universal link. Tapping it while the app is closed jumps the app directly to the open inspection request for that lock. The authenticity check remains the existing in-app scan."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.134.0",
     "date": "2026-07-31",
     "changes": [
