@@ -124,6 +124,7 @@ model User {
   belohnungEvents         BelohnungEvent[]
   zufallsPools            ZufallsPool[]
   zufallsZiehungen        ZufallsZiehung[]
+  airlockLocks            AirlockLock[]           @relation("AirlockAssignments")
 }
 
 // Belohnungs-Ökonomie: Ereignis-Protokoll (Kontoauszug des Guthabens). Jede Bewegung wird hier
@@ -429,6 +430,7 @@ model VerschlussAnforderung {
   device           Device?         @relation(fields: [deviceId], references: [id], onDelete: SetNull)
   deviceCategoryId String?         // null = KG (backward compat); non-null = Plug oder andere non-KG Kategorie
   deviceCategory   DeviceCategory? @relation(fields: [deviceCategoryId], references: [id], onDelete: SetNull)
+  airlockCode      String?         // Airlock-NFC: von der Keyholderin vorgegebenes Lock (Code) aus dem Pool des Subs — der Sub muss beim Verschluss genau dieses per NFC scannen. null = keine Vorgabe (Sub waehlt aus seinem Pool, der Scan entscheidet).
   fotoPflicht      Boolean?        // Wear-Anforderung: von der Keyholderin gesetzte Foto-Pflicht (null = Kategorie-Default)
   reinigungErlaubt Boolean   @default(false) // SPERRZEIT: Reinigungsöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
   toiletteErlaubt  Boolean   @default(false) // SPERRZEIT: Toilettenöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
@@ -734,6 +736,12 @@ model Entry {
   // Wer/was diesen Eintrag angelegt hat. "system" = automatisch erzeugte OEFFNEN-Entry der
   // Kontroll-Eskalation (Stufe 2), siehe inspectionEscalationService.ts.
   source              String               @default("user") // "user" | "system"
+  // Airlock-NFC (nur VERSCHLUSS): wurde dieser Verschluss mit einem NFC-Airlock erfasst? Dann steht
+  // hier die 5-stellige Airlock-Nummer + die beim Verschliessen validierte kanonische Tag-UID. Die
+  // UID ist der Anker für die spätere Kontrolle (der gescannte Tag MUSS dieselbe UID liefern → die
+  // Handschrift-Code-Abfrage entfällt). null = normaler Verschluss ohne Airlock. Siehe docs/AIRLOCK_NFC.md.
+  airlockCode         String?
+  airlockUid          String?
   kontrollAnforderungAutoMarked KontrollAnforderung? @relation("KontrolleAutoMarkedEntry")
   createdAt           DateTime             @default(now())
   kontrollAnforderung  KontrollAnforderung?  @relation("KontrolleEntry")
@@ -1117,4 +1125,39 @@ model ZufallsZiehung {
 
   @@index([userId, drawnAt])
   @@index([poolId])
+}
+
+// Airlock-NFC: Verbindung zur externen Airlock3DSTLGenerator-Instanz (Producer der 3D-Locks).
+// Instanzweit = genau EINE Zeile (id fix "singleton"). Der KG-Tracker ist reines Frontend/Proxy
+// (Weg A, siehe docs/AIRLOCK_NFC.md): keine Krypto, keine Registry — nur baseUrl + eingeschränkter
+// KG-API-Key. Der Key wird AES-256-GCM-verschlüsselt gehalten (src/lib/encrypt.ts), nie im Klartext
+// ausgeliefert und nie ins Frontend gereicht (Kette: Frontend → KG-Backend → Airlock-API).
+model AirlockConfig {
+  id        String   @id @default("singleton")
+  enabled   Boolean  @default(false)
+  baseUrl   String?  // Basis-URL der erreichbaren Airlock-Instanz (HTTPS), ohne Slash am Ende
+  apiKeyEnc String?  // verschlüsselter AIRLOCK_KG_API_KEY (encrypt.ts). null = kein Key gesetzt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Airlock-NFC: die Sicht des KG-Trackers auf ein einzelnes Lock der Airlock-Instanz + die ZUORDNUNG
+// zu einem Sub. Die Airlock-App kennt nur Codes/Status/UID-Bindung, KEINE Nutzer:innen — welche
+// Person welches aktive Lock trägt, hält allein der KG-Tracker (hier). `status`/`nfcUid` sind ein
+// zwischengespeicherter Spiegel des letzten Airlock-Sync; die Wahrheit bleibt die Airlock-Registry.
+model AirlockLock {
+  id             String    @id @default(cuid())
+  code           String    @unique // 5-stellige Airlock-Nummer
+  nfcUid         String?   // gebundene Tag-UID (kanonisch, Grossbuchstaben), aus dem Airlock-Sync
+  status         String?   // Spiegel des Airlock-Status (reserved|generated|printed|registered|active|retired|voided)
+  assignedUserId String?
+  assignedUser   User?     @relation("AirlockAssignments", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  assignedAt     DateTime? // wann einem Sub zugewiesen
+  releasedAt     DateTime? // wann die Zuweisung aufgehoben/das Lock freigegeben wurde
+  lastSyncedAt   DateTime? // letzter erfolgreicher Abgleich mit der Airlock-API
+  retireRequestedAt DateTime? // Airlock-NFC: Ablegen hat das Toeten (retired) angefordert. Solange gesetzt und der Server noch nicht retired/voided meldet, zieht der Reconcile den Statuswechsel nach — und der Sync darf das lokal getoetete Lock NICHT auf 'active' zuruecksetzen.
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([assignedUserId])
 }

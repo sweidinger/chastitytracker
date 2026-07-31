@@ -9,10 +9,12 @@ import { deriveSealCode } from "@/lib/kontrolleService";
 import { validateEntryPayload, TYPE_EMAIL_COLORS, VALID_ROTATIONS, BOX_PHOTO_TYPES, parseOrgasmusArtBase, type Rotation } from "@/lib/constants";
 import { orgasmusValueAllowed, validOeffnenCodes, effectiveOrgasmusArten, effectiveOeffnenGruende, resolveOrgasmusArtDisplay, resolveReasonLabel } from "@/lib/reasonsService";
 import { isDevBypassEnabled } from "@/lib/devMode";
-import { validateDeviceOwnership, releaseSperrzeitenOnOpen, prepareWearEntry, activeVerschlussAnforderungWhere, openLockRequestWhere, LOCK_REQUEST_ORDER, aktiveKontrolleWhere, getLatestKgEntry } from "@/lib/queries";
+import { validateDeviceOwnership, releaseSperrzeitenOnOpen, prepareWearEntry, activeVerschlussAnforderungWhere, openLockRequestWhere, LOCK_REQUEST_ORDER, aktiveKontrolleWhere, getLatestKgEntry, getOpenLockRequest } from "@/lib/queries";
 import { entryGuardError, entryGuardCode } from "@/lib/entryErrors";
 import { setBoxCommandForUser, boxCommandForEntry } from "@/lib/boxCommand";
 import { notifyHeimdall } from "@/lib/heimdallNotify";
+import { verifyForVerschluss, verifyForKontrolle } from "@/lib/airlock/verify";
+import { activateAirlockLock, retireLock } from "@/lib/airlock/service";
 import { getActiveSessionForCategory, fulfillSessionAnforderung, getActiveSessionAnforderung } from "@/lib/sessionService";
 import { findRegionConflict, type RegionConflict } from "@/lib/bodyRegion";
 import { getActivePause, pauseReasonsForDevice, type PauseDevice } from "@/lib/pauseService";
@@ -111,6 +113,42 @@ export async function POST(req: NextRequest) {
     if (rcDev?.categoryId) regionConflict = await findRegionConflict(session.user.id, rcDev.categoryId);
   }
 
+  // Airlock-NFC (Weg A): den Tag-Nachweis VOR der Transaktion prüfen — das ist ein Netz-Call zur
+  // Airlock-API und darf (wie regionConflict oben) nicht in die connection_limit=1-Transaktion. Rein
+  // additiv: ohne `body.airlock` bleibt alles unverändert. Siehe docs/AIRLOCK_NFC.md § 4.5/4.6.
+  let airlockProof: { code: string; uid: string } | null = null;
+  let kontrolleAirlockValidated = false;
+  // Airlock: beim Ablegen (OEFFNEN) zu tötendes Lock (in der Transaktion aus dem aktiven Verschluss
+  // ermittelt, NACH dem Commit best-effort retired).
+  let airlockToRetire: string | null = null;
+  if (type === "VERSCHLUSS") {
+    // Vorgabe aus der dringendsten offenen Anforderung (falls gesetzt): genau dieses Lock ist Pflicht.
+    const mandate = await getOpenLockRequest(session.user.id);
+    const mandatedAirlockCode = mandate?.airlockCode ?? null;
+    if (body.airlock) {
+      const r = await verifyForVerschluss(session.user.id, body.airlock, mandatedAirlockCode);
+      if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
+      airlockProof = { code: r.code, uid: r.uid };
+    } else if (mandatedAirlockCode) {
+      // Die Keyholderin hat ein Airlock-Lock vorgegeben → der Verschluss MUSS per NFC damit erfolgen.
+      return NextResponse.json({ error: "AIRLOCK_VERSCHLUSS_REQUIRES_TAG" }, { status: 400 });
+    }
+  }
+  if (type === "PRUEFUNG") {
+    // War der aktive Verschluss ein Airlock? Dann ersetzt der NFC-Scan die Handschrift-Code-Prüfung.
+    const activeLock = await prisma.entry.findFirst({
+      where: { userId: session.user.id, type: { in: ["VERSCHLUSS", "OEFFNEN"] } },
+      orderBy: { startTime: "desc" },
+      select: { type: true, airlockUid: true },
+    });
+    if (activeLock?.type === "VERSCHLUSS" && activeLock.airlockUid) {
+      if (!body.airlock) return NextResponse.json({ error: "AIRLOCK_CONTROL_REQUIRES_TAG" }, { status: 400 });
+      const r = await verifyForKontrolle(activeLock.airlockUid, body.airlock);
+      if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
+      kontrolleAirlockValidated = true;
+    }
+  }
+
   try {
     entry = await prisma.$transaction(async (tx) => {
       // Validate deviceId ownership inside transaction (VERSCHLUSS / WEAR_* / SESSION_*)
@@ -195,6 +233,9 @@ export async function POST(req: NextRequest) {
               orderBy: { startTime: "desc" },
             });
             if (!latestKg || latestKg.type !== "VERSCHLUSS") throw entryGuardError("PAUSE_NOT_LOCKED");
+            // Airlock: ein physisches Einweg-Lock lässt sich nicht temporär öffnen und wieder schliessen.
+            // Reinigungs-/Toiletten-Pause bei aktivem Airlock-Verschluss gesperrt — nur endgültiges Ablegen.
+            if (latestKg.airlockUid) throw entryGuardError("AIRLOCK_NO_TEMP_OPEN");
           }
           if (dev === "PLUG") {
             const latestWear = await tx.entry.findFirst({
@@ -259,6 +300,13 @@ export async function POST(req: NextRequest) {
         if (!latest || latest.type !== "VERSCHLUSS") throw entryGuardError("NOT_LOCKED");
         if (new Date(startTime) <= latest.startTime) throw entryGuardError("TIME_BEFORE");
         lockStartTime = latest.startTime;
+        // Airlock: war der aktive Verschluss ein Airlock, das Lock nach dem Commit töten (retire).
+        const activeAirlock = await tx.entry.findFirst({
+          where: { userId: session.user.id, type: "VERSCHLUSS" },
+          orderBy: { startTime: "desc" },
+          select: { airlockCode: true },
+        });
+        airlockToRetire = activeAirlock?.airlockCode ?? null;
       }
 
       if (type === "OEFFNEN") {
@@ -269,7 +317,9 @@ export async function POST(req: NextRequest) {
       // fertig ist, soll die UI "Verifizierung läuft" statt "Nicht verifiziert" zeigen. Ohne Foto/Code
       // findet nie eine Verifikation statt → bleibt korrekt bei null ("unverified").
       const initialVerifikationStatus =
-        type === "PRUEFUNG" && imageUrl && kontrollCode ? "pending" : null;
+        type === "PRUEFUNG" && kontrolleAirlockValidated ? "verified"
+        : type === "PRUEFUNG" && imageUrl && kontrollCode ? "pending"
+        : null;
 
       const created = await tx.entry.create({
         data: {
@@ -296,6 +346,10 @@ export async function POST(req: NextRequest) {
           sessionGoalAchieved: type === "SESSION_END" && typeof sessionGoalAchieved === "boolean" ? sessionGoalAchieved : undefined,
           // `keyDetected` bleibt hier ungesetzt (null) — das Urteil fällt nach dem Commit (siehe unten).
           boxImageUrl: BOX_PHOTO_TYPES.has(type) ? (boxImageUrl || null) : null,
+          // Airlock-NFC: bei per Tag validiertem Verschluss die Airlock-Nummer + gebundene UID
+          // festhalten (Anker für die spätere NFC-Kontrolle). null = normaler Verschluss ohne Airlock.
+          airlockCode: type === "VERSCHLUSS" ? (airlockProof?.code ?? null) : null,
+          airlockUid: type === "VERSCHLUSS" ? (airlockProof?.uid ?? null) : null,
         },
       });
 
@@ -309,7 +363,24 @@ export async function POST(req: NextRequest) {
         // requireCode=false haben), schrieben sie DIESELBE entryId → P2002 → Transaktion rollt
         // zurück → 500 und der PRUEFUNG-Eintrag ging verloren.
         let fulfilledCount = 0;
-        if (kontrollCode) {
+        // Airlock-NFC: war der aktive Verschluss ein Airlock, ersetzt der (vorab geprüfte) Tag-Scan die
+        // Code-Abfrage — die älteste offene, bereits ausgelöste Anforderung wird ohne Code-Abgleich
+        // erfüllt. Läuft zuerst, damit der Code-Zweig dieselbe entryId nicht doppelt schreibt (@unique).
+        if (kontrolleAirlockValidated) {
+          const nfcKontrolle = await tx.kontrollAnforderung.findFirst({
+            where: { userId: session.user.id, entryId: null, withdrawnAt: null, ...aktiveKontrolleWhere() },
+            orderBy: { createdAt: "asc" },
+            select: { id: true },
+          });
+          if (nfcKontrolle) {
+            await tx.kontrollAnforderung.update({
+              where: { id: nfcKontrolle.id },
+              data: { entryId: created.id, fulfilledAt: new Date() },
+            });
+            fulfilledCount = 1;
+          }
+        }
+        if (fulfilledCount === 0 && kontrollCode) {
           // requireCode=true: Code aus URL/Mail muss übereinstimmen.
           const res = await tx.kontrollAnforderung.updateMany({
             where: {
@@ -503,6 +574,19 @@ export async function POST(req: NextRequest) {
   // Dieselbe Entscheidung, nicht dieselbe Bedingung noch einmal: sonst driften Pull und Push
   // auseinander und die Box taete per MQTT etwas anderes als beim Sync. No-op ohne HEIMDALL_BASE_URL.
   if (boxCmd) notifyHeimdall(session.user.name, boxCmd);
+
+  // Airlock-NFC: das per Tag validierte Lock beim erfolgreichen Verschluss auf `active` setzen
+  // (Airlock-Registry + lokaler Spiegel) — best-effort, blockiert die Antwort nicht (wie notifyHeimdall).
+  if (type === "VERSCHLUSS" && airlockProof) {
+    void activateAirlockLock(airlockProof.code, session.user.id);
+  }
+
+  // Airlock-NFC: beim Ablegen (OEFFNEN) das Einweg-Lock töten (retired) — Airlock-Registry + lokaler
+  // Spiegel, Zuweisung endgültig gelöst. Best-effort; ist der Server nicht erreichbar, bleibt es lokal
+  // „retired" und der nächste Sync zieht den Statuswechsel nach.
+  if (type === "OEFFNEN" && airlockToRetire) {
+    void retireLock(airlockToRetire);
+  }
 
   // REINIGUNG-Limit wird NICHT mehr automatisch bestraft: eine Reinigungsöffnung über dem
   // Tageskontingent (auch ein Geräte-Wechsel) wird im Strafbuch nur noch ERKANNT (live in

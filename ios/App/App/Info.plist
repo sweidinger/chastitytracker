@@ -2,12 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CAPACITOR_DEBUG</key>
+	<key>CAPACITOR_DEBUG</key>
 	<string>$(CAPACITOR_DEBUG)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>ChastityTracker</string>
+	<string>ChastityTracker</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -24,6 +24,18 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NFCReaderUsageDescription</key>
+	<string>Zum Prüfen der Echtheit deines Airlock-Schlosses per NFC-Tag.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Die App benötigt Kamerazugriff, um Fotos für Einträge aufzunehmen.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Die App verwendet Face ID, um deine Daten zu schützen.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Die App benötigt Mikrofonzugriff für Videoaufnahmen.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Die App kann Fotos in deiner Bibliothek speichern.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Die App benötigt Zugriff auf die Fotobibliothek, um Fotos für Einträge auszuwählen.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
@@ -32,6 +44,8 @@
 	<array>
 		<string>armv7</string>
 	</array>
+	<key>UIRequiresFullScreen</key>
+	<true/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
@@ -41,19 +55,7 @@
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 	</array>
-	<key>UIRequiresFullScreen</key>
-	<true/>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
-	<key>NSCameraUsageDescription</key>
-	<string>Die App benötigt Kamerazugriff, um Fotos für Einträge aufzunehmen.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Die App benötigt Zugriff auf die Fotobibliothek, um Fotos für Einträge auszuwählen.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Die App kann Fotos in deiner Bibliothek speichern.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Die App benötigt Mikrofonzugriff für Videoaufnahmen.</string>
-	<key>NSFaceIDUsageDescription</key>
-	<string>Die App verwendet Face ID, um deine Daten zu schützen.</string>
 </dict>
 </plist>

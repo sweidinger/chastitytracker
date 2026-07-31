@@ -6,6 +6,8 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { getUserDeviceOptions, getIsLocked, getOpenLockRequest, getBoxFormContext } from "@/lib/queries";
 import { bildersafeEnabled } from "@/lib/constants";
+import { airlockEnabled } from "@/lib/airlock/config";
+import { getAssignedLocks } from "@/lib/airlock/service";
 import { nowDatetimeLocal, APP_TZ } from "@/lib/utils";
 
 export default async function NewVerschlussPage() {
@@ -13,7 +15,7 @@ export default async function NewVerschlussPage() {
   const userId = session!.user.id;
   const tz = session!.user.timezone ?? APP_TZ;
 
-  const [isLocked, dbUser, devices, offeneAnforderung, box] = await Promise.all([
+  const [isLocked, dbUser, devices, offeneAnforderung, box, airlockOn, assignedLocks] = await Promise.all([
     getIsLocked(userId),
     prisma.user.findUnique({ where: { id: userId }, select: { mobileDesktopUpload: true } }),
     getUserDeviceOptions(userId),
@@ -22,11 +24,18 @@ export default async function NewVerschlussPage() {
     getOpenLockRequest(userId),
     // Box-User (Heimdall aktiv + eigene Box): „Schlüssel ist in der Box"-Block statt Bildersafe.
     getBoxFormContext(userId),
+    // Airlock-NFC: ist die Integration scharf UND hat der Sub zugewiesene Schlösser? → Scan-Feld.
+    airlockEnabled(),
+    getAssignedLocks(userId),
   ]);
 
   if (isLocked) redirect("/dashboard");
 
   const { boxConfirm, boxName } = box;
+  // Pool des Subs (nur wenn Airlock scharf). Bei genau einem = erwartetes Lock, bei mehreren wählt der Sub.
+  const airlockAssignedCodes = airlockOn ? assignedLocks.map((l) => l.code) : [];
+  // Vorgabe aus der offenen Anforderung: der Sub MUSS genau dieses Lock scannen (Pflicht).
+  const anforderungAirlockCode = airlockOn ? (offeneAnforderung?.airlockCode ?? null) : null;
 
   const tn = await getTranslations("newEntry");
   const tf = await getTranslations("lockForm");
@@ -43,6 +52,8 @@ export default async function NewVerschlussPage() {
         bildersafe={!boxConfirm && bildersafeEnabled()}
         boxConfirm={boxConfirm}
         boxName={boxName}
+        airlockAssignedCodes={airlockAssignedCodes}
+        anforderungAirlockCode={anforderungAirlockCode}
       />
     </div>
   );

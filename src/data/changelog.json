@@ -1,5 +1,18 @@
 [
   {
+    "version": "4.133.0",
+    "date": "2026-07-31",
+    "changes": [
+      {
+        "type": "feat",
+        "text": {
+          "de": "Airlock-NFC (externer 3D-Lock-Generator, Weg A): Verschlüsse lassen sich jetzt mit einem NFC-Airlock erfassen und per Scan verifizieren. Verwaltung unter Airlock (Verbindung, Lock-Pool je Sub, Vorgabe eines konkreten Locks bei der Verschluss-Anforderung); Echtheits- und Kopierschutz über die signierte Tag-UID; die Kontrolle prüft den gebundenen Tag; das endgültige Ablegen setzt das Einweg-Lock außer Kraft.",
+          "en": "Airlock NFC (external 3D-lock generator, path A): closures can now be recorded with an NFC airlock and verified by scan. Managed under Airlock (connection, per-sub lock pool, mandating a specific lock on a lock request); authenticity and anti-clone protection via the signed tag UID; checks verify the bound tag; final removal retires the one-way lock."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.132.0",
     "date": "2026-07-30",
     "changes": [

@@ -40,6 +40,9 @@ export const ENTRY_GUARD_CODES = [
   "PAUSE_LIMIT_REACHED",
   "PLUG_REINIGUNG_FENSTER",
   "ORGASMUS_PHOTO_REQUIRED",
+  // Airlock-NFC: ein aktiver Airlock-Verschluss (Einweg-Lock) lässt keine temporäre Reinigungs-/
+  // Toiletten-Pause zu — nur endgültiges Ablegen. Siehe docs/AIRLOCK_NFC.md.
+  "AIRLOCK_NO_TEMP_OPEN",
 ] as const;
 
 /** Returned by `validateEntryPayload` (constants.ts) for a malformed create-payload. */
@@ -71,6 +74,17 @@ export const ENTRY_ROUTE_CODES = [
   "USER_ID_REQUIRED",
   "USER_NOT_FOUND",
   "BOX_PHOTO_REUSED",
+  // Airlock-NFC (Weg A): der Nachweis wird VOR der Transaktion geprüft (Netz-Call), diese Codes
+  // gibt die entries-Route direkt zurück. Siehe docs/AIRLOCK_NFC.md § 4.5/4.6.
+  "AIRLOCK_NOT_REACHABLE",
+  "AIRLOCK_TAG_INVALID",
+  "AIRLOCK_TAG_UID_MISMATCH",
+  "AIRLOCK_TAG_NOT_REGISTERED",
+  "AIRLOCK_TAG_RETIRED",
+  "AIRLOCK_WRONG_LOCK",
+  "AIRLOCK_CONTROL_REQUIRES_TAG",
+  // Die Keyholderin hat bei der Anforderung ein Airlock-Lock vorgegeben → der Verschluss muss per NFC damit erfolgen.
+  "AIRLOCK_VERSCHLUSS_REQUIRES_TAG",
 ] as const;
 
 export type EntryGuardCode = (typeof ENTRY_GUARD_CODES)[number];

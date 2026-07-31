@@ -29,9 +29,11 @@ interface Props {
   redirectTo?: string;
   /** Sub hat eine Heimdall-Box: zusätzliches Foto durchs Sichtfenster. */
   boxConfirm?: boolean;
+  /** Airlock-NFC: aktiver Verschluss war ein Airlock → NFC-Scan statt Handschrift-Code. */
+  airlockControl?: boolean;
 }
 
-export default function PruefungForm({ initial, minTime, tz, nowDefault, initialCode, initialKommentar, sealRequired, mobileDesktopMode, redirectTo, boxConfirm }: Props) {
+export default function PruefungForm({ initial, minTime, tz, nowDefault, initialCode, initialKommentar, sealRequired, mobileDesktopMode, redirectTo, boxConfirm, airlockControl }: Props) {
   const apiError = useApiError();
   const tDash = useTranslations("dashboard");
   const router = useRouter();
@@ -58,6 +60,7 @@ export default function PruefungForm({ initial, minTime, tz, nowDefault, initial
       sealRequired={sealRequired}
       mobileDesktopMode={mobileDesktopMode}
       boxConfirm={boxConfirm}
+      airlockControl={airlockControl}
       isEdit={!!initial}
       submitFn={submitFn}
       onSuccess={() => router.push(target)}

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Airlock-NFC — Referenz-Entitlements. Das echte File liegt im generierten iOS-Projekt unter
+  ios/App/App/App.entitlements und wird von scripts/apply-ios-nfc.sh idempotent um den NFC-Key
+  ergänzt. Falls dort schon `aps-environment` (Push) steht, bleibt das erhalten — dieser Block
+  zeigt nur den Airlock-relevanten Teil.
+
+  WICHTIG: NUR `TAG` (NFCTagReaderSession). `NDEF` NICHT setzen — der App-Store-Upload lehnt es
+  sonst ab ("NDEF is disallowed", Fehler 90778). Den NDEF-Inhalt lesen wir über das Tag-Protokoll,
+  das braucht kein NDEF-Format-Entitlement.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.developer.nfc.readersession.formats</key>
+	<array>
+		<string>TAG</string>
+	</array>
+	<!-- Beispiel: falls Push aktiv ist, steht hier zusätzlich (nicht von apply-ios-nfc.sh angefasst):
+	<key>aps-environment</key>
+	<string>production</string>
+	-->
+</dict>
+</plist>

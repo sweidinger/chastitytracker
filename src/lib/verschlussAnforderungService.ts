@@ -24,6 +24,9 @@ export interface CreateVerschlussAnforderungParams {
    *  auto-created SPERRZEIT.endetAt on fulfill — a late lock does NOT shift it. Alternative to dauerH. */
   sperrEndetAt?: string | Date | null;
   deviceId?: string | null;
+  /** Airlock-NFC (ANFORDERUNG only): vorgegebenes Lock aus dem Pool des Subs. Der Sub muss beim
+   *  Verschluss genau dieses per NFC scannen. null = keine Vorgabe (Sub wählt aus dem Pool). */
+  airlockCode?: string | null;
   /** Non-KG category (e.g. Plug). When set: uses wear-state instead of KG lock-state. */
   deviceCategoryId?: string | null;
   /** Wear-Anforderung: Foto beim Anlegen erzwingen (true) / optional (false) / Kategorie-Default (null). */
@@ -68,7 +71,7 @@ export function checkLockEnd(
 export async function createVerschlussAnforderung(
   params: CreateVerschlussAnforderungParams,
 ): Promise<ServiceResult<{ id: string; scheduledFor: string | null }>> {
-  const { userId, art, nachricht, endetAt, fristH, dauerH, sperrEndetAt, deviceId, deviceCategoryId, fotoPflicht, reinigungErlaubt, toiletteErlaubt, delayMinutes, wirksamAbAt } = params;
+  const { userId, art, nachricht, endetAt, fristH, dauerH, sperrEndetAt, deviceId, airlockCode, deviceCategoryId, fotoPflicht, reinigungErlaubt, toiletteErlaubt, delayMinutes, wirksamAbAt } = params;
   const isPlugCategory = !!deviceCategoryId;
 
   if (!userId) return serviceFail(400, "USER_ID_REQUIRED");
@@ -136,6 +139,15 @@ export async function createVerschlussAnforderung(
     if (!device) return serviceFail(400, "INVALID_DEVICE");
   }
 
+  // Airlock-Vorgabe: das vorgegebene Lock muss diesem Sub aktuell zugewiesen und nicht getötet sein.
+  if (airlockCode && art === "ANFORDERUNG") {
+    const lock = await prisma.airlockLock.findUnique({ where: { code: airlockCode } });
+    const dead = lock?.status === "retired" || lock?.status === "voided" || !!lock?.retireRequestedAt;
+    if (!lock || lock.assignedUserId !== userId || lock.releasedAt || dead) {
+      return serviceFail(400, "AIRLOCK_LOCK_NOT_ASSIGNED");
+    }
+  }
+
   // Wrap state-check + withdraw + create in transaction to prevent TOCTOU race
   let anforderung;
   // Wurf- und Fang-Seite hängen an derselben Tabelle — siehe kontrolleService.
@@ -201,6 +213,7 @@ export async function createVerschlussAnforderung(
           dauerH: effectiveDauerH,
           sperrEndetAt: sperrEndetAtDate,
           deviceId: art === "ANFORDERUNG" ? (deviceId || null) : null,
+          airlockCode: art === "ANFORDERUNG" ? (airlockCode || null) : null,
           deviceCategoryId: deviceCategoryId || null,
           fotoPflicht: fotoPflicht ?? null,
           reinigungErlaubt: effectiveReinigung,

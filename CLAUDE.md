@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Multi-User Web-App zur Erfassung von Keuschheitsgürtel-Einschlusszeiten. Benutzer werden in der DB mit bcrypt-Passwort gespeichert. Admins verwalten Benutzer, setzen Trainingsvorgaben und sehen Statistiken. Jeder Benutzer kann Einschlüsse (VERSCHLUSS/OEFFNEN), Prüfungen (PRUEFUNG) und Orgasmen (ORGASMUS) mit Zeitstempel, Foto und Notiz erfassen.
 
+### Externe Features
+
+- **Airlock-NFC** (`docs/AIRLOCK_NFC.md`) – Lese-/Verifikationsseite für den NFC-Echtheits-/Kopierschutz der 3D-druckbaren AirLocks aus dem separaten `Airlock3DSTLGenerator`. Der KG-Tracker ist reines Frontend + Backend-Proxy (Weg A): liest UID + NDEF, ruft die Airlock-`verify`-API auf, hält keine Krypto/Registry. Siehe die Datei für Architektur, API-Contract und offene To-dos.
+
 ## Commands
 
 ```bash

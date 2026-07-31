@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Lock } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toDatetimeLocal, fromDatetimeLocal } from "@/lib/utils";
@@ -90,6 +90,20 @@ export default function VerschlussAnforderungFields({
     toDatetimeLocal(new Date(nowBaseMs + 24 * 60 * 60 * 1000), tz)
   );
   const [deviceId, setDeviceId] = useState("");
+  // Airlock-NFC: optional ein bestimmtes Lock aus dem Pool des Subs vorgeben ("" = keine Vorgabe).
+  const [airlockCode, setAirlockCode] = useState("");
+  // Der Pool wird selbst geladen (nur ANFORDERUNG) — so muss ihn kein Wrapper/Server-Parent durchreichen.
+  // Leere Liste (Airlock aus, kein Lock zugewiesen, oder Fehler) → das Dropdown bleibt einfach aus.
+  const [airlockLocks, setAirlockLocks] = useState<{ code: string }[]>([]);
+  useEffect(() => {
+    if (isSperrzeit) return;
+    let cancelled = false;
+    fetch(`/api/admin/airlock/assigned?userId=${encodeURIComponent(userId)}`)
+      .then((r) => (r.ok ? r.json() : { locks: [] }))
+      .then((d: { locks?: { code: string }[] }) => { if (!cancelled) setAirlockLocks(d.locks ?? []); })
+      .catch(() => { if (!cancelled) setAirlockLocks([]); });
+    return () => { cancelled = true; };
+  }, [userId, isSperrzeit]);
   const [reinigungErlaubt, setReinigungErlaubt] = useState(false);
   const [toiletteErlaubt, setToiletteErlaubt] = useState(false);
   // Terminierung: sofort (default), relative Verzögerung, oder absoluter Zeitpunkt.
@@ -143,6 +157,9 @@ export default function VerschlussAnforderungFields({
       }
       if (!isSperrzeit && deviceId) {
         payload.deviceId = deviceId;
+      }
+      if (!isSperrzeit && airlockCode) {
+        payload.airlockCode = airlockCode;
       }
       if (isSperrzeit || withMinDauer) {
         payload.reinigungErlaubt = reinigungErlaubt;
@@ -273,6 +290,20 @@ export default function VerschlussAnforderungFields({
           ]}
           value={deviceId}
           onChange={(e) => setDeviceId(e.target.value)}
+        />
+      )}
+
+      {/* Airlock-NFC: ein bestimmtes zugewiesenes Lock vorgeben. Nur bei ANFORDERUNG und wenn dem Sub
+          mindestens ein Lock zugewiesen ist. Leer = keine Vorgabe (Sub wählt aus dem Pool). */}
+      {!isSperrzeit && airlockLocks.length > 0 && (
+        <Select
+          label={t("airlockMandateLabel")}
+          options={[
+            { value: "", label: t("airlockMandatePlaceholder") },
+            ...airlockLocks.map((l) => ({ value: l.code, label: `#${l.code}` })),
+          ]}
+          value={airlockCode}
+          onChange={(e) => setAirlockCode(e.target.value)}
         />
       )}
 

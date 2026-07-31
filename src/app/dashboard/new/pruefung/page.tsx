@@ -12,12 +12,18 @@ export default async function NewPruefungPage({ searchParams }: { searchParams: 
   const userId = session?.user?.id;
   const tz = session?.user?.timezone ?? APP_TZ;
 
-  const [dbUser, latest, box] = await Promise.all([
+  const [dbUser, latest, box, activeAirlock] = await Promise.all([
     userId ? prisma.user.findUnique({ where: { id: userId }, select: { mobileDesktopUpload: true } }) : null,
     userId ? getLatestKgEntry(userId) : null,
     // Box-User: die Kontrolle verlangt zusätzlich ein Foto durchs Sichtfenster — der Nachweis,
     // dass der Schlüssel seit dem Einschliessen drin GEBLIEBEN ist.
     userId ? getBoxFormContext(userId) : null,
+    // Airlock-NFC: wurde der aktive Verschluss per Airlock erfasst? (getLatestKgEntry liefert airlockUid nicht.)
+    userId ? prisma.entry.findFirst({
+      where: { userId, type: { in: ["VERSCHLUSS", "OEFFNEN"] } },
+      orderBy: { startTime: "desc" },
+      select: { type: true, airlockUid: true },
+    }) : null,
   ]);
 
   // Angeforderter Code (Mail-Link) hat Vorrang.
@@ -25,12 +31,10 @@ export default async function NewPruefungPage({ searchParams }: { searchParams: 
   // (Siegel-Nummer) hat — ohne Siegel gibt es nichts zu verifizieren.
   // Bei aktivem Siegel prüft die Verifikation die Siegel-Nummer zusätzlich (Server-seitig).
   const hasSeal = latest?.type === "VERSCHLUSS" && !!latest.kontrollCode;
-  // URL-Code (von KontrollAnforderungs-E-Mail) hat immer Vorrang — er wurde bereits generiert und
-  // versendet, unabhängig vom Siegel-Status.
-  // Selbstkontrolle (kein URL-Code): Frische-Code nur erzeugen wenn ein Siegel vorhanden ist —
-  // ohne Siegel gibt es nichts zu verifizieren, kein Code nötig.
   const effectiveCode = code ?? (hasSeal ? generateKontrollCode() : undefined);
   const sealRequired = sealRequiredForCode(effectiveCode, latest ?? null);
+  // Airlock-Kontrolle: aktiver Verschluss trägt eine gebundene Airlock-UID → NFC statt Code.
+  const airlockControl = activeAirlock?.type === "VERSCHLUSS" && !!activeAirlock.airlockUid;
   const tn = await getTranslations("newEntry");
   const tf = await getTranslations("inspectionForm");
   const tdash = await getTranslations("dashboard");
@@ -42,7 +46,7 @@ export default async function NewPruefungPage({ searchParams }: { searchParams: 
         {tf("title")}
         {deviceLabel && <span className="text-foreground-muted font-normal"> · {deviceLabel}</span>}
       </h1>
-      <PruefungForm tz={tz} nowDefault={nowDatetimeLocal(tz)} initialCode={effectiveCode} initialKommentar={kommentar} sealRequired={sealRequired} mobileDesktopMode={dbUser?.mobileDesktopUpload ?? false} boxConfirm={box?.boxConfirm ?? false} />
+      <PruefungForm tz={tz} nowDefault={nowDatetimeLocal(tz)} initialCode={effectiveCode} initialKommentar={kommentar} sealRequired={sealRequired} mobileDesktopMode={dbUser?.mobileDesktopUpload ?? false} boxConfirm={box?.boxConfirm ?? false} airlockControl={airlockControl} />
     </div>
   );
 }

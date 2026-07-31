@@ -21,6 +21,7 @@ import BoxPhotoField from "@/app/components/BoxPhotoField";
 import Card from "@/app/components/Card";
 import Badge from "@/app/components/Badge";
 import Spinner from "@/app/components/Spinner";
+import AirlockScanField, { type AirlockProof } from "@/app/components/AirlockScanField";
 import type { PruefungPayload, SubmitResult } from "./types";
 import { formatVerifyReason, type VerifyReason } from "@/lib/verifyReason";
 
@@ -59,6 +60,8 @@ interface Props {
   /** Sub hat eine Heimdall-Box: zusätzliches Foto durchs Sichtfenster, das den Schlüssel zeigt.
    *  Nur beim Neuanlegen — beim Bearbeiten wird kein Nachweis nachgereicht. */
   boxConfirm?: boolean;
+  /** Airlock-NFC: der aktive Verschluss wurde per Airlock erfasst → NFC-Scan statt Handschrift-Code. */
+  airlockControl?: boolean;
   isEdit?: boolean;
   submitFn: (payload: PruefungPayload) => Promise<SubmitResult>;
   onSuccess?: () => void;
@@ -69,7 +72,7 @@ interface Props {
 
 export default function PruefungFormCore({
   initial, minTime, tz, nowDefault, initialCode, initialKommentar, sealRequired, mobileDesktopMode,
-  boxConfirm = false, isEdit = false, submitFn, onSuccess, onCancel, submitVariant = "semantic", submitLabel,
+  boxConfirm = false, airlockControl = false, isEdit = false, submitFn, onSuccess, onCancel, submitVariant = "semantic", submitLabel,
 }: Props) {
   const t = useTranslations("inspectionForm");
   const tc = useTranslations("common");
@@ -77,6 +80,7 @@ export default function PruefungFormCore({
   // Box-Foto + seine Rückfrage teilen die Texte mit dem Verschluss-Formular (lockForm) — es ist
   // derselbe Nachweis, er darf nicht je Formular anders heissen.
   const tLock = useTranslations("lockForm");
+  const tAir = useTranslations("airlockScan");
   const dl = toDateLocale(useLocale());
 
   const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
@@ -94,6 +98,8 @@ export default function PruefungFormCore({
   const [startTime, setStartTime] = useState(toDatetimeLocal(initial?.startTime, tz) || nowDefault);
   const [note, setNote] = useState(initial?.note ?? "");
   const [kontrollCode, setKontrollCode] = useState(initial?.kontrollCode ?? initialCode ?? "");
+  // Airlock-NFC: bei einer Airlock-Kontrolle ersetzt der Tag-Scan die Code-/Foto-Verifikation.
+  const [airlockProof, setAirlockProof] = useState<AirlockProof | null>(null);
   const [verifyStatus, setVerifyStatus] = useState<"pending" | "match" | "mismatch" | "sealMismatch" | "error" | "policy" | null>(null);
   const [verifyReason, setVerifyReason] = useState<{ code: VerifyReason; detected?: string } | null>(null);
   const [aiMatch, setAiMatch] = useState<boolean | null>(null);
@@ -176,6 +182,8 @@ export default function PruefungFormCore({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!imageUrl) { setError(t("photoRequired")); return; }
+    // Airlock-Kontrolle: der Tag-Scan ist Pflicht (der Server erzwingt ihn ebenfalls).
+    if (airlockControl && !airlockProof) { setError(tAir("scanRequiredError")); return; }
     // Box-Foto fehlt: nachfragen statt blockieren — die Kontrolle selbst ist gültig, nur der
     // Schlüssel-Nachweis fehlt. Dieselbe Rückfrage wie im Verschluss-Formular.
     if (boxConfirm && !boxPhoto.imageUrl) { setPendingBoxConfirm(true); return; }
@@ -194,6 +202,8 @@ export default function PruefungFormCore({
       verifikationStatus: aiMatch === true ? "ai" : null,
       imageRotation: rotation,
       ...(boxConfirm && boxPhoto.imageUrl ? { boxImageUrl: boxPhoto.imageUrl, boxImageRotation: boxPhoto.rotation } : {}),
+      // Airlock-NFC: den gescannten Tag mitschicken (ersetzt serverseitig die Code-Prüfung).
+      ...(airlockProof ? { airlock: airlockProof } : {}),
     });
   }
 
@@ -234,7 +244,7 @@ export default function PruefungFormCore({
         </Card>
       )}
 
-      {hasPrefilledCode && (
+      {!airlockControl && hasPrefilledCode && (
         <Card padding="compact">
           <div className="flex items-center gap-3">
             <Badge variant="inspect" label={t("controlCode")} size="sm" />
@@ -249,6 +259,10 @@ export default function PruefungFormCore({
       )}
 
       <RequiredHint />
+
+      {airlockControl && (
+        <AirlockScanField mode="kontrolle" value={airlockProof} onChange={setAirlockProof} />
+      )}
 
       <DateTimePicker
         label={tc("dateTime")}
@@ -296,7 +310,7 @@ export default function PruefungFormCore({
         </Card>
       )}
 
-      {!hasPrefilledCode && (
+      {!airlockControl && !hasPrefilledCode && (
         <Input
           label={t("controlCode")}
           hint={t("controlCodeHint")}

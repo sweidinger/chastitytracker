@@ -21,6 +21,8 @@ import BoxPhotoField from "@/app/components/BoxPhotoField";
 import Select from "@/app/components/Select";
 import Card from "@/app/components/Card";
 import Toggle from "@/app/components/Toggle";
+import AirlockScanField, { type AirlockProof } from "@/app/components/AirlockScanField";
+import { parseNdef } from "@/lib/airlock/uid";
 import type { DeviceOption } from "@/lib/queries";
 import type { VerschlussPayload, SubmitResult } from "./types";
 
@@ -53,6 +55,12 @@ interface Props {
   boxConfirm?: boolean;
   /** Name(n) der Box(en) — in der „Schlüssel in Box"-Bestätigung angezeigt. */
   boxName?: string;
+  /** Airlock-NFC: dem Sub zugewiesene Locks (Pool). Bei genau einem ist es das erwartete Lock; bei
+   *  mehreren wählt der Sub eines aus. */
+  airlockAssignedCodes?: string[];
+  /** Airlock-NFC: von der Anforderung vorgegebenes Lock — der Sub MUSS genau dieses scannen (Pflicht).
+   *  null = keine Vorgabe. */
+  anforderungAirlockCode?: string | null;
   isEdit?: boolean;
   submitFn: (payload: VerschlussPayload) => Promise<SubmitResult>;
   onSuccess?: () => void;
@@ -63,7 +71,7 @@ interface Props {
 
 export default function VerschlussFormCore({
   initial, minTime, tz, nowDefault, mobileDesktopMode, devices = [], anforderungDeviceId, bildersafe = false,
-  boxConfirm = false, boxName,
+  boxConfirm = false, boxName, airlockAssignedCodes = [], anforderungAirlockCode = null,
   isEdit = false, submitFn, onSuccess, onCancel, submitVariant = "semantic", submitLabel,
 }: Props) {
   const t = useTranslations("common");
@@ -76,6 +84,21 @@ export default function VerschlussFormCore({
   // reist mit) und darf das Speichern nicht blockieren. Default an = der Normalfall, und die Box
   // folgt dem Eintrag wie bisher; wer den Schlüssel behält, schaltet bewusst ab.
   const [keyInBox, setKeyInBox] = useState(true);
+
+  // Airlock-NFC: Tag-Nachweis. Bei einer Vorgabe (anforderungAirlockCode) ist das Lock fix und der Scan
+  // Pflicht; bei genau einem zugewiesenen Lock ist es das erwartete; bei mehreren wählt der Sub eines.
+  const [airlockProof, setAirlockProof] = useState<AirlockProof | null>(null);
+  const airlockMandated = !!anforderungAirlockCode;
+  const [airlockPick, setAirlockPick] = useState<string>(
+    anforderungAirlockCode ?? (airlockAssignedCodes.length === 1 ? airlockAssignedCodes[0] : "")
+  );
+  const expectedAirlockCode = anforderungAirlockCode ?? (airlockPick || null);
+  const showAirlock = airlockMandated || airlockAssignedCodes.length > 0;
+  // Client-Vorabprüfung (der Server verifiziert autoritativ per Weg A): passt der gescannte Code zum
+  // erwarteten Lock? Der Code steckt im NDEF-Text (AL1|code|token).
+  const scannedAirlockCode = airlockProof ? (parseNdef(airlockProof.ndefText)?.code ?? null) : null;
+  const airlockMismatch = !!(expectedAirlockCode && scannedAirlockCode && scannedAirlockCode !== expectedAirlockCode);
+  const airlockBlocksSubmit = airlockMismatch || (airlockMandated && !airlockProof);
 
   // Device defaulting: anforderung > single-device auto-pick > initial > empty
   const defaultDeviceId = anforderungDeviceId
@@ -187,6 +210,8 @@ export default function VerschlussFormCore({
       // Rotation mitschicken: die Vision liest das Foto server-seitig neu, ein gedrehtes Bild
       // sonst anders als die Vorschau, die der Sub gesehen hat.
       ...(boxConfirm && keyInBox && boxUrl ? { boxImageUrl: boxUrl, boxImageRotation: boxPhoto.rotation } : {}),
+      // Airlock-NFC: den gescannten Tag mitschicken; der Server verifiziert ihn (Weg A).
+      ...(airlockProof ? { airlock: airlockProof } : {}),
     });
   }
 
@@ -204,7 +229,7 @@ export default function VerschlussFormCore({
           semantic={submitVariant === "semantic" ? "lock" : undefined}
           fullWidth
           loading={saving || uploading || codePhoto.uploading || boxPhoto.uploading}
-          disabled={bildersafe && (!codeUrl || codeReadable === false)}
+          disabled={(bildersafe && (!codeUrl || codeReadable === false)) || airlockBlocksSubmit}
           icon={submitVariant === "primary" ? <Lock size={16} /> : undefined}
         >
           {submitLabel ?? defaultLabel}
@@ -212,6 +237,36 @@ export default function VerschlussFormCore({
       }
     >
       <RequiredHint />
+
+      {showAirlock && (
+        <div className="flex flex-col gap-2">
+          {/* Vorgabe der Keyholderin: fixes Lock. Ohne Vorgabe, aber mit mehreren zugewiesenen Locks
+              wählt der Sub, welches er verschliesst. Bei genau einem Lock ist nichts zu wählen. */}
+          {!airlockMandated && airlockAssignedCodes.length > 1 && (
+            <Select
+              label={tForm("airlockPickLabel")}
+              options={[
+                { value: "", label: tForm("airlockPickPlaceholder") },
+                ...airlockAssignedCodes.map((c) => ({ value: c, label: `#${c}` })),
+              ]}
+              value={airlockPick}
+              onChange={(e) => { setAirlockPick(e.target.value); setAirlockProof(null); }}
+            />
+          )}
+          <AirlockScanField
+            mode="verschluss"
+            assignedCode={expectedAirlockCode}
+            value={airlockProof}
+            onChange={setAirlockProof}
+          />
+          {airlockMismatch && (
+            <p className="text-xs text-warn font-medium">{tForm("airlockMismatch", { code: expectedAirlockCode ?? "" })}</p>
+          )}
+          {airlockMandated && !airlockProof && (
+            <p className="text-xs text-foreground-faint">{tForm("airlockMandateHint", { code: anforderungAirlockCode ?? "" })}</p>
+          )}
+        </div>
+      )}
 
       {showDeviceSelector && (
         <div className="flex flex-col gap-2">

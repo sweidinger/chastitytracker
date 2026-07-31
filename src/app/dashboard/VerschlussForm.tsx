@@ -32,9 +32,13 @@ interface Props {
   boxConfirm?: boolean;
   /** Name(n) der Box(en) des Users — in der „Schlüssel in Box"-Bestätigung angezeigt. */
   boxName?: string;
+  /** Airlock-NFC: dem Sub zugewiesene Locks (Pool). */
+  airlockAssignedCodes?: string[];
+  /** Airlock-NFC: von der Anforderung vorgegebenes Lock (Pflicht-Scan). null = keine Vorgabe. */
+  anforderungAirlockCode?: string | null;
 }
 
-export default function VerschlussForm({ initial, minTime, tz, nowDefault, mobileDesktopMode, redirectTo, devices, anforderungDeviceId, bildersafe, boxConfirm, boxName }: Props) {
+export default function VerschlussForm({ initial, minTime, tz, nowDefault, mobileDesktopMode, redirectTo, devices, anforderungDeviceId, bildersafe, boxConfirm, boxName, airlockAssignedCodes, anforderungAirlockCode }: Props) {
   const apiError = useApiError();
   const tDash = useTranslations("dashboard");
   const router = useRouter();
@@ -71,6 +75,8 @@ export default function VerschlussForm({ initial, minTime, tz, nowDefault, mobil
       bildersafe={bildersafe}
       boxConfirm={boxConfirm}
       boxName={boxName}
+      airlockAssignedCodes={airlockAssignedCodes}
+      anforderungAirlockCode={anforderungAirlockCode}
       isEdit={!!initial}
       submitFn={submitFn}
       onSuccess={onSuccess}

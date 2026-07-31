@@ -27,6 +27,8 @@ export default function UserSubNav({ userId, isGlobalAdmin = false }: Props) {
     { href: `${base}/einstellungen`, label: t("user_settings_tab"), exact: false },
     // AI-Keyholder-Konfiguration ist auf Global-Admins beschränkt
     ...(isGlobalAdmin ? [{ href: `${base}/ai-keyholder`, label: t("ai_keyholder_tab"), exact: false }] : []),
+    // Airlock-Zuweisung ebenfalls nur für Global-Admins (Verbindung liegt zentral unter /admin/airlock)
+    ...(isGlobalAdmin ? [{ href: `${base}/airlock`, label: t("airlock_tab"), exact: false }] : []),
   ];
 
   const active = tabs.find((tab) =>

@@ -39,6 +39,9 @@ export interface PruefungPayload {
   boxImageUrl?: string | null;
   /** Anzeige-Drehung des Box-Fotos (siehe `imageRotation`). */
   boxImageRotation?: number;
+  /** Airlock-NFC: Nachweis vom gescannten Tag (Hardware-UID + NDEF-Text `AL1|code|token`).
+   *  Serverseitig verifiziert (Weg A) — bei einem Airlock-Verschluss ersetzt der Scan die Code-Abfrage. */
+  airlock?: { uid: string; ndefText: string } | null;
 }
 
 export interface VerschlussPayload {
@@ -62,6 +65,9 @@ export interface VerschlussPayload {
   /** Anzeige-Drehung des Box-Fotos — die server-seitige Erkennung liest es damit so, wie der Sub
    *  es gesehen hat. Kein Urteil vom Client: `keyDetected` entsteht ausschliesslich auf dem Server. */
   boxImageRotation?: number;
+  /** Airlock-NFC: Nachweis vom gescannten Tag (Hardware-UID + NDEF-Text `AL1|code|token`).
+   *  Serverseitig verifiziert (Weg A); optional beim eigenständigen Verschluss, sonst leer. */
+  airlock?: { uid: string; ndefText: string } | null;
 }
 
 export interface OeffnenPayload {
