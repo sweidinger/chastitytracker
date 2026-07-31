@@ -2,20 +2,21 @@ import { NextResponse } from "next/server";
 import { requireApi } from "@/lib/authGuards";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { prisma } from "@/lib/prisma";
-import { verifyProof, verifyForVerschluss, verifyForKontrolle } from "@/lib/airlock/verify";
+import { verifyProof, verifyForVerschluss, verifyForKontrolle, verifyForAssignment } from "@/lib/airlock/verify";
+import { markLockVerified } from "@/lib/airlock/service";
 import { getOpenLockRequest } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/airlock/verify — prüft einen NFC-Tag-Nachweis auf Echtheit (Weg A, ruft die Airlock-API).
- * Für die Sofort-Rückmeldung im Scan-UI. Optionaler `mode` macht die Prüfung deckungsgleich mit dem
- * Speichern (entries-Route):
+ * POST /api/airlock/verify — prüft einen NFC-Tag-Nachweis (Weg A). Sofort-Rückmeldung im Scan-UI.
+ * `mode`:
  *   - "verschluss": zusätzlich prüfen, ob es das richtige (vorgegebene/zugewiesene) Lock des Subs ist.
  *   - "kontrolle":  gegen die beim aktiven Verschluss gebundene UID prüfen.
+ *   - "verify":     Vorab-Verifikation eines ZUGEWIESENEN Locks (Sicherheits-Feature) — echt + gehört
+ *                   dem Sub + UID passt → markiert das Lock als verifiziert (AirlockLock.verifiedAt).
  *   - ohne mode:    nur generische Echtheit (verifyProof).
- * Antwortet 200 + `{ok:false, error}` bei ungültigem Tag (Verdikt, kein HTTP-Fehler); 400 nur bei
- * fehlender UID. Rate-limitiert (externer API-Call).
+ * 200 + `{ok:false, error}` bei ungültigem Tag; 400 nur bei fehlender UID. Rate-limitiert.
  */
 export async function POST(req: Request) {
   const session = await requireApi();
@@ -27,7 +28,8 @@ export async function POST(req: Request) {
   }
 
   const body = (await req.json()) as {
-    uid?: string; code?: string; token?: string; ndefText?: string; mode?: "verschluss" | "kontrolle";
+    uid?: string; code?: string; token?: string; ndefText?: string;
+    mode?: "verschluss" | "kontrolle" | "verify";
   };
   if (!body.uid || (!(body.code && body.token) && !body.ndefText)) {
     return NextResponse.json({ ok: false, error: "AIRLOCK_TAG_INVALID" }, { status: 400 });
@@ -37,11 +39,9 @@ export async function POST(req: Request) {
 
   let res;
   if (body.mode === "verschluss") {
-    // Vorgabe aus der dringendsten offenen Anforderung (falls gesetzt) — identisch zur entries-Route.
     const mandate = await getOpenLockRequest(session.user.id);
     res = await verifyForVerschluss(session.user.id, proof, mandate?.airlockCode ?? null);
   } else if (body.mode === "kontrolle") {
-    // Gegen die beim aktiven Verschluss gebundene UID prüfen (falls es einen aktiven Airlock-Verschluss gibt).
     const activeLock = await prisma.entry.findFirst({
       where: { userId: session.user.id, type: { in: ["VERSCHLUSS", "OEFFNEN"] } },
       orderBy: { startTime: "desc" },
@@ -51,6 +51,9 @@ export async function POST(req: Request) {
       activeLock?.type === "VERSCHLUSS" && activeLock.airlockUid
         ? await verifyForKontrolle(activeLock.airlockUid, proof)
         : await verifyProof(proof);
+  } else if (body.mode === "verify") {
+    res = await verifyForAssignment(session.user.id, proof);
+    if (res.ok) await markLockVerified(res.code, session.user.id);
   } else {
     res = await verifyProof(proof);
   }

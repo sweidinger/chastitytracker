@@ -85,6 +85,8 @@ export const ENTRY_ROUTE_CODES = [
   "AIRLOCK_CONTROL_REQUIRES_TAG",
   // Die Keyholderin hat bei der Anforderung ein Airlock-Lock vorgegeben → der Verschluss muss per NFC damit erfolgen.
   "AIRLOCK_VERSCHLUSS_REQUIRES_TAG",
+  // Sicherheits-Feature: zugewiesenes Lock erst nach Vorab-Verifikation (Tag-Scan) zum Verschluss nutzbar.
+  "AIRLOCK_LOCK_UNVERIFIED",
 ] as const;
 
 export type EntryGuardCode = (typeof ENTRY_GUARD_CODES)[number];

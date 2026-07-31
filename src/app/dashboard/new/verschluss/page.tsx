@@ -19,12 +19,8 @@ export default async function NewVerschlussPage() {
     getIsLocked(userId),
     prisma.user.findUnique({ where: { id: userId }, select: { mobileDesktopUpload: true } }),
     getUserDeviceOptions(userId),
-    // Dieselbe Auswahl wie die Durchsetzung in POST /api/entries (dringendste zuerst) — sonst
-    // schlägt das Formular Gerät X vor, während gegen Y beurteilt wird.
     getOpenLockRequest(userId),
-    // Box-User (Heimdall aktiv + eigene Box): „Schlüssel ist in der Box"-Block statt Bildersafe.
     getBoxFormContext(userId),
-    // Airlock-NFC: ist die Integration scharf UND hat der Sub zugewiesene Schlösser? → Scan-Feld.
     airlockEnabled(),
     getAssignedLocks(userId),
   ]);
@@ -32,17 +28,26 @@ export default async function NewVerschlussPage() {
   if (isLocked) redirect("/dashboard");
 
   const { boxConfirm, boxName } = box;
-  // Pool des Subs (nur wenn Airlock scharf). Bei genau einem = erwartetes Lock, bei mehreren wählt der Sub.
   const airlockAssignedCodes = airlockOn ? assignedLocks.map((l) => l.code) : [];
-  // Vorgabe aus der offenen Anforderung: der Sub MUSS genau dieses Lock scannen (Pflicht).
   const anforderungAirlockCode = airlockOn ? (offeneAnforderung?.airlockCode ?? null) : null;
+  // Sicherheits-Feature: gibt es dem Sub zugewiesene, noch NICHT verifizierte Locks? → Hinweis + Link.
+  const hasUnverified = airlockOn && assignedLocks.some((l) => !l.verifiedAt);
 
   const tn = await getTranslations("newEntry");
   const tf = await getTranslations("lockForm");
+  const tv = await getTranslations("airlockVerify");
   return (
     <div className="w-full max-w-2xl mx-auto px-4 py-6">
       <Link href="/dashboard" className="text-sm text-foreground-faint hover:text-foreground-muted transition">{tn("back")}</Link>
       <h1 className="text-xl font-bold text-foreground mt-1 mb-6">{tf("title")}</h1>
+      {hasUnverified && (
+        <Link
+          href="/dashboard/airlock"
+          className="mb-6 block rounded-xl border border-inspect/40 bg-inspect/10 px-4 py-3 text-sm text-inspect hover:bg-inspect/15 transition"
+        >
+          {tv("gateNotice")}
+        </Link>
+      )}
       <VerschlussForm
         tz={tz}
         nowDefault={nowDatetimeLocal(tz)}

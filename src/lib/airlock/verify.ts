@@ -126,6 +126,23 @@ export async function verifyForVerschluss(
  * Nachweis für „Kontrolle": der gescannte Tag muss dieselbe UID liefern, die beim aktiven Verschluss
  * gebunden wurde (Entry.airlockUid) — sonst wurde ein anderes/kopiertes Lock vorgezeigt.
  */
+/**
+ * Nachweis für die Vorab-VERIFIKATION eines zugewiesenen Locks durch den Sub (Sicherheits-Feature):
+ * der Tag muss echt sein, dem Sub gehören und die gebundene UID des Locks tragen. Erfolg → der Aufrufer
+ * markiert das Lock als verifiziert (AirlockLock.verifiedAt), erst dann ist es zum Verschluss nutzbar.
+ */
+export async function verifyForAssignment(
+  userId: string,
+  input: AirlockProofInput,
+): Promise<AirlockProofResult> {
+  const res = await verifyProof(input);
+  if (!res.ok) return res;
+  const lock = await prisma.airlockLock.findUnique({ where: { code: res.code } });
+  if (!lock || lock.assignedUserId !== userId) return { ok: false, error: "AIRLOCK_WRONG_LOCK" };
+  if (lock.nfcUid && res.uid !== lock.nfcUid) return { ok: false, error: "AIRLOCK_TAG_UID_MISMATCH" };
+  return res;
+}
+
 export async function verifyForKontrolle(
   activeAirlockUid: string,
   input: AirlockProofInput,

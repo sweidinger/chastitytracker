@@ -1154,6 +1154,7 @@ model AirlockLock {
   assignedUser   User?     @relation("AirlockAssignments", fields: [assignedUserId], references: [id], onDelete: SetNull)
   assignedAt     DateTime? // wann einem Sub zugewiesen
   releasedAt     DateTime? // wann die Zuweisung aufgehoben/das Lock freigegeben wurde
+  verifiedAt     DateTime? // Sicherheits-Feature: vom Sub per Tag-Scan bestaetigt; null = unverifiziert
   lastSyncedAt   DateTime? // letzter erfolgreicher Abgleich mit der Airlock-API
   retireRequestedAt DateTime? // Airlock-NFC: Ablegen hat das Toeten (retired) angefordert. Solange gesetzt und der Server noch nicht retired/voided meldet, zieht der Reconcile den Statuswechsel nach — und der Sync darf das lokal getoetete Lock NICHT auf 'active' zuruecksetzen.
   createdAt      DateTime  @default(now())

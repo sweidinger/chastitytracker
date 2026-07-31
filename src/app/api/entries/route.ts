@@ -129,6 +129,12 @@ export async function POST(req: NextRequest) {
       const r = await verifyForVerschluss(session.user.id, body.airlock, mandatedAirlockCode);
       if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
       airlockProof = { code: r.code, uid: r.uid };
+      // Sicherheits-Gate: ein ZUGEWIESENES Lock muss vom Sub vorab per Tag-Scan verifiziert worden
+      // sein (bestätigt, dass der Tag liest), bevor es zum Verschluss genutzt werden darf.
+      const alLock = await prisma.airlockLock.findUnique({ where: { code: r.code }, select: { assignedUserId: true, verifiedAt: true } });
+      if (alLock?.assignedUserId === session.user.id && !alLock.verifiedAt) {
+        return NextResponse.json({ error: "AIRLOCK_LOCK_UNVERIFIED" }, { status: 400 });
+      }
     } else if (mandatedAirlockCode) {
       // Die Keyholderin hat ein Airlock-Lock vorgegeben → der Verschluss MUSS per NFC damit erfolgen.
       return NextResponse.json({ error: "AIRLOCK_VERSCHLUSS_REQUIRES_TAG" }, { status: 400 });

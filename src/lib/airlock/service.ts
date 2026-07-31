@@ -133,7 +133,7 @@ export async function assignLock(code: string, userId: string): Promise<void> {
 
   await prisma.airlockLock.update({
     where: { code },
-    data: { assignedUserId: userId, assignedAt: new Date(), releasedAt: null },
+    data: { assignedUserId: userId, assignedAt: new Date(), releasedAt: null, verifiedAt: null },
   });
 }
 
@@ -227,4 +227,12 @@ export async function activateAirlockLock(code: string, userId: string): Promise
   } catch {
     /* best-effort — Verschluss bleibt gültig, Spiegel gleicht sich beim nächsten Sync ab */
   }
+}
+
+/** Markiert ein dem Sub zugewiesenes Lock als per Tag-Scan verifiziert (Sicherheits-Feature). */
+export async function markLockVerified(code: string, userId: string): Promise<void> {
+  await prisma.airlockLock.updateMany({
+    where: { code, assignedUserId: userId },
+    data: { verifiedAt: new Date() },
+  });
 }

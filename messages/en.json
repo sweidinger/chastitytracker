@@ -175,7 +175,8 @@
     "INVALID_SESSION_CATEGORY": "Invalid session category",
     "NO_SESSION_CATEGORY": "No session-capable category available",
     "lastAdmin": "The last admin cannot be demoted — otherwise nobody can reach the admin area anymore",
-    "BOX_PHOTO_REUSED": "This box photo already belongs to another entry. Please take a fresh one."
+    "BOX_PHOTO_REUSED": "This box photo already belongs to another entry. Please take a fresh one.",
+    "AIRLOCK_LOCK_UNVERIFIED": "Please verify the lock first – scan its tag once under My locks."
   },
   "appLock": {
     "subtitle": "Confirm your identity to continue",
@@ -2120,5 +2121,17 @@
       "SESSION_REQUEST": "Request session",
       "NOTHING": "Blank (nothing)"
     }
+  },
+  "airlockVerify": {
+    "title": "My Airlock locks",
+    "intro": "Verify each assigned lock once by scanning its tag — only then is it usable for locking.",
+    "verified": "verified ✓",
+    "unverified": "unverified",
+    "verifyBtn": "Verify",
+    "scanning": "Hold your iPhone to the Airlock lock …",
+    "none": "No Airlock lock is currently assigned to you.",
+    "notNative": "Verifying only works in the iOS app.",
+    "wrongLockForRow": "Wrong tag — this one belongs to #{code}.",
+    "gateNotice": "One or more assigned locks are not verified yet — verify them here first."
   }
 }

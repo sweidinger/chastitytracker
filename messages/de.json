@@ -175,7 +175,8 @@
     "INVALID_SESSION_CATEGORY": "Ungültige Session-Kategorie",
     "NO_SESSION_CATEGORY": "Keine Session-fähige Kategorie vorhanden",
     "lastAdmin": "Der letzte Admin kann sich die Rechte nicht selbst entziehen — sonst kommt niemand mehr in den Adminbereich",
-    "BOX_PHOTO_REUSED": "Dieses Box-Foto gehört bereits zu einem anderen Eintrag. Bitte eine frische Aufnahme machen."
+    "BOX_PHOTO_REUSED": "Dieses Box-Foto gehört bereits zu einem anderen Eintrag. Bitte eine frische Aufnahme machen.",
+    "AIRLOCK_LOCK_UNVERIFIED": "Bitte das Schloss zuerst verifizieren – unter Meine Schlösser den Tag einmal scannen."
   },
   "appLock": {
     "subtitle": "Identität bestätigen um fortzufahren",
@@ -2120,5 +2121,17 @@
       "SESSION_REQUEST": "Session anfordern",
       "NOTHING": "Niete (nichts)"
     }
+  },
+  "airlockVerify": {
+    "title": "Meine Airlock-Schlösser",
+    "intro": "Verifiziere jedes zugewiesene Schloss einmal per Tag-Scan — erst dann ist es zum Verschluss nutzbar.",
+    "verified": "verifiziert ✓",
+    "unverified": "unverifiziert",
+    "verifyBtn": "Verifizieren",
+    "scanning": "Halte dein iPhone an das Airlock-Schloss …",
+    "none": "Dir ist aktuell kein Airlock-Schloss zugewiesen.",
+    "notNative": "Verifizieren geht nur in der iOS-App.",
+    "wrongLockForRow": "Falscher Tag — dieser gehört zu #{code}.",
+    "gateNotice": "Ein oder mehrere zugewiesene Schlösser sind noch unverifiziert — hier zuerst verifizieren."
   }
 }
