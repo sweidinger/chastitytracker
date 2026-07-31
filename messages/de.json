@@ -12,7 +12,10 @@
     "willVerify": "Wird beim Speichern geprüft.",
     "notAvailable": "NFC-Scan ist nur in der iOS-App verfügbar.",
     "errGeneric": "Scan fehlgeschlagen. Bitte erneut versuchen.",
-    "scanRequiredError": "Bitte zuerst dein Airlock-Schloss scannen."
+    "scanRequiredError": "Bitte zuerst dein Airlock-Schloss scannen.",
+    "verifying": "Prüfe Tag …",
+    "verifiedOk": "Echtes Lock #{code} ✓",
+    "noAirlockData": "Kein Airlock-Datensatz gelesen:"
   },
   "errors": {
     "AIRLOCK_NOT_REACHABLE": "Airlock-Dienst nicht erreichbar. Bitte später erneut versuchen.",
@@ -2056,8 +2059,16 @@
     "minutes": "Minuten",
     "penaltySeverity": "Schwere",
     "penaltyChoice": "Strafe",
-    "severity": { "leicht": "Leicht", "mittel": "Mittel", "schwer": "Schwer" },
-    "orgasmGoal": { "KEINE": "Keine Vorgabe", "ERFORDERLICH": "Orgasmus erforderlich", "VERBOTEN": "Orgasmus verboten" },
+    "severity": {
+      "leicht": "Leicht",
+      "mittel": "Mittel",
+      "schwer": "Schwer"
+    },
+    "orgasmGoal": {
+      "KEINE": "Keine Vorgabe",
+      "ERFORDERLICH": "Orgasmus erforderlich",
+      "VERBOTEN": "Orgasmus verboten"
+    },
     "sessionCategory": "Session-Kategorie",
     "sessionCategoryPlaceholder": "Kategorie wählen",
     "sessionMinDuration": "Mindestdauer (Min.)",
