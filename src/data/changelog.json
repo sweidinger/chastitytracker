@@ -1,5 +1,25 @@
 [
   {
+    "version": "4.136.0",
+    "date": "2026-07-31",
+    "changes": [
+      {
+        "type": "fix",
+        "text": {
+          "de": "Universal-Link: Behebt ein Aufblitzen/Flackern beim Öffnen der App über einen angetippten Airlock-Tag (die Kaltstart-Link-URL wurde in einer Endlosschleife erneut verarbeitet).",
+          "en": "Universal link: fixes a flicker when opening the app from a tapped Airlock tag (the cold-start launch URL was reprocessed in a loop)."
+        }
+      },
+      {
+        "type": "feat",
+        "text": {
+          "de": "Universal-Link-Szenarien verfeinert: Tippt der Sub sein aktiv verschlossenes Airlock-Schloss an, ohne dass eine Kontrolle angefordert ist, landet er im Keyholder-Chat und die Keyholderin bekommt einen einmaligen Hinweis auf den Scan. Bei offener Kontrolle geht es wie gehabt direkt in die Prüfung; unbekannte/fremde Codes führen still zur Startseite.",
+          "en": "Refined universal-link scenarios: if the sub taps their actively locked Airlock while no inspection is requested, they land in the keyholder chat and the keyholder gets a one-off note about the scan. With an open inspection it still goes straight to the check; unknown or foreign codes silently return to the home screen."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.135.0",
     "date": "2026-07-31",
     "changes": [
