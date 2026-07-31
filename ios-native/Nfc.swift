@@ -8,8 +8,8 @@ import CoreNFC
  * und den NDEF-Text-Record `AL1|<code>|<token>`. Beides geht als { uid, ndefText } an JS; die
  * Kanonisierung/Verifikation passiert web-/serverseitig (Weg A, siehe docs/AIRLOCK_NFC.md).
  *
- * Registrierung: Capacitor 6+/8 lädt ein app-lokales Plugin, das `CAPBridgedPlugin` implementiert,
- * automatisch (kein .m-Makro nötig). JS-Seite: `registerPlugin('Nfc')`.
+ * Registrierung: Als app-lokales Plugin (kein npm-Package) MUSS die Klasse in capacitor.config.json →
+ * packageClassList stehen (cap sync trägt sie NICHT ein; apply-ios-nfc.sh ergänzt sie idempotent). JS: registerPlugin('Nfc').
  *
  * Voraussetzungen im iOS-Projekt (per scripts/apply-ios-nfc.sh gesetzt):
  *  - Entitlement `com.apple.developer.nfc.readersession.formats = ["NDEF","TAG"]`

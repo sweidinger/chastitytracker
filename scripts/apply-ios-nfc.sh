@@ -76,6 +76,18 @@ else
   echo "✓ aps-environment=${APS_ENV:-production} in App.entitlements ergänzt (fehlte)"
 fi
 
+
+# 6) capacitor.config.json: das app-lokale NfcPlugin in packageClassList aufnehmen. `cap sync` trägt es
+#    NICHT ein (kein npm-Plugin) → Capacitor 8 lädt es sonst nie → registerPlugin('Nfc') findet nichts →
+#    NFC-Button bleibt deaktiviert ("nur in der iOS-App verfügbar"). Idempotent.
+CFG="$IOS_APP/capacitor.config.json"
+if [ -f "$CFG" ]; then
+  /usr/bin/python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); l=d.setdefault("packageClassList",[]); (l.append("NfcPlugin") if "NfcPlugin" not in l else None); f=open(p,"w"); json.dump(d,f,indent=2,ensure_ascii=False); f.write("\n")' "$CFG"
+  echo "✓ capacitor.config.json: NfcPlugin in packageClassList"
+else
+  echo "⚠︎ $CFG fehlt — zuerst 'npx cap sync ios' ausführen"
+fi
+
 echo ""
 echo "Noch EINMALIG in Xcode (überlebt danach 'cap sync'):"
 echo "  1. Nfc.swift ist im App-Ordner — sicherstellen, dass es Mitglied des App-Targets ist"
