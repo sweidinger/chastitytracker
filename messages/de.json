@@ -2134,6 +2134,8 @@
     "none": "Dir ist aktuell kein Airlock-Schloss zugewiesen.",
     "notNative": "Verifizieren geht nur in der iOS-App.",
     "wrongLockForRow": "Falscher Tag — dieser gehört zu #{code}.",
-    "gateNotice": "Ein oder mehrere zugewiesene Schlösser sind noch unverifiziert — hier zuerst verifizieren."
+    "gateNotice": "Ein oder mehrere zugewiesene Schlösser sind noch unverifiziert — hier zuerst verifizieren.",
+    "scanError": "Scan-Fehler: {code}",
+    "noRead": "Kein AL1 gelesen: {info}"
   }
 }

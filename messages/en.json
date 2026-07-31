@@ -2134,6 +2134,8 @@
     "none": "No Airlock lock is currently assigned to you.",
     "notNative": "Verifying only works in the iOS app.",
     "wrongLockForRow": "Wrong tag — this one belongs to #{code}.",
-    "gateNotice": "One or more assigned locks are not verified yet — verify them here first."
+    "gateNotice": "One or more assigned locks are not verified yet — verify them here first.",
+    "scanError": "Scan error: {code}",
+    "noRead": "No AL1 read: {info}"
   }
 }
