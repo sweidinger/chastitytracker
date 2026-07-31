@@ -1141,6 +1141,30 @@ model AirlockConfig {
   updatedAt DateTime @updatedAt
 }
 
+// KI-Backend (global): instanzweite Verbindungs-Config der AI-Keyholderin (Singleton wie AirlockConfig).
+// Ersetzt die frueheren PER-USER-Backend-Felder in AiKeyholderConfig (die bleiben als deprecated liegen).
+// Zwei API-Keys (Anthropic + Media/Novita) AES-256-GCM-verschluesselt (encrypt.ts); nie im Klartext ans Frontend.
+model AiBackendConfig {
+  id                 String   @id @default("singleton")
+  // LLM-Chat-Backend
+  llmProvider        String   @default("anthropic") // "anthropic" | "ollama"
+  ollamaBaseUrl      String?
+  ollamaModel        String?
+  anthropicApiKeyEnc String?
+  // Medien-Backend
+  mediaProvider      String   @default("comfyui") // "comfyui" | "novita"
+  comfyUiBaseUrl     String?
+  mediaApiKeyEnc     String?
+  mediaModelName     String?
+  // Dediziertes LLM nur fuer Bild-Prompts
+  mediaLlmProvider   String   @default("inherit") // "inherit" | "anthropic" | "ollama"
+  mediaLlmBaseUrl    String?
+  mediaLlmModel      String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+
 // Airlock-NFC: die Sicht des KG-Trackers auf ein einzelnes Lock der Airlock-Instanz + die ZUORDNUNG
 // zu einem Sub. Die Airlock-App kennt nur Codes/Status/UID-Bindung, KEINE Nutzer:innen — welche
 // Person welches aktive Lock trägt, hält allein der KG-Tracker (hier). `status`/`nfcUid` sind ein

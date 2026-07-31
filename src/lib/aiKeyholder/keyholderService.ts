@@ -19,6 +19,7 @@ import { isHealthHoldActive } from "@/lib/healthHoldService";
 import { bestaetigeErledigung, lehneErledigungAb } from "@/lib/strafErledigung";
 import { buildTagesformContext, type TagesformView } from "@/lib/tagesformService";
 import { buildSharedPromptContext } from "./promptContext";
+import { getAiBackend } from "./backendConfig";
 import { calendarLine } from "@/lib/relativeTime";
 
 /** Aktionen, die bei aktivem Gesundheits-Stopp NICHT ausgeführt werden dürfen: alles Fordernde und
@@ -45,7 +46,12 @@ export interface ChatResult {
 export async function getKeyholderConfig(
   userId: string,
 ): Promise<AiKeyholderConfig | null> {
-  return prisma.aiKeyholderConfig.findUnique({ where: { userId } });
+  const row = await prisma.aiKeyholderConfig.findUnique({ where: { userId } });
+  if (!row) return null;
+  // KI-Backend ist global (Singleton `AiBackendConfig`): die per-User-Backend-Spalten sind
+  // deprecated und werden hier von der instanzweiten Config ueberlagert. Persona/Verhalten/
+  // enabled/mediaEnabled/visionEnabled bleiben per-User.
+  return { ...row, ...(await getAiBackend()) };
 }
 
 /** Upsert config — used by the admin settings form. */

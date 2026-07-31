@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Settings, LogOut, Lock, Users, Nfc } from "lucide-react";
+import { Settings, LogOut, Lock, Users, Nfc, Bot } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useTranslations } from "next-intl";
 import { clearSwUserCache } from "@/lib/swMessages";
@@ -67,6 +67,12 @@ export default function AvatarMenu({ username, settingsHref, theme, version, isG
               <Link href="/admin/users" onClick={() => setOpen(false)} className={itemNormal}>
                 <Users size={16} strokeWidth={1.75} />
                 {t("userManagement")}
+              </Link>
+            )}
+            {isGlobalAdmin && (
+              <Link href="/admin/ai-backend" onClick={() => setOpen(false)} className={itemNormal}>
+                <Bot size={16} strokeWidth={1.75} />
+                {t("aiBackend")}
               </Link>
             )}
             {isGlobalAdmin && (

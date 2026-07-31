@@ -1,5 +1,18 @@
 [
   {
+    "version": "4.134.0",
+    "date": "2026-07-31",
+    "changes": [
+      {
+        "type": "feat",
+        "text": {
+          "de": "KI-Backend ist jetzt eine globale, instanzweite Einstellung: Die Verbindungen der KI-Keyholderin (LLM/Chat, Medien-Generierung und Medien-Prompt-LLM) werden einmalig unter dem neuen Menüpunkt „KI-Backend“ (zwischen Benutzerverwaltung und Airlock) gepflegt und gelten für alle Subs. Der AI-Keyholderin-Tab pro Sub enthält nur noch Persona, Verhalten und die Medien-Freigabe.",
+          "en": "The AI backend is now a global, instance-wide setting: the AI keyholder's connections (LLM/chat, media generation and media-prompt LLM) are configured once under the new \"AI Backend\" menu item (between User management and Airlock) and apply to all subs. The per-sub AI Keyholder tab now only holds persona, behaviour and the media toggle."
+        }
+      }
+    ]
+  },
+  {
     "version": "4.133.0",
     "date": "2026-07-31",
     "changes": [
@@ -19,8 +32,8 @@
       {
         "type": "new",
         "text": {
-          "de": "Schicksalsrad-Konsequenzen überarbeitet: Sperrzeit verlängern/verkürzen jetzt in Minuten, Strafe als Strafbuch-Auswahl (Schwere + Vorschläge, im Strafbuch als \u201eper Schicksalsrad\u201c vermerkt), und \u201eAufgabe\u201c ersetzt durch \u201eSession anfordern\u201c mit allen Optionen.",
-          "en": "Reworked Wheel of Fate consequences: extend/shorten lock now in minutes, penalty as a punishment-book selection (severity + suggestions, logged as \u201cby Wheel of Fate\u201d), and \u201cTask\u201d replaced by \u201cRequest session\u201d with all options."
+          "de": "Schicksalsrad-Konsequenzen überarbeitet: Sperrzeit verlängern/verkürzen jetzt in Minuten, Strafe als Strafbuch-Auswahl (Schwere + Vorschläge, im Strafbuch als „per Schicksalsrad“ vermerkt), und „Aufgabe“ ersetzt durch „Session anfordern“ mit allen Optionen.",
+          "en": "Reworked Wheel of Fate consequences: extend/shorten lock now in minutes, penalty as a punishment-book selection (severity + suggestions, logged as “by Wheel of Fate”), and “Task” replaced by “Request session” with all options."
         }
       },
       {
@@ -46,8 +59,8 @@
       {
         "type": "fix",
         "text": {
-          "de": "Schicksalsrad erscheint jetzt zuverlässig im \u201eNeu erfassen\u201c-Sheet (die Verfügbarkeitsprüfung las die Pool-Liste falsch aus).",
-          "en": "The Wheel of Fate now reliably appears in the \u201cNew entry\u201d sheet (the availability check parsed the pool list incorrectly)."
+          "de": "Schicksalsrad erscheint jetzt zuverlässig im „Neu erfassen“-Sheet (die Verfügbarkeitsprüfung las die Pool-Liste falsch aus).",
+          "en": "The Wheel of Fate now reliably appears in the “New entry” sheet (the availability check parsed the pool list incorrectly)."
         }
       }
     ]
@@ -59,8 +72,8 @@
       {
         "type": "new",
         "text": {
-          "de": "Das Schicksalsrad hat jetzt einen eigenen Eintrag in der linken Seitenleiste (zwischen \u201eAI Keyholderin\u201c und \u201eAdmin\u201c) \u2014 er erscheint, sobald ein aktiver Pool existiert.",
-          "en": "The Wheel of Fate now has its own entry in the left sidebar (between \u201cAI Keyholder\u201d and \u201cAdmin\u201d) \u2014 it appears once an active pool exists."
+          "de": "Das Schicksalsrad hat jetzt einen eigenen Eintrag in der linken Seitenleiste (zwischen „AI Keyholderin“ und „Admin“) — er erscheint, sobald ein aktiver Pool existiert.",
+          "en": "The Wheel of Fate now has its own entry in the left sidebar (between “AI Keyholder” and “Admin”) — it appears once an active pool exists."
         }
       }
     ]

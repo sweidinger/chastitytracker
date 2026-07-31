@@ -145,9 +145,6 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           enabled,
-          llmProvider,
-          ollamaBaseUrl: llmProvider === "ollama" ? (ollamaBaseUrl || null) : null,
-          ollamaModel: llmProvider === "ollama" ? (ollamaModel || null) : null,
           systemPrompt: systemPrompt || null,
           intensity,
           moodScore,
@@ -156,22 +153,10 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
           randomIntervalMinMin: minMin,
           randomIntervalMinMax: minMax,
           mediaEnabled,
-          mediaProvider,
-          comfyUiBaseUrl: mediaEnabled && mediaProvider === "comfyui" ? (comfyUiBaseUrl || null) : null,
-          mediaModelName: mediaEnabled && mediaProvider === "novita" ? (mediaModelName || null) : null,
-          mediaLlmProvider: mediaEnabled ? mediaLlmProvider : "inherit",
-          mediaLlmBaseUrl: mediaEnabled && mediaLlmProvider === "ollama" ? (mediaLlmBaseUrl || null) : null,
-          mediaLlmModel: mediaEnabled && mediaLlmProvider === "ollama" ? (mediaLlmModel || null) : null,
           mediaPersonaAnchor: mediaEnabled ? (mediaPersonaAnchor || null) : null,
           mediaSeed: mediaEnabled && mediaSeed.trim() !== "" ? Number(mediaSeed) : null,
           avatarPath,
           mediaPromptTemplates: mediaEnabled ? (mediaPromptTemplates || null) : null,
-          ...(clearApiKey ? { anthropicApiKey: "" }
-            : anthropicApiKey !== "" ? { anthropicApiKey }
-            : {}),
-          ...(clearMediaKey ? { mediaApiKey: "" }
-            : mediaApiKey !== "" ? { mediaApiKey }
-            : {}),
           personaId: null,
         }),
       });
@@ -280,65 +265,6 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
       </Card>
 
       {/* LLM Backend */}
-      <Card padding="none" className="overflow-hidden">
-        <div className="px-5 py-3 border-b border-border-subtle">
-          <p className="text-xs font-semibold uppercase tracking-wider text-foreground-faint">{t("aikhSectionLlm")}</p>
-        </div>
-        <div className="px-5 py-4 flex flex-col gap-4">
-          <Select
-            label={t("aikhLlmProvider")}
-            value={llmProvider}
-            onChange={(e) => setLlmProvider(e.target.value)}
-            options={[
-              { value: "anthropic", label: "Anthropic (Claude)" },
-              { value: "ollama", label: "Ollama (lokal)" },
-            ]}
-          />
-          {llmProvider === "anthropic" && (
-            <div className="flex flex-col gap-2">
-              <Input
-                label={t("aikhAnthropicApiKey")}
-                type="password"
-                placeholder={anthropicApiKeySet
-                  ? t("aikhAnthropicApiKeySet")
-                  : t("aikhAnthropicApiKeyPlaceholder")}
-                hint={t("aikhAnthropicApiKeyHint")}
-                value={anthropicApiKey}
-                onChange={(e) => setAnthropicApiKey(e.target.value)}
-                autoComplete="off"
-              />
-              {anthropicApiKeySet && !clearApiKey && (
-                <button
-                  type="button"
-                  className="text-xs text-warn self-start underline underline-offset-2"
-                  onClick={() => {
-                    setClearApiKey(true);
-                    setAnthropicApiKeySet(false);
-                  }}
-                >
-                  {t("aikhAnthropicApiKeyClear")}
-                </button>
-              )}
-            </div>
-          )}
-          {llmProvider === "ollama" && (
-            <>
-              <Input
-                label={t("aikhOllamaUrl")}
-                placeholder="http://192.168.1.10:11434"
-                value={ollamaBaseUrl}
-                onChange={(e) => setOllamaBaseUrl(e.target.value)}
-              />
-              <Input
-                label={t("aikhOllamaModel")}
-                placeholder="qwen2.5:32b"
-                value={ollamaModel}
-                onChange={(e) => setOllamaModel(e.target.value)}
-              />
-            </>
-          )}
-        </div>
-      </Card>
 
       {/* Persona / System Prompt */}
       <Card padding="none" className="overflow-hidden">
@@ -506,60 +432,6 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
           </div>
           {mediaEnabled && (
             <>
-              <Select
-                label={t("aikhMediaProvider")}
-                value={mediaProvider}
-                onChange={(e) => setMediaProvider(e.target.value)}
-                options={[
-                  { value: "comfyui", label: t("aikhMediaProviderComfy") },
-                  { value: "novita", label: t("aikhMediaProviderNovita") },
-                ]}
-              />
-
-              {mediaProvider === "comfyui" && (
-                <Input
-                  label={t("aikhComfyUrl")}
-                  placeholder="http://192.168.1.10:8188"
-                  value={comfyUiBaseUrl}
-                  onChange={(e) => setComfyUiBaseUrl(e.target.value)}
-                />
-              )}
-
-              {mediaProvider === "novita" && (
-                <>
-                  <div className="flex flex-col gap-2">
-                    <Input
-                      label={t("aikhMediaApiKey")}
-                      type="password"
-                      placeholder={mediaApiKeySet ? t("aikhAnthropicApiKeySet") : t("aikhMediaApiKeyPlaceholder")}
-                      hint={t("aikhMediaApiKeyHint")}
-                      value={mediaApiKey}
-                      onChange={(e) => setMediaApiKey(e.target.value)}
-                      autoComplete="off"
-                    />
-                    {mediaApiKeySet && !clearMediaKey && (
-                      <button
-                        type="button"
-                        className="text-xs text-warn self-start underline underline-offset-2"
-                        onClick={() => {
-                          setClearMediaKey(true);
-                          setMediaApiKeySet(false);
-                        }}
-                      >
-                        {t("aikhAnthropicApiKeyClear")}
-                      </button>
-                    )}
-                  </div>
-                  <Input
-                    label={t("aikhMediaModelName")}
-                    placeholder="sd_xl_base_1.0.safetensors"
-                    hint={t("aikhMediaModelNameHint")}
-                    value={mediaModelName}
-                    onChange={(e) => setMediaModelName(e.target.value)}
-                  />
-                </>
-              )}
-
               <Textarea
                 label={t("aikhMediaTemplates")}
                 hint={t("aikhMediaTemplatesHint")}
@@ -568,35 +440,6 @@ export default function AiKeyholderConfigForm({ userId, initial }: Props) {
                 rows={6}
                 className="font-mono text-xs"
               />
-
-              <Select
-                label={t("aikhMediaLlmProvider")}
-                value={mediaLlmProvider}
-                onChange={(e) => setMediaLlmProvider(e.target.value)}
-                options={[
-                  { value: "inherit", label: t("aikhMediaLlmInherit") },
-                  { value: "anthropic", label: t("aikhMediaLlmAnthropic") },
-                  { value: "ollama", label: t("aikhMediaLlmOllama") },
-                ]}
-              />
-              <p className="text-xs text-foreground-muted -mt-1">{t("aikhMediaLlmProviderHint")}</p>
-              {mediaLlmProvider === "ollama" && (
-                <>
-                  <Input
-                    label={t("aikhMediaLlmUrl")}
-                    placeholder="http://192.168.1.10:11434"
-                    value={mediaLlmBaseUrl}
-                    onChange={(e) => setMediaLlmBaseUrl(e.target.value)}
-                  />
-                  <Input
-                    label={t("aikhMediaLlmModel")}
-                    placeholder="dolphin-mistral"
-                    hint={t("aikhMediaLlmModelHint")}
-                    value={mediaLlmModel}
-                    onChange={(e) => setMediaLlmModel(e.target.value)}
-                  />
-                </>
-              )}
 
               {/* Test-Generierung */}
               <div className="border-t border-border-subtle pt-3 flex flex-col gap-2">

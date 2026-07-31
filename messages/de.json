@@ -320,7 +320,8 @@
     "aiKeyholder": "AI Keyholderin",
     "zufall": "Schicksalsrad",
     "language": "Sprache",
-    "myAirlock": "Meine Airlock-Schlösser"
+    "myAirlock": "Meine Airlock-Schlösser",
+    "aiBackend": "KI-Backend"
   },
   "login": {
     "subtitle": "Melde dich an um fortzufahren",
@@ -1549,7 +1550,15 @@
     "aikhMediaOpen": "Öffnen",
     "roleSelfDemoteConfirm": "Du entziehst dir damit selbst die Adminrechte und verlierst den Zugang zum Adminbereich, sobald deine Sitzung die neue Rolle übernimmt. Fortfahren?",
     "airlockVerifiedBadge": "verifiziert ✓",
-    "airlockUnverifiedBadge": "unverifiziert"
+    "airlockUnverifiedBadge": "unverifiziert",
+    "aiBackendPageTitle": "KI-Backend",
+    "aiBackendPageDesc": "Instanzweite Verbindung der KI-Keyholderin — LLM (Chat) und Medien-Generierung. Gilt fuer alle Subs; Persona und Verhalten bleiben pro Sub im AI-Keyholderin-Tab.",
+    "aiBackendSectionLlm": "LLM (Chat)",
+    "aiBackendSectionMedia": "Medien-Generierung",
+    "aiBackendSectionMediaLlm": "Medien-Prompt-LLM",
+    "aiBackendSave": "Speichern",
+    "aiBackendSaved": "Gespeichert.",
+    "aiBackendSaveFailed": "Speichern fehlgeschlagen."
   },
   "forgotPassword": {
     "title": "Passwort vergessen",

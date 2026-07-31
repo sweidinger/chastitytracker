@@ -21,6 +21,7 @@ import { prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/encrypt";
 import { llmChat } from "./llmClient";
 import { getKeyholderConfig } from "./keyholderService";
+import { getAiBackend } from "./backendConfig";
 import {
   submitWorkflow,
   getJobOutputs,
@@ -219,10 +220,11 @@ export async function processQueuedJobs(maxBatch = 3): Promise<number> {
     include: { user: { include: { aiKeyholderConfig: true } } },
   });
 
+  const backend = await getAiBackend();
   let submitted = 0;
 
   for (const media of queued) {
-    const cfg = media.user.aiKeyholderConfig;
+    const cfg = media.user.aiKeyholderConfig ? { ...media.user.aiKeyholderConfig, ...backend } : null;
     const fail = (reason: string) =>
       prisma.generatedMedia.update({ where: { id: media.id }, data: { status: "failed", failedReason: reason } });
 
@@ -296,10 +298,11 @@ export async function pollGeneratingJobs(): Promise<number> {
     include: { user: { include: { aiKeyholderConfig: true } } },
   });
 
+  const backend = await getAiBackend();
   let completed = 0;
 
   for (const media of generating) {
-    const cfg = media.user.aiKeyholderConfig;
+    const cfg = media.user.aiKeyholderConfig ? { ...media.user.aiKeyholderConfig, ...backend } : null;
     if (!cfg || !media.comfyPromptId) continue;
     const provider = cfg.mediaProvider ?? "comfyui";
     const fail = (reason: string) =>

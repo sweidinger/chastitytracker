@@ -320,7 +320,8 @@
     "aiKeyholder": "AI Keyholder",
     "zufall": "Wheel of Fate",
     "language": "Language",
-    "myAirlock": "My Airlock locks"
+    "myAirlock": "My Airlock locks",
+    "aiBackend": "AI Backend"
   },
   "login": {
     "subtitle": "Sign in to continue",
@@ -1549,7 +1550,15 @@
     "aikhMediaOpen": "Open",
     "roleSelfDemoteConfirm": "This removes your own admin rights; you will lose access to the admin area as soon as your session picks up the new role. Continue?",
     "airlockVerifiedBadge": "verified ✓",
-    "airlockUnverifiedBadge": "unverified"
+    "airlockUnverifiedBadge": "unverified",
+    "aiBackendPageTitle": "AI Backend",
+    "aiBackendPageDesc": "Instance-wide connection for the AI keyholder — LLM (chat) and media generation. Applies to all subs; persona and behaviour stay per-sub in the AI Keyholder tab.",
+    "aiBackendSectionLlm": "LLM (chat)",
+    "aiBackendSectionMedia": "Media generation",
+    "aiBackendSectionMediaLlm": "Media-prompt LLM",
+    "aiBackendSave": "Save",
+    "aiBackendSaved": "Saved.",
+    "aiBackendSaveFailed": "Save failed."
   },
   "forgotPassword": {
     "title": "Forgot password",
