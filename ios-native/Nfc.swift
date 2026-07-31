@@ -140,10 +140,16 @@ public class NfcPlugin: CAPPlugin, CAPBridgedPlugin, NFCTagReaderSessionDelegate
             guard let type = String(data: r.type, encoding: .utf8), type == "T" else { continue }
             let payload = r.payload
             guard payload.count > 1 else { continue }
-            let langLen = Int(payload[0] & 0x3F)
+            // NDEF-Text-Record: Status-Byte Bit 7 = Encoding (0 = UTF-8, 1 = UTF-16),
+            // Bits 0-5 = Laenge des Sprachcodes. Die Airlock-Writer-App (iOS
+            // wellKnownTypeTextPayload) schreibt UTF-16 (mit BOM) — reines UTF-8-Dekodieren
+            // ergab dann nil und damit einen leeren ndefText.
+            let status = payload[0]
+            let isUTF16 = (status & 0x80) != 0
+            let langLen = Int(status & 0x3F)
             guard payload.count >= 1 + langLen else { continue }
             let textData = payload.subdata(in: (1 + langLen)..<payload.count)
-            return String(data: textData, encoding: .utf8)
+            return String(data: textData, encoding: isUTF16 ? .utf16 : .utf8)
         }
         return nil
     }
