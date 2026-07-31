@@ -2,20 +2,6 @@ import Foundation
 import Capacitor
 import CoreNFC
 
-/**
- * Airlock-NFC — lokales Capacitor-Plugin (Core NFC). Liest von einem NTAG213/215/216 (MIFARE
- * Ultralight, ISO14443-A) BEIDES: die Hardware-UID (aus der Tag-Identifikation, NICHT aus dem NDEF)
- * und den NDEF-Text-Record `AL1|<code>|<token>`. Beides geht als { uid, ndefText } an JS; die
- * Kanonisierung/Verifikation passiert web-/serverseitig (Weg A, siehe docs/AIRLOCK_NFC.md).
- *
- * Registrierung: Als app-lokales Plugin (kein npm-Package) MUSS die Klasse in capacitor.config.json →
- * packageClassList stehen (cap sync trägt sie NICHT ein; apply-ios-nfc.sh ergänzt sie idempotent). JS: registerPlugin('Nfc').
- *
- * Voraussetzungen im iOS-Projekt (per scripts/apply-ios-nfc.sh gesetzt):
- *  - Entitlement `com.apple.developer.nfc.readersession.formats = ["NDEF","TAG"]`
- *  - Info.plist `NFCReaderUsageDescription`
- *  - NFC-Tag-Reading-Capability auf der App-ID (Apple Developer Portal)
- */
 @objc(NfcPlugin)
 public class NfcPlugin: CAPPlugin, CAPBridgedPlugin, NFCTagReaderSessionDelegate {
     public let identifier = "NfcPlugin"
@@ -55,8 +41,6 @@ public class NfcPlugin: CAPPlugin, CAPBridgedPlugin, NFCTagReaderSessionDelegate
     public func tagReaderSessionDidBecomeActive(_ session: NFCTagReaderSession) {}
 
     public func tagReaderSession(_ session: NFCTagReaderSession, didInvalidateWithError error: Error) {
-        // Wird auch bei User-Abbruch oder Timeout gerufen. Nur reagieren, wenn ein Call noch offen ist
-        // (bei erfolgreichem scan haben wir vorher schon aufgelöst und pendingCall genullt).
         guard self.pendingCall != nil else { self.session = nil; return }
         if let nfcErr = error as? NFCReaderError,
            nfcErr.code == .readerSessionInvalidationErrorUserCanceled {
@@ -91,17 +75,34 @@ public class NfcPlugin: CAPPlugin, CAPBridgedPlugin, NFCTagReaderSessionDelegate
                 return
             }
 
-            ndefTag.readNDEF { [weak self] (message, error) in
+            // FIX: NDEF erst „primen" (queryNDEFStatus) — ohne diesen Aufruf liefert
+            // readNDEF auf manchen NTAG/iOS-Kombinationen eine LEERE Message zurück
+            // (genau das beobachtete Fehlerbild: ndefText leer, kein Fehlercode).
+            ndefTag.queryNDEFStatus { [weak self] (status, _, statusError) in
                 guard let self = self else { return }
-                if let error = error {
-                    session.invalidate(errorMessage: "NDEF konnte nicht gelesen werden.")
-                    self.finish(rejectCode: "NFC_NDEF_FAILED", message: error.localizedDescription)
+                if let statusError = statusError {
+                    session.invalidate(errorMessage: "NDEF-Status konnte nicht gelesen werden.")
+                    self.finish(rejectCode: "NFC_NDEF_FAILED", message: statusError.localizedDescription)
                     return
                 }
-                let text = self.firstTextRecord(message) ?? ""
-                session.alertMessage = "Airlock gelesen ✓"
-                session.invalidate()
-                self.finish(resolve: ["uid": uid, "ndefText": text])
+                guard status != .notSupported else {
+                    session.invalidate(errorMessage: "Tag unterstützt kein NDEF.")
+                    self.finish(rejectCode: "NFC_NOT_NTAG", message: "Tag unterstützt kein NDEF.")
+                    return
+                }
+
+                ndefTag.readNDEF { [weak self] (message, error) in
+                    guard let self = self else { return }
+                    if let error = error {
+                        session.invalidate(errorMessage: "NDEF konnte nicht gelesen werden.")
+                        self.finish(rejectCode: "NFC_NDEF_FAILED", message: error.localizedDescription)
+                        return
+                    }
+                    let text = self.firstTextRecord(message) ?? ""
+                    session.alertMessage = "Airlock gelesen ✓"
+                    session.invalidate()
+                    self.finish(resolve: ["uid": uid, "ndefText": text])
+                }
             }
         }
     }
