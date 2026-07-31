@@ -319,7 +319,8 @@
     "devices": "My Devices",
     "aiKeyholder": "AI Keyholder",
     "zufall": "Wheel of Fate",
-    "language": "Language"
+    "language": "Language",
+    "myAirlock": "My Airlock locks"
   },
   "login": {
     "subtitle": "Sign in to continue",

@@ -2,12 +2,22 @@ import { auth } from "@/lib/auth";
 import Link from "next/link";
 import AvatarMenu from "@/app/components/AvatarMenu";
 import FeedbackButton from "@/app/components/FeedbackButton";
+import { airlockEnabled } from "@/lib/airlock/config";
+import { getAssignedLocks } from "@/lib/airlock/service";
 import pkg from "../../package.json";
 
 export default async function Header() {
   const session = await auth();
   const user = session?.user;
   const feedbackEnabled = process.env.DISABLE_FEEDBACK !== "true";
+
+  // Airlock: „Meine Airlock-Schlösser" nur zeigen, wenn die Integration scharf ist UND dem Sub
+  // mindestens ein Lock zugewiesen ist (sonst wäre der Menüpunkt für die meisten leer/verwirrend).
+  let showMyAirlock = false;
+  if (user) {
+    const [on, locks] = await Promise.all([airlockEnabled(), getAssignedLocks(user.id)]);
+    showMyAirlock = on && locks.length > 0;
+  }
 
   const hostname = process.env.NEXTAUTH_URL
     ? (() => { try { return new URL(process.env.NEXTAUTH_URL!).hostname; } catch { return null; } })()
@@ -36,6 +46,7 @@ export default async function Header() {
               settingsHref="/dashboard/settings"
               theme="user"
               version={pkg.version}
+              showMyAirlock={showMyAirlock}
             />
           )}
         </div>

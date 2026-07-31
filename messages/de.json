@@ -319,7 +319,8 @@
     "devices": "Meine Devices",
     "aiKeyholder": "AI Keyholderin",
     "zufall": "Schicksalsrad",
-    "language": "Sprache"
+    "language": "Sprache",
+    "myAirlock": "Meine Airlock-Schlösser"
   },
   "login": {
     "subtitle": "Melde dich an um fortzufahren",

@@ -14,9 +14,11 @@ interface Props {
   version?: string;
   /** Show the instance-management (Benutzerverwaltung) entry — global admins only. */
   isGlobalAdmin?: boolean;
+  /** Show the "Meine Airlock-Schlösser" entry — nur wenn dem User Locks zugewiesen sind (Sub-Bereich). */
+  showMyAirlock?: boolean;
 }
 
-export default function AvatarMenu({ username, settingsHref, theme, version, isGlobalAdmin }: Props) {
+export default function AvatarMenu({ username, settingsHref, theme, version, isGlobalAdmin, showMyAirlock }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const t = useTranslations("nav");
@@ -71,6 +73,12 @@ export default function AvatarMenu({ username, settingsHref, theme, version, isG
               <Link href="/admin/airlock" onClick={() => setOpen(false)} className={itemNormal}>
                 <Nfc size={16} strokeWidth={1.75} />
                 {t("airlock")}
+              </Link>
+            )}
+            {theme === "user" && showMyAirlock && (
+              <Link href="/dashboard/airlock" onClick={() => setOpen(false)} className={itemNormal}>
+                <Nfc size={16} strokeWidth={1.75} />
+                {t("myAirlock")}
               </Link>
             )}
             {theme === "user" && (
