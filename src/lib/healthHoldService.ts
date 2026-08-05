@@ -52,6 +52,7 @@ export async function startHealthHold(userId: string, reason: string): Promise<S
         subjectKey: "healthHoldOnSubject",
         messageKey: "healthHoldOnMessage",
         params: { text },
+        inbox: false,
       });
     }
   } catch { /* Benachrichtigung darf den Stopp nie verhindern */ }
@@ -72,6 +73,7 @@ export async function resolveHealthHold(userId: string): Promise<ServiceResult<{
         await notifyUser(c.id, {
           subjectKey: "healthHoldOffSubject",
           messageKey: "healthHoldOffMessage",
+          inbox: false,
         });
       }
     } catch { /* egal */ }

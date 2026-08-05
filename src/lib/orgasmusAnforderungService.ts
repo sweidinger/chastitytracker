@@ -6,6 +6,7 @@ import { firePush } from "@/lib/push";
 import { ORGASMUS_ANFORDERUNG_ARTEN, toLocale, EMAIL_BUTTON_COLORS } from "@/lib/constants";
 import { orgasmusValueAllowed, resolveOrgasmusArtDisplay, effectiveOrgasmusArten } from "@/lib/reasonsService";
 import { notifyUser, type NotifyContent } from "@/lib/notify";
+import { recordMessageAndBadge } from "@/lib/messageService";
 import { emailT, emailGreeting } from "@/lib/emailI18n";
 import { getTranslations } from "next-intl/server";
 import { serviceFail, type ServiceResult } from "@/lib/serviceResult";
@@ -104,6 +105,7 @@ export async function createOrgasmusAnforderung(
   await sendOrgasmusAnforderungNotifications({
     userId, user, art, nachricht, beginnt, endet, vorgegebeneArt, oeffnenErlaubt: Boolean(oeffnenErlaubt),
     fotoPflicht: Boolean(fotoPflicht),
+    directiveId: anforderung.id,
   });
 
   return { ok: true, data: { id: anforderung.id } };
@@ -111,8 +113,14 @@ export async function createOrgasmusAnforderung(
 
 /** Notification text shown to the user when an open orgasm directive is withdrawn — shared by the
  *  per-userId (MCP) and per-id (admin route) withdraw paths so the text isn't duplicated. */
-export function orgasmusWithdrawNotice(): NotifyContent {
-  return { subjectKey: "orgasmWithdrawnSubject", messageKey: "orgasmWithdrawnMessage" };
+export function orgasmusWithdrawNotice(refId?: string): NotifyContent {
+  // Wie beim Verschluss-Rückzug: ohne `refId` (Rückzug per userId, der mehrere offene Anweisungen
+  // treffen kann) bleibt die Nachricht bewusst ohne Bezug.
+  return {
+    subjectKey: "orgasmWithdrawnSubject",
+    messageKey: "orgasmWithdrawnMessage",
+    inbox: { senderKind: "keyholder", ...(refId ? { ref: { type: "orgasmDirective" as const, id: refId } } : {}) },
+  };
 }
 
 /** Withdraws the user's currently open orgasm directive(s) (not yet fulfilled/withdrawn).
@@ -170,7 +178,7 @@ export async function withdrawOrgasmusAnforderungById(id: string, userId: string
     await tx.orgasmusAnforderung.update({ where: { id }, data: { withdrawnAt: now } });
     if (refund) await refundReward(tx, userId, 1);
   });
-  await notifyUser(userId, orgasmusWithdrawNotice());
+  await notifyUser(userId, orgasmusWithdrawNotice(id));
   return { ok: true, data: { count: 1 } };
 }
 
@@ -185,9 +193,20 @@ async function sendOrgasmusAnforderungNotifications(opts: {
   vorgegebeneArt?: string | null;
   oeffnenErlaubt: boolean;
   fotoPflicht?: boolean;
+  /** Die Zeile, auf die die Nachricht im Posteingang zeigt. */
+  directiveId: string;
 }) {
-  const { userId, user, art, nachricht, beginnt, endet, vorgegebeneArt, oeffnenErlaubt, fotoPflicht } = opts;
+  const { userId, user, art, nachricht, beginnt, endet, vorgegebeneArt, oeffnenErlaubt, fotoPflicht, directiveId } = opts;
   const istAnweisung = art === "ANWEISUNG";
+
+  // Nachricht des Keyholders bleibt an der Direktive; der Posteingang verlinkt sie nur.
+  const badge = await recordMessageAndBadge({
+    subjectUserId: userId,
+    bodyKey: istAnweisung ? "orgasmAnweisungIntro" : "orgasmGelegenheitIntro",
+    senderKind: "keyholder",
+    ref: { type: "orgasmDirective", id: directiveId },
+    once: true,
+  });
   const locale = toLocale(user.locale);
   const t = await emailT(locale);
   const betreff = istAnweisung ? t("orgasmAnweisungSubject") : t("orgasmGelegenheitSubject");
@@ -228,5 +247,5 @@ async function sendOrgasmusAnforderungNotifications(opts: {
   if (artLabel) pushParts.push(artLabel);
   if (fotoPflicht) pushParts.push("Foto-Nachweis erforderlich");
   if (nachricht?.trim()) pushParts.push(nachricht.trim());
-  firePush(userId, betreff, pushParts.join(" · "), "/dashboard");
+  firePush(userId, betreff, pushParts.join(" · "), "/dashboard", badge);
 }

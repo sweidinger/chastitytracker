@@ -73,7 +73,7 @@ export async function POST(req: Request) {
       },
     });
     // Konsistent zur MCP (judgeOffense): bei verhängter Strafe den Nutzer benachrichtigen.
-    if (status === "PUNISHED") await notifyUser(userId, strafeVerhaengtNotice(reason?.trim() || null));
+    if (status === "PUNISHED") await notifyUser(userId, strafeVerhaengtNotice(reason?.trim() || null, record.id, "admin"));
 
     // Straf-Aktion (Fork, Phase 3) ausfuehren — nur bei verhaengter Strafe. Fehler brechen das Urteil
     // NICHT ab (der Straf-Eintrag bleibt), werden aber zurueckgemeldet.

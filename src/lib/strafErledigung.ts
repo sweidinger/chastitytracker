@@ -100,6 +100,7 @@ export async function meldeErledigung(
         subjectKey: "penaltyReportedSubject",
         messageKey: text ? "penaltyReportedMessage" : "penaltyReportedMessagePlain",
         ...(text ? { params: { reason: text } } : {}),
+        inbox: false,
       });
     }
   } catch { /* Benachrichtigung darf die Meldung nie verhindern */ }

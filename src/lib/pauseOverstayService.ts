@@ -112,6 +112,7 @@ async function notifyPauseExpired(userId: string, username: string): Promise<voi
         subjectKey: "pauseExpiredSubjectKeyholder",
         messageKey: "pauseExpiredMessageKeyholder",
         params: { username },
+        inbox: false,
       }),
     ),
   );
