@@ -1558,7 +1558,8 @@
     "aiBackendSectionMediaLlm": "Medien-Prompt-LLM",
     "aiBackendSave": "Speichern",
     "aiBackendSaved": "Gespeichert.",
-    "aiBackendSaveFailed": "Speichern fehlgeschlagen."
+    "aiBackendSaveFailed": "Speichern fehlgeschlagen.",
+    "strafbuchAdminPasswort": "Passwortwechsel während Sperrzeit"
   },
   "forgotPassword": {
     "title": "Passwort vergessen",

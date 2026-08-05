@@ -272,6 +272,7 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
     pause_overage: t("strafbuchPauseUeberzug"),
     erektion: t("strafbuchErektion"),
     orgasm_over_budget: t("strafbuchOrgasmusUeberBudget"),
+    admin_password_change: t("strafbuchAdminPasswort"),
   };
   const severityMatrix = (["schwer", "mittel", "leicht"] as OffenseSeverity[]).map((sev) => ({
     severity: sev,

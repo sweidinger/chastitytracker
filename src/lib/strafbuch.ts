@@ -112,6 +112,17 @@ export interface StrafbuchData {
     relockAt: Date | null;
     note: string | null;
   }[];
+  /** Passwortwechsel an einem Admin-Konto, während für diesen Sub eine Sperrzeit lief. Anders als
+   *  alle anderen Vergehen NICHT live abgeleitet, sondern beim Vorgang festgeschrieben
+   *  (`AdminPasswordChange`) — eine später zurückgezogene Sperrzeit darf das Vergehen nicht
+   *  rückwirkend tilgen. */
+  adminPasswordChanges: {
+    id: string;
+    at: Date;
+    adminUsername: string;
+    via: string;
+    sperrzeitEndetAt: Date | null;
+  }[];
   /** Judgment records — each marks an offense (by `refId`) as PUNISHED or DISMISSED. */
   strafeRecords: {
     refId: string;
@@ -312,6 +323,9 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
       include: { deviceCategory: { select: { name: true } } },
     }),
   ]);
+  // Passwortwechsel am Admin-Konto während einer Sperrzeit (v4.60.7) — separat abgefragt,
+  // um die positionsgebundene Zuordnung des großen Promise.all nicht zu stören.
+  const adminPasswordChangesRaw = await prisma.adminPasswordChange.findMany({ where: { subUserId: userId }, orderBy: { createdAt: "desc" } });
 
   // Windows that explicitly permit opening to perform the directed orgasm — an OEFFNEN inside
   // such a window is not an unauthorized opening (like the REINIGUNG exception).
@@ -531,6 +545,13 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
       .map((s) => ({ id: s.id, endetAt: s.endetAt as Date, nachricht: s.nachricht, categoryName: s.deviceCategory?.name ?? null, istStrafe: s.istStrafe })),
     lateLocks,
     cleaningNotRelocked,
+    adminPasswordChanges: adminPasswordChangesRaw.map((p) => ({
+      id: p.id,
+      at: p.createdAt,
+      adminUsername: p.adminUsername,
+      via: p.via,
+      sperrzeitEndetAt: p.sperrzeitEndetAt,
+    })),
     strafeRecords: strafeRecordsRaw.map((r) => ({
       refId: r.refId,
       offenseType: r.offenseType,

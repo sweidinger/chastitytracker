@@ -445,8 +445,10 @@ export async function validateDeviceOwnership(
  *  `activeSperrzeitWhere` baut darauf auf und ergänzt das wirksamAb-Gate für Sub/Enforcement.
  *  Filtert explizit `deviceCategoryId: null` → KG only; Plug-Sperrzeiten laufen über
  *  `getActivePlugSperrzeit`. */
-function keyholderSperrzeitWhere(userIdFilter: string | { in: string[] }, now: Date) {
+function keyholderSperrzeitWhere(userIdFilter: string | { in: string[] } | undefined, now: Date) {
   return {
+    // `undefined` = kein User-Filter, also über ALLE Subs. Prisma lässt ein undefined-Feld weg,
+    // statt auf null zu prüfen — genau das ist hier gewollt (siehe `subsWithActiveSperrzeit`).
     userId: userIdFilter,
     art: "SPERRZEIT" as const,
     deviceCategoryId: null, // KG only — Plug-Sperrzeiten haben eine deviceCategoryId gesetzt
@@ -458,7 +460,7 @@ function keyholderSperrzeitWhere(userIdFilter: string | { in: string[] }, now: D
 /** Shared `where` for currently-active Sperrzeiten (not withdrawn, already triggered, not ended).
  *  Erweitert `keyholderSperrzeitWhere` um das `wirksamAb`-Gate: schliesst geplante (zukünftige)
  *  Sperrzeiten aus — sie dürfen vor ihrem Versand das Öffnen nicht blockieren. */
-function activeSperrzeitWhere(userIdFilter: string | { in: string[] }, now: Date) {
+function activeSperrzeitWhere(userIdFilter: string | { in: string[] } | undefined, now: Date) {
   const { OR, ...base } = keyholderSperrzeitWhere(userIdFilter, now);
   return {
     ...base,
@@ -467,6 +469,20 @@ function activeSperrzeitWhere(userIdFilter: string | { in: string[] }, now: Date
       { OR },
     ],
   };
+}
+
+/** Alle Subs, für die JETZT eine Sperrzeit läuft, samt der laufenden Sperrzeit.
+ *
+ *  Ohne User-Filter, weil der Aufrufer den Sub noch nicht kennt: Das Passwort-Audit hängt an einem
+ *  ADMIN-Konto, das Vergehen aber am Sub (`AdminPasswordChange.subUserId`). Bewusst über
+ *  `activeSperrzeitWhere`, damit „läuft gerade" hier dieselbe Bedeutung hat wie überall sonst —
+ *  inklusive `wirksamAb`-Gate, damit eine erst geplante Sperrzeit kein Vergehen auslöst. */
+export async function subsWithActiveSperrzeit(now: Date = new Date()) {
+  return prisma.verschlussAnforderung.findMany({
+    where: activeSperrzeitWhere(undefined, now),
+    select: { id: true, userId: true, endetAt: true },
+    orderBy: { createdAt: "asc" },
+  });
 }
 
 /** Ist diese Direktive TERMINIERT und noch nicht ausgelöst (wirksamAb in der Zukunft)? Die

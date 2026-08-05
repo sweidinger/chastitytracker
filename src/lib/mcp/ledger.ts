@@ -76,6 +76,9 @@ export interface StrafbuchOverview {
   cleaningNotRelocked: ({ time: string; deadline: string; relockedAt: string | null; note: string | null } & OffenseJudgment)[];
   /** Orgasmen ueber dem Orgasmus-Budget des laufenden Zeitraums. */
   orgasmOverBudgetViolations: ({ time: string | null; orgasmusArt: string | null; used: number; limit: number } & OffenseJudgment)[];
+  /** Passwortwechsel an einem Admin-Konto während einer laufenden Sperrzeit. `via` unterscheidet
+   *  die Wege; `reset_token` heisst: über das Postfach neuen Zugang verschafft. */
+  adminPasswordChanges: ({ time: string; adminUsername: string; via: string; lockPeriodEndedAt: string | null } & OffenseJudgment)[];
 }
 
 /** Baut den Strafbuch-Snapshot. Nimmt den bereits aufgelösten User: `getOffenses` hat ihn ohnehin
@@ -202,6 +205,13 @@ async function mcpStrafbuch(userId: string, timezone: string, now: Date): Promis
       limit: v.limit,
       ...judge("orgasm_over_budget", v.entryId),
     })),
+    adminPasswordChanges: sb.adminPasswordChanges.map((p) => ({
+      time: fmt(p.at),
+      adminUsername: p.adminUsername,
+      via: p.via,
+      lockPeriodEndedAt: p.sperrzeitEndetAt ? fmt(p.sperrzeitEndetAt) : null,
+      ...judge("admin_password_change", p.id),
+    })),
   };
 }
 
@@ -325,6 +335,7 @@ export function buildOffenseRows(
     ...sb.lateLocks.map((a) => toRow(a.fulfilledAt ?? a.deadline, a, { deadline: a.deadline, fulfilledAt: a.fulfilledAt, message: a.message, categoryName: a.categoryName })),
     ...sb.cleaningNotRelocked.map((c) => toRow(c.relockedAt ?? c.deadline, c, { time: c.time, deadline: c.deadline, relockedAt: c.relockedAt, note: c.note })),
     ...sb.orgasmOverBudgetViolations.map((v) => toRow(v.time, v, { orgasmusArt: v.orgasmusArt, used: v.used, limit: v.limit })),
+    ...sb.adminPasswordChanges.map((p) => toRow(p.time, p, { adminUsername: p.adminUsername, via: p.via, lockPeriodEndedAt: p.lockPeriodEndedAt })),
   ];
 }
 

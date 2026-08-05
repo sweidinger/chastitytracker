@@ -1558,7 +1558,8 @@
     "aiBackendSectionMediaLlm": "Media-prompt LLM",
     "aiBackendSave": "Save",
     "aiBackendSaved": "Saved.",
-    "aiBackendSaveFailed": "Save failed."
+    "aiBackendSaveFailed": "Save failed.",
+    "strafbuchAdminPasswort": "Password change during lock"
   },
   "forgotPassword": {
     "title": "Forgot password",

@@ -43,7 +43,8 @@ function strafbuchWithOneOfEach() {
     erektionViolations: [{ ...j("erektion", "e3"), time: "t", oeffnenGrund: null, note: null }],
     pauseOverageViolations: [{ ...j("pause_overage", "e4"), time: "t", device: null, grund: null, dauerMin: 30, maxMin: 15 }],
     orgasmOverBudgetViolations: [{ ...j("orgasm_over_budget", "og1"), time: "t", orgasmusArt: null, used: 3, limit: 2 }],
-    detectedOffenseCount: 13, openOffenseCount: 13, pendingPenaltyCount: 0,
+    adminPasswordChanges: [{ ...j("admin_password_change", "p1"), time: "t", adminUsername: "Admin", via: "reset_token", lockPeriodEndedAt: null }],
+    detectedOffenseCount: 14, openOffenseCount: 14, pendingPenaltyCount: 0,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 }
@@ -66,6 +67,7 @@ function rawStrafbuchWithOneOfEach() {
     erektionViolations: [{ entryId: "e3", ...one }],
     pauseOverageViolations: [{ entryId: "e4", ...one }],
     orgasmOverBudgetViolations: [{ entryId: "og1", ...one }],
+    adminPasswordChanges: [{ id: "p1", at: null, adminUsername: "Admin", via: "reset_token", sperrzeitEndetAt: null }],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 }
