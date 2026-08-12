@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireKeyholderOrAdminApi } from "@/lib/authGuards";
 import { createTask, type CreateTaskParams } from "@/lib/taskService";
-import { punishWithTask } from "@/lib/strafurteilService";
-import { TASK_FORM_QUERY } from "@/lib/entryFormRoute";
-import { serviceFailure, errorResponse } from "@/lib/serviceResult";
+import { errorResponse, serviceFailure } from "@/lib/serviceResult";
 
 /** Keyholder stellt dem Sub eine Aufgabe. */
 export async function POST(req: NextRequest) {
@@ -16,10 +14,6 @@ export async function POST(req: NextRequest) {
     const holdUntil = new Date(body.holdUntil);
     if (Number.isNaN(holdUntil.getTime())) return errorResponse(400, "INVALID_DATETIME");
 
-    // Felder EINZELN übernehmen, nie den rohen Body spreaden: was der Service an Parametern kennt,
-    // wäre sonst von aussen setzbar. `punishWithTask` nimmt zusätzlich `judgedBy` — mit einem
-    // Spread liesse sich „ai" hineinreichen, und das Urteil eines Menschen stünde im Strafbuch und
-    // in der Nachricht an den Sub als Urteil der KI.
     const params: CreateTaskParams = {
       userId: body.userId,
       title: body.title,
@@ -32,13 +26,9 @@ export async function POST(req: NextRequest) {
       proofs: body.proofs,
     };
 
-    // Mit `offenseRef` ist die Aufgabe die STRAFE für ein Vergehen: dann entstehen Aufgabe und
-    // Urteil zusammen, sonst stünden sie unverbunden nebeneinander. `judgedBy: "admin"` — der
-    // MCP-Agent urteilt über `judge_offense`, nicht über diese Route.
-    const offenseRef = body[TASK_FORM_QUERY.offenseRef];
-    const result = typeof offenseRef === "string" && offenseRef
-      ? await punishWithTask({ ...params, refId: offenseRef, judgedBy: "admin" })
-      : await createTask(params);
+    // Fork: "Strafaufgabe" (Vergehen mit Aufgabe bestrafen via punishWithTask) ist ein eigenes
+    // Increment - haengt am Posteingang + strafurteil-Refactor. Hier nur normale Aufgabenerstellung.
+    const result = await createTask(params);
     if (!result.ok) return serviceFailure(result);
     return NextResponse.json({ ok: true, id: result.data.id });
   } catch (err) {

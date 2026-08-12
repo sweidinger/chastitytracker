@@ -47,26 +47,3 @@ export async function activateWaitingSw(): Promise<void> {
 export function clearSwUserCache(): void {
   postSwMessage({ type: "CLEAR_USER_CACHE" });
 }
-
-
-// ==== ported from upstream (Tasks #39) ====
-/**
- * Setzt das App-Badge auf die Zahl ungelesener Nachrichten (0 = räumen).
- *
- * ZWEI Wege, weil es zwei Plattformen sind:
- *  - **Nativ (Capacitor/iOS):** die Web-Badging-API existiert in der WKWebView NICHT. Ohne Plugin
- *    kann die App das Badge gar nicht anfassen — die Zahl käme ausschliesslich aus dem APNs-Payload
- *    und bliebe nach dem Lesen stehen, bis der nächste Push sie korrigiert.
- *  - **Browser/PWA:** `navigator.setAppBadge`, dort wo es der Browser kennt.
- *
- * Gehört aus demselben Grund hierher wie die Service-Worker-Zugriffe darüber: jeder dieser Zugriffe
- * fehlt auf mindestens einer Plattform, und ungeschützt verschluckt er die umgebende Aktion.
- * Bewusst am ZUSTAND aufgerufen (App-Start, Resume, nach dem Lesen), nicht am Klick auf eine
- * Benachrichtigung.
- *
- * Fire-and-forget: der Aufrufer wartet nicht. Das Badge ist Beiwerk, nie ein Grund, die auslösende
- * Aktion scheitern zu lassen.
- */
-export function setAppBadgeSafe(unread: number): void {
-  void applyBadge(unread).catch(() => { /* Badge ist Beiwerk */ });
-}

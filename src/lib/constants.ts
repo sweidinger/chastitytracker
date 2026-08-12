@@ -578,3 +578,7 @@ export function isRecipientNotificationEventType(v: unknown): v is RecipientNoti
 export const RECIPIENT_NOTIFICATION_EVENT_TYPES = ["MESSAGE_RECEIVED"] as const;
 
 export type RecipientNotificationEventType = typeof RECIPIENT_NOTIFICATION_EVENT_TYPES[number];
+
+
+// ==== ported from upstream (Tasks #39) ====
+export type TaskRequirementType = (typeof TASK_REQUIREMENT_TYPES)[number];

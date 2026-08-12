@@ -9,10 +9,14 @@ import { firePush } from "@/lib/push";
  * body and push all arrive translated. `params` are interpolated into both subject and message.
  */
 export interface NotifyContent {
+  /** Fork: Posteingang nicht portiert (eigenes Increment). Feld toleriert; notifyUser ignoriert es. */
+  inbox?: boolean | ({ ref: { type: string; id: string } } & Record<string, unknown>);
   subjectKey: string;
   messageKey: string;
   params?: Record<string, string | number>;
   url?: string;
+  /** Fork: von Tasks#39 genutzt; notifyUser wendet es (noch) nicht an. */
+  alwaysNotify?: boolean;
 }
 
 /**

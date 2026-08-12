@@ -154,10 +154,13 @@ export function validateCategoryInput(input: {
  * zusammengesetzt wurden. Der Keyholder-Zweig ist dabei nicht Kosmetik: zeigt eine Karte in seiner
  * Ansicht auf `/dashboard/...`, wirft `proxy.ts` ihn nach `/admin` — der Link ist dann schlicht tot.
  */
-export function wearActionHref(opts: { categoryId: string; active: boolean; adminUserId?: string }): string {
+export function wearActionHref(opts: { categoryId: string; active: boolean; adminUserId?: string; deviceId?: string | null; redirectTo?: string | null }): string {
   const form = opts.active ? "wear-end" : "wear-begin";
   const base = opts.adminUserId ? `/admin/users/${opts.adminUserId}/aktionen` : "/dashboard/new";
-  return `${base}/${form}?category=${opts.categoryId}`;
+  const params = new URLSearchParams({ category: opts.categoryId });
+  if (opts.deviceId) params.set("device", opts.deviceId);
+  if (opts.redirectTo) params.set("redirectTo", opts.redirectTo);
+  return `${base}/${form}?${params.toString()}`;
 }
 
 

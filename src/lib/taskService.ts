@@ -229,8 +229,8 @@ async function checkRequirements(
         })
       : Promise.resolve([]),
   ]);
-  const deviceById = new Map(devices.map((d) => [d.id, d]));
-  const categoryById = new Map(categories.map((c) => [c.id, c]));
+  const deviceById = new Map(devices.map((d) => [d.id, d] as const));
+  const categoryById = new Map(categories.map((c) => [c.id, c] as const));
 
   for (const n of normalized) {
     if (n.deviceId) {

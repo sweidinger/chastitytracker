@@ -446,7 +446,7 @@ export function wearSessionPairsByDevice(sessions: Session[], now: Date = new Da
   for (const s of sessions) {
     for (const w of segmentsByDevice(s.segments).values()) {
       if (!w.device.id) continue;
-      const pair: WearPair = { start: w.start, end: w.end ?? now };
+      const pair: WearPair = { start: w.start, end: w.durationMs != null ? new Date(w.start.getTime() + w.durationMs) : now };
       const list = byDevice.get(w.device.id);
       if (list) list.push(pair);
       else byDevice.set(w.device.id, [pair]);
