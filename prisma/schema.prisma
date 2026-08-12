@@ -9,122 +9,127 @@ datasource db {
 }
 
 model User {
-  id                             String                   @id @default(cuid())
-  username                       String                   @unique
+  id                             String                        @id @default(cuid())
+  username                       String                        @unique
   passwordHash                   String
-  role                           String                   @default("user")
-  email                          String?                  @unique
-  createdAt                      DateTime                 @default(now())
-  reinigungErlaubt               Boolean                  @default(false)
-  reinigungMaxMinuten            Int                      @default(15)
-  reinigungMaxProTag             Int                      @default(0)
+  role                           String                        @default("user")
+  email                          String?                       @unique
+  createdAt                      DateTime                      @default(now())
+  reinigungErlaubt               Boolean                       @default(false)
+  reinigungMaxMinuten            Int                           @default(15)
+  reinigungMaxProTag             Int                           @default(0)
   // Tägliche Öffnungs-Fenster für Reinigung als JSON-String, z.B. [{"start":"19:00","end":"20:00"}]
   // (CH-Lokalzeit). SQLite/Prisma 5 kennt kein Json → TEXT; parseReinigungsFenster deserialisiert.
   reinigungsFenster              String?
   // Automatische Kontrollen: pro Tag zufällig X Kontrollen, wobei X selbst zufällig aus
   // [PerDayMin, PerDayMax] gewürfelt wird. Frist darf nicht ins Schlaf-Fenster (RuheVon–RuheBis,
   // CH-Lokalzeit) fallen; Erfüllungsdauer zufällig in [FristVon, FristBis] Min.
-  autoKontrolleAktiv             Boolean                  @default(false)
-  autoKontrollePerDayMin         Int                      @default(0) // Min-Anzahl/Tag
-  autoKontrollePerDayMax         Int                      @default(0) // Max-Anzahl/Tag (< Min → als Min behandelt)
-  autoKontrolleRuheVon           String                   @default("22:00")
-  autoKontrolleRuheBis           String                   @default("06:00")
-  autoKontrolleFristVon          Int                      @default(15)
-  autoKontrolleFristBis          Int                      @default(60)
+  autoKontrolleAktiv             Boolean                       @default(false)
+  autoKontrollePerDayMin         Int                           @default(0) // Min-Anzahl/Tag
+  autoKontrollePerDayMax         Int                           @default(0) // Max-Anzahl/Tag (< Min → als Min behandelt)
+  autoKontrolleRuheVon           String                        @default("22:00")
+  autoKontrolleRuheBis           String                        @default("06:00")
+  autoKontrolleFristVon          Int                           @default(15)
+  autoKontrolleFristBis          Int                           @default(60)
   // Optionales festes AUSLÖSE-Fenster ("HH:MM", "" = aus): sind beide gesetzt und Von<Bis, fallen die
   // Auslösungen (wirksamAb) in dieses Fenster statt gleichmässig übers Wach-Fenster. Die Frist läuft
   // danach normal und darf übers Fensterende hinaus, wird aber am nächsten Schlaf-Beginn gekappt.
-  autoKontrolleFensterVon        String                   @default("")
-  autoKontrolleFensterBis        String                   @default("")
+  autoKontrolleFensterVon        String                        @default("")
+  autoKontrolleFensterBis        String                        @default("")
   // true = Auto-Kontrollen nur auslösen, während eine aktive Sperrzeit (SPERRZEIT) läuft. Die Slots
   // werden weiter für jeden Tag geplant; wird eine bei Fälligkeit ohne aktive Sperrzeit angetroffen,
   // zieht der Poller sie zurück (kein Nachholen — dieselbe Behandlung wie eine Auslösung bei offenem KG).
-  autoKontrolleNurBeiSperre      Boolean                  @default(false)
+  autoKontrolleNurBeiSperre      Boolean                       @default(false)
   // Kontroll-Eskalation (Stufe 1: Mahnung, Stufe 2: automatisch als abgelegt markieren). Beide
   // Stufen sind unabhängig voneinander schaltbar und standardmässig AUS (Opt-in, kein
   // Verhaltenswechsel für Bestandsnutzer). Delay-Werte in Minuten; Stufe 2 zählt ab dem Zeitpunkt
   // der Mahnung (KontrollAnforderung.benachrichtigtReminderAt), nicht ab der Deadline.
-  inspectionReminderEnabled      Boolean                  @default(false)
-  inspectionReminderDelayMinutes Int                      @default(5)
-  inspectionAutoMarkEnabled      Boolean                  @default(false)
-  inspectionAutoMarkDelayMinutes Int                      @default(60)
-  mobileDesktopUpload            Boolean                  @default(false)
+  inspectionReminderEnabled      Boolean                       @default(false)
+  inspectionReminderDelayMinutes Int                           @default(5)
+  inspectionAutoMarkEnabled      Boolean                       @default(false)
+  inspectionAutoMarkDelayMinutes Int                           @default(60)
+  mobileDesktopUpload            Boolean                       @default(false)
   // IANA-Zeitzone des Nutzers (z.B. "America/New_York"). Governiert Anzeige, Eingabe-Defaults und
   // die Wanduhr-Fenster (Reinigung/Schlaf) für DIESEN Nutzer. Default "Europe/Zurich" = bisheriges
   // Verhalten für alle Bestandsnutzer (keine sichtbare Änderung).
-  timezone                       String                   @default("Europe/Zurich")
+  timezone                       String                        @default("Europe/Zurich")
   // Startseite nach Login (pro User): "auto" = rollen-/sub-abhängig (Keyholder→Übersicht bzw. einziger
   // Sub direkt, sonst eigener Tracker), "overview" = Keyholder-Übersicht, "dashboard" = eigener Tracker.
-  startPage                      String                   @default("auto")
+  startPage                      String                        @default("auto")
   // Keyholder/Admin-Präferenz: eigene Karte in der Keyholder-Übersicht ausblenden (für Keyholder,
   // die keinen eigenen Tracker nutzen). Nur relevant, wenn die eigene Karte dort überhaupt erscheint.
-  hideOwnTracker        Boolean                @default(false)
+  hideOwnTracker                 Boolean                       @default(false)
   // Per-user UI + notification language ("de" | "en"). Drives the app locale AND the language of
   // all e-mails / push sent to this user (rendered server-side from this field, not the browser cookie).
-  locale                String                 @default("de")
+  locale                         String                        @default("de")
   // Toiletten-Öffnungen: analog zu Reinigung (aber ohne Zeitfenster).
-  toiletteErlaubt       Boolean  @default(false)
-  toiletteMaxMinuten    Int      @default(15)
-  toiletteMaxProTag     Int      @default(0)
+  toiletteErlaubt                Boolean                       @default(false)
+  toiletteMaxMinuten             Int                           @default(15)
+  toiletteMaxProTag              Int                           @default(0)
   // Anal-Plug: Reinigung + Toilette analog zu KG, aber getrennte Einstellungen.
-  plugReinigungErlaubt    Boolean  @default(false)
-  plugReinigungMaxMinuten Int      @default(15)
-  plugReinigungMaxProTag  Int      @default(0)
-  plugReinigungsFenster   String?  // JSON [{start,end}] — tägliche Zeitfenster für Plug-Reinigung (analog reinigungsFenster)
+  plugReinigungErlaubt           Boolean                       @default(false)
+  plugReinigungMaxMinuten        Int                           @default(15)
+  plugReinigungMaxProTag         Int                           @default(0)
+  plugReinigungsFenster          String? // JSON [{start,end}] — tägliche Zeitfenster für Plug-Reinigung (analog reinigungsFenster)
   // Plug-Toilette: immer erlaubt, unbegrenzte Anzahl — nur Max.-Dauer konfigurierbar.
-  plugToiletteMaxMinuten  Int      @default(15)
+  plugToiletteMaxMinuten         Int                           @default(15)
   // Orgasmus-Budget: max. Anzahl zaehlbarer Orgasmen pro Zeitraum (WOCHE|MONAT). null = kein Budget/aus.
   // Zaehlt echte Orgasmen (ohne "feuchter Traum"), die keine erfuellte Orgasmus-Anforderung erfuellen.
-  orgasmBudget            Int?
-  orgasmBudgetPeriode     String   @default("WOCHE")
-  orgasmBudgetSetAt       DateTime?
+  orgasmBudget                   Int?
+  orgasmBudgetPeriode            String                        @default("WOCHE")
+  orgasmBudgetSetAt              DateTime?
   // Pro-User anpassbare Auswahllisten als JSON-Array [{code,label?}] (TEXT). null = eingebaute
   // Standardliste (Bestandsnutzer unverändert). Öffnungsgründe enthalten IMMER die geschützten
   // Built-ins "REINIGUNG" und "TOILETTE" (Code fix, nur Label umbenennbar). Siehe reasonsService.ts.
-  orgasmusArtenConfig   String?
-  oeffnenGruendeConfig  String?
+  orgasmusArtenConfig            String?
+  oeffnenGruendeConfig           String?
   // Free-text keyholder rules the human admin sets for the MCP AI keyholder (soft guidance, read-only to the agent).
-  mcpKeyholderInstructions String?
+  mcpKeyholderInstructions       String?
   // Belohnungs-Ökonomie: verfügbares Guthaben verdienter Orgasmen (Untergrenze 0, nie negativ). Beim
   // Gewähren eines Belohnungs-Fensters wird 1 vorgemerkt (Guthaben −1); Straf-Aktion Entzug reduziert
   // ebenfalls. Vorgemerkte werden über offene istBelohnung-GELEGENHEITEN gezählt (nicht hier).
-  verdienteOrgasmen     Int                    @default(0)
+  verdienteOrgasmen              Int                           @default(0)
   // Hoechster gemeldeter orgasmusfreier Rekord (Tage) — Meilenstein-Push-Drossel (denialService.ts).
-  denialRecordDays      Int                    @default(0)
-  entries               Entry[]
-  moodEvents            MoodEvent[]
-  notificationPrefs     NotificationPreference[]
-  vorgaben              TrainingVorgabe[]
-  passwordResetTokens   PasswordResetToken[]
-  kontrollAnforderungen   KontrollAnforderung[]
-  verschlussAnforderungen VerschlussAnforderung[]
-  orgasmusAnforderungen   OrgasmusAnforderung[]
-  devices                 Device[]
-  strafeRecords           StrafeRecord[]
-  adminRelationships      AdminUserRelationship[] @relation("AdminRelationships")
-  userRelationships       AdminUserRelationship[] @relation("UserRelationships")
-  pushSubscriptions       PushSubscription[]
-  nativePushTokens        NativePushToken[]
-  passkeys                Passkey[]
-  deviceCategories        DeviceCategory[]
-  aiKeyholderConfig       AiKeyholderConfig?
-  aiKeyholderMessages     AiKeyholderMessage[]
-  generatedMedia          GeneratedMedia[]
-  keyholderTasks          KeyholderTask[]
-  boxEvents               BoxEvent[]
-  boxStatuses             BoxStatus[]
-  keyholderNotes          KeyholderNote[]
-  keyholderActionLogs     KeyholderActionLog[]
-  healthHolds             HealthHold[]
-  recurringContexts       RecurringContext[]
-  appointments            Appointment[]
-  sessionAnforderungen    SessionAnforderung[]
-  tagesformen             Tagesform[]
-  belohnungGutschriften   OrgasmusBelohnungGutschrift[]
-  belohnungEvents         BelohnungEvent[]
-  zufallsPools            ZufallsPool[]
-  zufallsZiehungen        ZufallsZiehung[]
-  airlockLocks            AirlockLock[]           @relation("AirlockAssignments")
+  denialRecordDays               Int                           @default(0)
+  entries                        Entry[]
+  moodEvents                     MoodEvent[]
+  notificationPrefs              NotificationPreference[]
+  vorgaben                       TrainingVorgabe[]
+  passwordResetTokens            PasswordResetToken[]
+  kontrollAnforderungen          KontrollAnforderung[]
+  verschlussAnforderungen        VerschlussAnforderung[]
+  orgasmusAnforderungen          OrgasmusAnforderung[]
+  devices                        Device[]
+  strafeRecords                  StrafeRecord[]
+  adminRelationships             AdminUserRelationship[]       @relation("AdminRelationships")
+  userRelationships              AdminUserRelationship[]       @relation("UserRelationships")
+  pushSubscriptions              PushSubscription[]
+  nativePushTokens               NativePushToken[]
+  passkeys                       Passkey[]
+  deviceCategories               DeviceCategory[]
+  aiKeyholderConfig              AiKeyholderConfig?
+  aiKeyholderMessages            AiKeyholderMessage[]
+  generatedMedia                 GeneratedMedia[]
+  keyholderTasks                 KeyholderTask[]
+  boxEvents                      BoxEvent[]
+  boxStatuses                    BoxStatus[]
+  keyholderNotes                 KeyholderNote[]
+  keyholderActionLogs            KeyholderActionLog[]
+  healthHolds                    HealthHold[]
+  recurringContexts              RecurringContext[]
+  appointments                   Appointment[]
+  sessionAnforderungen           SessionAnforderung[]
+  tagesformen                    Tagesform[]
+  belohnungGutschriften          OrgasmusBelohnungGutschrift[]
+  belohnungEvents                BelohnungEvent[]
+  zufallsPools                   ZufallsPool[]
+  zufallsZiehungen               ZufallsZiehung[]
+  airlockLocks                   AirlockLock[]                 @relation("AirlockAssignments")
+  autoInspectionPlannedFor       DateTime?
+  tasks                          Task[]
+  adminPasswordChanges           AdminPasswordChange[]         @relation("AdminPasswordChangeSub")
+  receivedMessages               Message[]
+  messageReads                   MessageRead[]
 }
 
 // Belohnungs-Ökonomie: Ereignis-Protokoll (Kontoauszug des Guthabens). Jede Bewegung wird hier
@@ -154,8 +159,8 @@ model OrgasmusBelohnungGutschrift {
   id         String   @id @default(cuid())
   userId     String
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  categoryId String?  // null = KG
-  periodType String   // day | week | month | year
+  categoryId String? // null = KG
+  periodType String // day | week | month | year
   periodKey  String
   createdAt  DateTime @default(now())
 
@@ -181,22 +186,22 @@ model HealthHold {
 // Wiederkehrender Wochen-Kontext (§8): HO-Tage, Bürotage, Pilates-Slots … damit der Keyholder
 // Anker/Kontrollen ums echte Leben plant. weekday: 0=So .. 6=Sa. deviceFree = Slot ist gerätefrei.
 model RecurringContext {
-  id         String   @id @default(cuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  label      String // z.B. "Home Office", "Pilates"
-  weekday    Int // 0=So .. 6=Sa
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label          String // z.B. "Home Office", "Pilates"
+  weekday        Int // 0=So .. 6=Sa
   // null = jede Woche (Default, bisheriges Verhalten). 1..5 = n-ter <weekday> im Monat.
   // -1 = letzter <weekday> im Monat (z.B. "erster Mittwoch" = weekday:3, ordinal:1).
-  ordinal    Int?
+  ordinal        Int?
   // Optimistic-Concurrency-Token: inkrementiert bei jedem MCP-Edit (siehe writeFramework).
-  version    Int      @default(1)
-  deviceFree Boolean  @default(false)
+  version        Int      @default(1)
+  deviceFree     Boolean  @default(false)
   // JSON-Array von Ausnahme-Daten ("YYYY-MM-DD"), an denen der Slot NICHT stattfindet (iCalendar-
   // EXDATE-Modell). null/leer = keine Ausnahmen. Der Planer wendet sie beim Aufzählen der Termine an.
   exclusionDates String?
-  note       String?
-  createdAt  DateTime @default(now())
+  note           String?
+  createdAt      DateTime @default(now())
 
   @@index([userId])
 }
@@ -295,32 +300,33 @@ model NoteRef {
 // KG-specific features (photo-pflicht, seal-detection, kontrollen, reinigung).
 // All other categories are user-defined and have plain wear-tracking only.
 model DeviceCategory {
-  id              String   @id @default(cuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name            String // user-editable display name
-  slug            String // stable identifier; "kg" for built-in
-  color           String // CSS-variable suffix (e.g. "cat-steel", "cat-plum")
-  icon            String // lucide-react icon name (e.g. "Lock", "Crown")
-  isBuiltIn       Boolean  @default(false) // true only for KG; cannot be deleted
-  trackingEnabled Boolean  @default(true) // when false: inventory-only, no wear sessions
-  requirePhoto    Boolean  @default(false) // when true: WEAR_BEGIN entries require an imageUrl
-  allowVorgaben   Boolean  @default(true)  // when false: category cannot be linked to TrainingVorgaben
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name              String // user-editable display name
+  slug              String // stable identifier; "kg" for built-in
+  color             String // CSS-variable suffix (e.g. "cat-steel", "cat-plum")
+  icon              String // lucide-react icon name (e.g. "Lock", "Crown")
+  isBuiltIn         Boolean  @default(false) // true only for KG; cannot be deleted
+  trackingEnabled   Boolean  @default(true) // when false: inventory-only, no wear sessions
+  requirePhoto      Boolean  @default(false) // when true: WEAR_BEGIN entries require an imageUrl
+  allowVorgaben     Boolean  @default(true) // when false: category cannot be linked to TrainingVorgaben
   // Session-Kategorie (z.B. Dildo): kein Wear-Tracking, stattdessen zeitlich begrenzte Training-Sitzungen.
-  isSessionCategory  Boolean @default(false) // when true: SESSION_BEGIN/SESSION_END statt WEAR_BEGIN/END
-  maxSessionMinutes  Int     @default(30)    // Maximale Sitzungsdauer in Minuten
-  requiresVideo      Boolean @default(false) // when true: SESSION_END braucht videoUrl
-  orgasmusZiel       String  @default("KEINE") // KEINE | ERFORDERLICH | VERBOTEN
+  isSessionCategory Boolean  @default(false) // when true: SESSION_BEGIN/SESSION_END statt WEAR_BEGIN/END
+  maxSessionMinutes Int      @default(30) // Maximale Sitzungsdauer in Minuten
+  requiresVideo     Boolean  @default(false) // when true: SESSION_END braucht videoUrl
+  orgasmusZiel      String   @default("KEINE") // KEINE | ERFORDERLICH | VERBOTEN
   // Körperregion für die anatomische Exklusivität: zwei Geräte derselben Region (!= "other") können
   // nicht gleichzeitig aktiv sein (z.B. Anal-Plug + Anal-Dildo-Session). "other" = keine Einschränkung.
-  region          String   @default("other") // genital | anal | other
-  sortOrder       Int      @default(0)
-  createdAt       DateTime @default(now())
+  region            String   @default("other") // genital | anal | other
+  sortOrder         Int      @default(0)
+  createdAt         DateTime @default(now())
 
-  devices  Device[]
-  vorgaben TrainingVorgabe[]
+  devices                 Device[]
+  vorgaben                TrainingVorgabe[]
   verschlussAnforderungen VerschlussAnforderung[]
   sessionAnforderungen    SessionAnforderung[]
+  taskRequirements        TaskRequirement[]
 
   @@unique([userId, slug])
   @@index([userId])
@@ -396,20 +402,20 @@ model KontrollAnforderung {
   withdrawnAt              DateTime?
   // Zeitversetzte Auslösung: null = sofort. Gesetzt = geplant; bis dahin für den Sub
   // unsichtbar, Benachrichtigung + Frist starten erst dann (Poller verschickt sie).
-  wirksamAb        DateTime?
-  benachrichtigtAt DateTime? // wann Mail/Push raus ging (sofort beim Anlegen, oder per Poller)
-  auto        Boolean   @default(false) // automatisch generiert (Auto-Kontrollen); manuelle = false
-  requireCode Boolean   @default(true)  // false = kein Frische-Code in E-Mail/Formular; nur Foto (ggf. mit Siegel)
-  device      String?   // "CAGE" | "PLUG" | null (null = KG-Kontrolle Legacy ohne Device-Angabe)
-  entryId     String?   @unique
-  entry       Entry?    @relation("KontrolleEntry", fields: [entryId], references: [id], onDelete: SetNull)
+  wirksamAb                DateTime?
+  benachrichtigtAt         DateTime? // wann Mail/Push raus ging (sofort beim Anlegen, oder per Poller)
+  auto                     Boolean   @default(false) // automatisch generiert (Auto-Kontrollen); manuelle = false
+  requireCode              Boolean   @default(true) // false = kein Frische-Code in E-Mail/Formular; nur Foto (ggf. mit Siegel)
+  device                   String? // "CAGE" | "PLUG" | null (null = KG-Kontrolle Legacy ohne Device-Angabe)
+  entryId                  String?   @unique
+  entry                    Entry?    @relation("KontrolleEntry", fields: [entryId], references: [id], onDelete: SetNull)
   // Kontroll-Eskalation: benachrichtigtReminderAt = Uhr-Anker für Stufe 2; autoMarkedRemovedAt =
   // Stufe 2 ausgelöst; autoMarkedEntryId = EIGENE FK zur dabei erzeugten OEFFNEN-Entry (nicht entryId,
   // die exklusiv für die erfüllende PRUEFUNG reserviert bleibt). Siehe inspectionEscalationService.ts.
   benachrichtigtReminderAt DateTime?
-  autoMarkedRemovedAt DateTime?
-  autoMarkedEntryId   String?   @unique
-  autoMarkedEntry     Entry?    @relation("KontrolleAutoMarkedEntry", fields: [autoMarkedEntryId], references: [id], onDelete: SetNull)
+  autoMarkedRemovedAt      DateTime?
+  autoMarkedEntryId        String?   @unique
+  autoMarkedEntry          Entry?    @relation("KontrolleAutoMarkedEntry", fields: [autoMarkedEntryId], references: [id], onDelete: SetNull)
 
   @@index([userId, withdrawnAt])
   @@index([userId, entryId])
@@ -418,9 +424,9 @@ model KontrollAnforderung {
 }
 
 model VerschlussAnforderung {
-  id               String    @id @default(cuid())
+  id               String          @id @default(cuid())
   userId           String
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   art              String // "ANFORDERUNG" | "SPERRZEIT"
   nachricht        String?
   endetAt          DateTime? // ANFORDERUNG: Frist zum Einschliessen; SPERRZEIT: darf nicht öffnen bis
@@ -428,13 +434,13 @@ model VerschlussAnforderung {
   sperrEndetAt     DateTime? // ANFORDERUNG only: absolutes Sperr-Ende (Wanduhr). Wird bei Fulfill 1:1 als SPERRZEIT.endetAt übernommen – unabhängig vom tatsächlichen Verschlusszeitpunkt (Spät-Verschluss verschiebt das Ende NICHT). Alternative zu dauerH.
   deviceId         String?
   device           Device?         @relation(fields: [deviceId], references: [id], onDelete: SetNull)
-  deviceCategoryId String?         // null = KG (backward compat); non-null = Plug oder andere non-KG Kategorie
+  deviceCategoryId String? // null = KG (backward compat); non-null = Plug oder andere non-KG Kategorie
   deviceCategory   DeviceCategory? @relation(fields: [deviceCategoryId], references: [id], onDelete: SetNull)
-  airlockCode      String?         // Airlock-NFC: von der Keyholderin vorgegebenes Lock (Code) aus dem Pool des Subs — der Sub muss beim Verschluss genau dieses per NFC scannen. null = keine Vorgabe (Sub waehlt aus seinem Pool, der Scan entscheidet).
-  fotoPflicht      Boolean?        // Wear-Anforderung: von der Keyholderin gesetzte Foto-Pflicht (null = Kategorie-Default)
-  reinigungErlaubt Boolean   @default(false) // SPERRZEIT: Reinigungsöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
-  toiletteErlaubt  Boolean   @default(false) // SPERRZEIT: Toilettenöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
-  createdAt        DateTime  @default(now())
+  airlockCode      String? // Airlock-NFC: von der Keyholderin vorgegebenes Lock (Code) aus dem Pool des Subs — der Sub muss beim Verschluss genau dieses per NFC scannen. null = keine Vorgabe (Sub waehlt aus seinem Pool, der Scan entscheidet).
+  fotoPflicht      Boolean? // Wear-Anforderung: von der Keyholderin gesetzte Foto-Pflicht (null = Kategorie-Default)
+  reinigungErlaubt Boolean         @default(false) // SPERRZEIT: Reinigungsöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
+  toiletteErlaubt  Boolean         @default(false) // SPERRZEIT: Toilettenöffnung bricht die Sperre nicht. ANFORDERUNG mit dauerH: wird auf erzeugte SPERRZEIT vererbt.
+  createdAt        DateTime        @default(now())
   fulfilledAt      DateTime? // ANFORDERUNG: gesetzt wenn User VERSCHLUSS erstellt
   withdrawnAt      DateTime?
   // WARUM withdrawnAt gesetzt wurde. Ohne dieses Feld sah eine vom Sub aufgebrochene Sperrzeit
@@ -461,18 +467,18 @@ model SessionAnforderung {
   user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   deviceCategoryId String
   deviceCategory   DeviceCategory @relation(fields: [deviceCategoryId], references: [id], onDelete: Cascade)
-  nachricht        String?        // optionale Anweisung der Keyholderin
-  endetAt          DateTime?      // Frist; null = keine Deadline
-  minMinuten       Int?           // Mindest-/Zieldauer der Session in Minuten (null = keine)
+  nachricht        String? // optionale Anweisung der Keyholderin
+  endetAt          DateTime? // Frist; null = keine Deadline
+  minMinuten       Int? // Mindest-/Zieldauer der Session in Minuten (null = keine)
   requireVideo     Boolean        @default(false) // Nachweis (Video/Foto) beim Beenden verpflichtend
   orgasmusZiel     String         @default("KEINE") // KEINE | ERFORDERLICH | VERBOTEN — pro Anforderung (überschreibt Kategorie-Standard)
   orgasmusRuiniert Boolean        @default(false) // nur bei orgasmusZiel=ERFORDERLICH: der geforderte Orgasmus muss ruiniert sein
-  wirksamAb        DateTime?      // geplante Auslösung; bis dahin inaktiv/unsichtbar
-  deviceId         String?        // bestimmtes Gerät der Kategorie (null = beliebiges Gerät)
+  wirksamAb        DateTime? // geplante Auslösung; bis dahin inaktiv/unsichtbar
+  deviceId         String? // bestimmtes Gerät der Kategorie (null = beliebiges Gerät)
   istStrafe        Boolean        @default(false) // als Strafe angeordnet → strengere Eskalation bei Nicht-Erfüllung
-  fulfilledAt      DateTime?      // gesetzt wenn SESSION_END die Anforderung erfüllt
+  fulfilledAt      DateTime? // gesetzt wenn SESSION_END die Anforderung erfüllt
   withdrawnAt      DateTime?
-  sessionEndId     String?        // Entry-ID des erfüllenden SESSION_END
+  sessionEndId     String? // Entry-ID des erfüllenden SESSION_END
   sessionEnd       Entry?         @relation("SessionAnforderungEntry", fields: [sessionEndId], references: [id], onDelete: SetNull)
   createdAt        DateTime       @default(now())
 
@@ -544,26 +550,29 @@ model RateLimit {
 // verworfen (status=DISMISSED) | bestraft (status=PUNISHED). Identität des Vergehens
 // über (offenseType, refId); refId ist die Entry-/Kontrolle-/Anforderungs-id.
 model StrafeRecord {
-  id            String    @id @default(cuid())
-  userId        String
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  offenseType   String // "KONTROLLANFORDERUNG" | "OEFFNEN_ENTRY" | "AUTO_ENTFERNT" | "VERSCHLUSS_ANFORDERUNG" | "REINIGUNG_LIMIT" | "FALSCHES_GERAET" | "ORGASMUS_ANWEISUNG" | "REINIGUNG_NICHT_VERSCHLOSSEN" | "AI_KEYHOLDER"
-  refId         String    @unique
-  bestraftDatum DateTime // Urteilszeitpunkt (bei PUNISHED = Strafdatum)
-  notiz         String?
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  offenseType     String // "KONTROLLANFORDERUNG" | "OEFFNEN_ENTRY" | "AUTO_ENTFERNT" | "VERSCHLUSS_ANFORDERUNG" | "REINIGUNG_LIMIT" | "FALSCHES_GERAET" | "ORGASMUS_ANWEISUNG" | "REINIGUNG_NICHT_VERSCHLOSSEN" | "AI_KEYHOLDER"
+  refId           String    @unique
+  bestraftDatum   DateTime // Urteilszeitpunkt (bei PUNISHED = Strafdatum)
+  notiz           String?
   // Urteils-Status + Audit
-  status        String    @default("PUNISHED") // "PUNISHED" | "DISMISSED"
-  reason        String? // DAS eine Freitextfeld: Strafe-Text bei PUNISHED, optionaler Grund bei DISMISSED
-  judgedBy      String? // "ai" | "admin" | "system"
-  erledigtAt    DateTime? // nur PUNISHED: null = Strafe offen, gesetzt = erledigt (Loop geschlossen)
+  status          String    @default("PUNISHED") // "PUNISHED" | "DISMISSED"
+  reason          String? // DAS eine Freitextfeld: Strafe-Text bei PUNISHED, optionaler Grund bei DISMISSED
+  judgedBy        String? // "ai" | "admin" | "system"
+  erledigtAt      DateTime? // nur PUNISHED: null = Strafe offen, gesetzt = erledigt (Loop geschlossen)
   // Erledigungs-Meldung durch den Sub (Loop: offen → gemeldet → bestätigt/abgelehnt)
   gemeldetAt      DateTime? // Sub hat die Strafe als erledigt gemeldet → wartet auf Prüfung
-  nachweisUrl     String?   // optionales Nachweis-Foto zur Meldung
-  erledigungNotiz String?   // optionale Notiz des Subs zur Meldung
-  ablehnungGrund  String?   // gesetzt bei abgelehnter Meldung (gemeldetAt wird geleert)
-  createdAt     DateTime @default(now())
+  nachweisUrl     String? // optionales Nachweis-Foto zur Meldung
+  erledigungNotiz String? // optionale Notiz des Subs zur Meldung
+  ablehnungGrund  String? // gesetzt bei abgelehnter Meldung (gemeldetAt wird geleert)
+  createdAt       DateTime  @default(now())
+  taskId          String?
+  task            Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
 
   @@index([userId])
+  @@index([taskId])
 }
 
 model Device {
@@ -576,10 +585,10 @@ model Device {
   description   String?
   imageUrl      String?
   purchasePrice Float?
-  currency      String?   // "CHF" | "EUR" | "USD"
+  currency      String? // "CHF" | "EUR" | "USD"
   // Größen-Reihenfolge innerhalb der Kategorie (z.B. Plug): kleiner = kleiner. Für "nächstgrößeres Gerät" (Strafe).
-  sortOrder     Int       @default(0)
-  createdAt     DateTime  @default(now())
+  sortOrder     Int             @default(0)
+  createdAt     DateTime        @default(now())
   archivedAt    DateTime? // Soft-delete: null = active, set = archived
 
   // ── Geräte-Metadaten für Keyholder-Entscheidungen (MCP-only, additiv) ──
@@ -593,12 +602,13 @@ model Device {
   healthFlags        String? // JSON string[] — Druckstellen, scheuert, rutscht ...
   retentionNotes     String? // z.B. "njoy: rutscht beim Entspannen"
   // Optimistic-Concurrency-Token: inkrementiert bei jedem MCP-Edit (siehe writeFramework).
-  version            Int     @default(1)
+  version            Int      @default(1)
 
   entries                 Entry[]
   verschlussAnforderungen VerschlussAnforderung[]
   boxEvents               BoxEvent[]
   referenceImages         DeviceReferenceImage[]
+  taskRequirements        TaskRequirement[]
 
   @@index([userId, archivedAt])
   @@index([categoryId])
@@ -646,34 +656,34 @@ model BoxEvent {
 // gepusht. Zeigt den Box-Status im Tracker (statt zweiter App). pendingCommand = vom Sub
 // im Tracker ausgelöste Aktion, die Heimdall beim nächsten Sync zieht & anwendet.
 model BoxStatus {
-  id                     String    @id @default(cuid())
-  userId                 String
-  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  boxId                  String // Heimdall-Geräte-id (stabil)
-  name                   String
-  locked                 Boolean   @default(false)
+  id                    String    @id @default(cuid())
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  boxId                 String // Heimdall-Geräte-id (stabil)
+  name                  String
+  locked                Boolean   @default(false)
   // Physisches IST der frischen Sync-Meldung — `locked` ist das SOLL. Seit dem Präsenz-Guard
   // (FW 0.2.33) kann die Box offen stehen, obwohl sie zu sein soll. null = Alt-Zeile (Fallback SOLL).
-  reportedLocked         Boolean?
-  lockUntil              DateTime? // effektive Sperre (eigene + Tracker-Sperrzeit, gekappt)
-  simpleLock             Boolean   @default(false)
-  keyholderLocked        Boolean   @default(false) // durch Tracker-Sperrzeit gehalten (Sub kann lokal nicht öffnen)
-  battery                Int?
-  charging               Boolean?
-  boltPos                String?
-  fwVersion              String?
-  lastSyncAt             DateTime?
-  offlineOpenHours       Int? // Offline-Failsafe-Schwelle der Box → für staleLock/hardwareEnforced im MCP
+  reportedLocked        Boolean?
+  lockUntil             DateTime? // effektive Sperre (eigene + Tracker-Sperrzeit, gekappt)
+  simpleLock            Boolean   @default(false)
+  keyholderLocked       Boolean   @default(false) // durch Tracker-Sperrzeit gehalten (Sub kann lokal nicht öffnen)
+  battery               Int?
+  charging              Boolean?
+  boltPos               String?
+  fwVersion             String?
+  lastSyncAt            DateTime?
+  offlineOpenHours      Int? // Offline-Failsafe-Schwelle der Box → für staleLock/hardwareEnforced im MCP
   // Akku-Failsafe-Schwelle in Prozent: darunter öffnet die Box AUTONOM. Kommt aus demselben
   // Heimdall-Push wie `offlineOpenHours` — der Tracker soll die Firmware-Konstante nicht ein
   // drittes Mal kopieren. (Heimdall spiegelt sie seinerseits; die Box selbst meldet sie nicht.)
   // null = Alt-Zeile oder Heimdall vor diesem Feld → keine Akku-Vorwarnung (still, nicht geraten).
-  lowBatteryOpenPercent  Int?
+  lowBatteryOpenPercent Int?
   // Aus einem Eintrag abgeleitetes, noch nicht vollzogenes Kommando. Kein Reinigungs-Kommando und
   // keine Frist: die Box öffnet auf "open" und bleibt offen, bis ein "lock" kommt.
-  pendingCommand         String? // "lock" | "open"
-  pendingCommandAt       DateTime?
-  updatedAt              DateTime  @updatedAt
+  pendingCommand        String? // "lock" | "open"
+  pendingCommandAt      DateTime?
+  updatedAt             DateTime  @updatedAt
 
   @@unique([userId, boxId])
   @@index([userId])
@@ -719,34 +729,34 @@ model Entry {
   // Geräte-Check der Kontrolle (PRUEFUNG): wird das verschlossene Gerät im Foto erkannt?
   // null = nicht geprüft · "ok" = passendes Gerät sichtbar · "wrong" = anderes Gerät · "missing" = kein Gerät.
   // Advisory (Keyholder sieht es), blockiert nicht. Server-seitig per Vision gesetzt.
-  deviceCheck         String?
-  deviceCheckNote     String?              // erkanntes Gerät (Name) oder null, wenn keins erkannt
-  deviceCheckExpected String?              // erwartetes (verschlossenes) Gerät zur Check-Zeit
+  deviceCheck                   String?
+  deviceCheckNote               String? // erkanntes Gerät (Name) oder null, wenn keins erkannt
+  deviceCheckExpected           String? // erwartetes (verschlossenes) Gerät zur Check-Zeit
   // OEFFNEN/WEAR_END-Einträge (Reinigung/Toilette): war eine Erektion vorhanden? → wird im Strafbuch erkannt (kein Auto-Urteil).
-  erektionGemeldet    Boolean              @default(false)
+  erektionGemeldet              Boolean              @default(false)
   // VERSCHLUSS-Einträge: wurde ein anderes Gerät verwendet als die Anforderung vorgab? → wird im Strafbuch erkannt (kein Auto-Urteil).
-  falschesGeraet      Boolean              @default(false)
+  falschesGeraet                Boolean              @default(false)
   // SESSION_END-Einträge: Ziel (analer Orgasmus) erreicht? + Video-Beweis
-  sessionGoalAchieved Boolean?
-  videoUrl            String?
+  sessionGoalAchieved           Boolean?
+  videoUrl                      String?
   // PAUSE_BEGIN/PAUSE_END-Einträge: welches Gerät ist pausiert? "CAGE" | "PLUG"
-  pauseDevice         String?
-  deviceId            String?
-  device              Device?              @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  pauseDevice                   String?
+  deviceId                      String?
+  device                        Device?              @relation(fields: [deviceId], references: [id], onDelete: SetNull)
   // Wer/was diesen Eintrag angelegt hat. "system" = automatisch erzeugte OEFFNEN-Entry der
   // Kontroll-Eskalation (Stufe 2), siehe inspectionEscalationService.ts.
-  source              String               @default("user") // "user" | "system"
+  source                        String               @default("user") // "user" | "system"
   // Airlock-NFC (nur VERSCHLUSS): wurde dieser Verschluss mit einem NFC-Airlock erfasst? Dann steht
   // hier die 5-stellige Airlock-Nummer + die beim Verschliessen validierte kanonische Tag-UID. Die
   // UID ist der Anker für die spätere Kontrolle (der gescannte Tag MUSS dieselbe UID liefern → die
   // Handschrift-Code-Abfrage entfällt). null = normaler Verschluss ohne Airlock. Siehe docs/AIRLOCK_NFC.md.
-  airlockCode         String?
-  airlockUid          String?
+  airlockCode                   String?
+  airlockUid                    String?
   kontrollAnforderungAutoMarked KontrollAnforderung? @relation("KontrolleAutoMarkedEntry")
-  createdAt           DateTime             @default(now())
-  kontrollAnforderung  KontrollAnforderung?  @relation("KontrolleEntry")
-  orgasmusAnforderung  OrgasmusAnforderung?  @relation("OrgasmusAnforderungEntry")
-  sessionAnforderungen SessionAnforderung[]  @relation("SessionAnforderungEntry")
+  createdAt                     DateTime             @default(now())
+  kontrollAnforderung           KontrollAnforderung? @relation("KontrolleEntry")
+  orgasmusAnforderung           OrgasmusAnforderung? @relation("OrgasmusAnforderungEntry")
+  sessionAnforderungen          SessionAnforderung[] @relation("SessionAnforderungEntry")
 
   @@index([userId])
   @@index([userId, type, startTime(sort: Desc)])
@@ -869,77 +879,77 @@ model OAuthRefreshToken {
 // Per-user configuration for the AI keyholder agent.
 // One row per user; created on first save in the admin settings.
 model AiKeyholderConfig {
-  id                   String   @id @default(cuid())
-  userId               String   @unique
-  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  enabled              Boolean  @default(false)
+  id                       String     @id @default(cuid())
+  userId                   String     @unique
+  user                     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  enabled                  Boolean    @default(false)
   // LLM backend
-  llmProvider          String   @default("anthropic") // "anthropic" | "ollama"
-  ollamaBaseUrl        String?  // e.g. "http://192.168.1.10:11434"
-  ollamaModel          String?  // e.g. "qwen2.5:32b"
+  llmProvider              String     @default("anthropic") // "anthropic" | "ollama"
+  ollamaBaseUrl            String? // e.g. "http://192.168.1.10:11434"
+  ollamaModel              String? // e.g. "qwen2.5:32b"
   // Intensität 1–5: steuert Häufigkeit proaktiver Aktionen + Härte/Ton (NICHT die Regeln). 3 = ausgewogen.
-  intensity            Int      @default(3)
+  intensity                Int        @default(3)
   // Beziehungs-/Stimmungsstand 0-100 (50 = neutral). Faerbt Ton + Neigung der KI (nie die Regeln);
   // zerfaellt ueber die Zeit Richtung neutral. moodUpdatedAt = Zeitpunkt der letzten Aenderung.
-  moodScore            Int      @default(50)
-  moodUpdatedAt        DateTime?
+  moodScore                Int        @default(50)
+  moodUpdatedAt            DateTime?
   // Drossel fuer Stimmungs-Ereignisse: Band ("high"/"low") + Zeitpunkt des letzten Ereignisses.
-  lastMoodEventBand    String?
-  lastMoodEventAt      DateTime?
+  lastMoodEventBand        String?
+  lastMoodEventAt          DateTime?
   // Zeitpunkt des letzten Wochenrueckblicks (Drossel, ~woechentlich).
-  lastWeeklyReviewAt   DateTime?
+  lastWeeklyReviewAt       DateTime?
   // Vision: Fotos des Subs werden dem Modell wirklich mitgeschickt (nur mit vision-fähigem Modell).
-  visionEnabled        Boolean  @default(true)
+  visionEnabled            Boolean    @default(true)
   // Persona / instructions
-  systemPrompt         String?  // dominant persona + rules for the AI keyholder
-  currentPersonaId     String?  // FK to AiPersona (set when a persona template is applied; cleared on manual edit)
-  currentPersona       AiPersona? @relation(fields: [currentPersonaId], references: [id], onDelete: SetNull)
+  systemPrompt             String? // dominant persona + rules for the AI keyholder
+  currentPersonaId         String? // FK to AiPersona (set when a persona template is applied; cleared on manual edit)
+  currentPersona           AiPersona? @relation(fields: [currentPersonaId], references: [id], onDelete: SetNull)
   // Proaktive Check-ins (reine Sozial-Nachrichten ohne Aktion): Mindestabstand in Stunden zwischen
   // zwei Check-ins; 0 = deaktiviert. Getrennt von der Lauf-Kadenz (randomInterval*). Erlaubte Werte
   // im Admin-Dropdown: 0/3/6/12/24. `lastCheckinAt` = Zeitstempel des letzten Check-ins (Drossel).
-  proactiveCheckinMinHours Int   @default(24)
-  lastCheckinAt        DateTime?
+  proactiveCheckinMinHours Int        @default(24)
+  lastCheckinAt            DateTime?
   // Medien-Backend: "comfyui" (self-hosted) | "novita" (gehostete API). API-Key verschluesselt (encrypt.ts).
-  mediaProvider        String   @default("comfyui")
-  mediaApiKeyEnc       String?
-  mediaModelName       String?
+  mediaProvider            String     @default("comfyui")
+  mediaApiKeyEnc           String?
+  mediaModelName           String?
   // Dediziertes LLM NUR zum Schreiben der Bild-Prompts (getrennt vom Chat-LLM). "inherit" =
   // wie llmProvider; "ollama" = lokales, unzensiertes Modell (schreibt NSFW-Prompts ungefiltert).
-  mediaLlmProvider     String   @default("inherit") // "inherit" | "anthropic" | "ollama"
-  mediaLlmBaseUrl      String?  // Ollama-Endpoint fuer Media-Prompts (Fallback: ollamaBaseUrl)
-  mediaLlmModel        String?  // Modellname fuer Media-Prompts (Fallback: ollamaModel)
+  mediaLlmProvider         String     @default("inherit") // "inherit" | "anthropic" | "ollama"
+  mediaLlmBaseUrl          String? // Ollama-Endpoint fuer Media-Prompts (Fallback: ollamaBaseUrl)
+  mediaLlmModel            String? // Modellname fuer Media-Prompts (Fallback: ollamaModel)
   // Charakter-Konsistenz: fester Aussehens-Anker (jedem Bild-Prompt vorangestellt) + fester Seed.
   // Gleicher Anker + gleicher Seed => wiedererkennbare Figur.
-  mediaPersonaAnchor   String?
-  mediaSeed            Int?
+  mediaPersonaAnchor       String?
+  mediaSeed                Int?
   // Profilbild/Avatar der Keyholderin (relativer Pfad unter uploads); wird generiert.
-  avatarPath           String?
+  avatarPath               String?
   // Autonomous action schedule — random interval
-  cronExpression       String?  // legacy / display only; actual scheduling uses randomInterval fields
-  lastRunAt            DateTime?
-  nextRunAt            DateTime? // when the next autonomous run is scheduled
-  randomIntervalMinMin Int?      // minimum wait between runs in minutes (default 15)
-  randomIntervalMinMax Int?      // maximum wait between runs in minutes (default 120)
+  cronExpression           String? // legacy / display only; actual scheduling uses randomInterval fields
+  lastRunAt                DateTime?
+  nextRunAt                DateTime? // when the next autonomous run is scheduled
+  randomIntervalMinMin     Int? // minimum wait between runs in minutes (default 15)
+  randomIntervalMinMax     Int? // maximum wait between runs in minutes (default 120)
   // Anthropic API key override (AES-256-GCM encrypted, see src/lib/encrypt.ts)
   // If set, takes precedence over the ANTHROPIC_API_KEY env var.
-  anthropicApiKeyEnc   String?
+  anthropicApiKeyEnc       String?
   // Media generation (ComfyUI)
-  mediaEnabled         Boolean  @default(false)
-  comfyUiBaseUrl       String?  // e.g. "http://192.168.1.10:8188"
+  mediaEnabled             Boolean    @default(false)
+  comfyUiBaseUrl           String? // e.g. "http://192.168.1.10:8188"
   // JSON array of prompt-theme objects: [{ "theme": "bondage", "weight": 2 }, ...]
-  mediaPromptTemplates String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  mediaPromptTemplates     String?
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
 }
 
 // Chat messages between the user and the AI keyholder.
 // role "system" is used for autonomous-action log entries (not shown in chat, but
 // included as context when the LLM builds its next reply).
 model AiKeyholderMessage {
-  id        String   @id @default(cuid())
+  id        String          @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      String   // "user" | "assistant" | "system"
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String // "user" | "assistant" | "system"
   content   String
   // Optional: message references a piece of generated media (e.g. "hier ist dein Bild")
   mediaId   String?
@@ -947,7 +957,7 @@ model AiKeyholderMessage {
   // Optional: vom Sub vorgelegtes/hochgeladenes Bild dieser Nachricht (Vision) — Dateiname unter
   // data/uploads. Damit bleibt ein gezeigtes Foto im Chat-Verlauf sichtbar UND fuer die KI ladbar.
   imageUrl  String?
-  createdAt DateTime @default(now())
+  createdAt DateTime        @default(now())
 
   // Composite index covers the most common query: messages by user + role filter + time order
   @@index([userId, role, createdAt(sort: Desc)])
@@ -955,38 +965,38 @@ model AiKeyholderMessage {
 
 // Images and videos pre-generated by ComfyUI for the AI keyholder to assign as tasks.
 model GeneratedMedia {
-  id               String   @id @default(cuid())
-  userId           String
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mediaType        String   // "image" | "video"
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaType       String // "image" | "video"
   // "queued"      → waiting for a free generation slot
   // "generating"  → ComfyUI job submitted, polling for result
   // "ready"       → file saved, not yet shown to user
   // "assigned"    → linked to a KeyholderTask
   // "failed"      → ComfyUI returned an error
-  status           String   @default("queued")
-  prompt           String
-  negativePrompt   String?
-  width            Int?
-  height           Int?
+  status          String    @default("queued")
+  prompt          String
+  negativePrompt  String?
+  width           Int?
+  height          Int?
   // ComfyUI internal prompt_id — used to poll /history/{id} for completion
-  comfyPromptId    String?
+  comfyPromptId   String?
   // Relative path under uploads/ once generation is done
-  filePath         String?
-  assignedAt       DateTime? // set when a KeyholderTask is created from this media
-  failedReason     String?
+  filePath        String?
+  assignedAt      DateTime? // set when a KeyholderTask is created from this media
+  failedReason    String?
   // On-demand delivery: a chat generate_media request sets autoDeliver=true, so the
   // media-poll cron turns this image into a VIEW_MEDIA chat task the moment it is ready
   // (a requested "Wunschbild" appears in the chat without waiting for an autonomous run).
-  autoDeliver      Boolean  @default(false)
-  deliverMessage   String?  // caption shown with the auto-delivered chat task
-  isAvatar         Boolean  @default(false) // true -> on ready, set an avatarPath instead of a chat task
-  seed             Int?     // per-job seed override (falls back to config.mediaSeed)
-  avatarPersonaId  String?  // when set + isAvatar: the ready avatar updates this persona (not the user config)
-  createdAt        DateTime @default(now())
+  autoDeliver     Boolean   @default(false)
+  deliverMessage  String? // caption shown with the auto-delivered chat task
+  isAvatar        Boolean   @default(false) // true -> on ready, set an avatarPath instead of a chat task
+  seed            Int? // per-job seed override (falls back to config.mediaSeed)
+  avatarPersonaId String? // when set + isAvatar: the ready avatar updates this persona (not the user config)
+  createdAt       DateTime  @default(now())
 
-  messages         AiKeyholderMessage[]
-  tasks            KeyholderTask[]
+  messages AiKeyholderMessage[]
+  tasks    KeyholderTask[]
 
   @@index([userId, status])
 }
@@ -995,16 +1005,16 @@ model GeneratedMedia {
 // Currently supports VIEW_MEDIA (watch a video / look at an image) but
 // the type field is open for future task types (e.g. WRITE_ESSAY, WEAR_DURATION).
 model KeyholderTask {
-  id             String   @id @default(cuid())
+  id             String          @id @default(cuid())
   userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type           String   // "VIEW_MEDIA" | "WRITE_RESPONSE"
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           String // "VIEW_MEDIA" | "WRITE_RESPONSE"
   // The AI keyholder's message introducing / explaining the task
   message        String
   // Optional media attachment
   mediaId        String?
   media          GeneratedMedia? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
-  assignedAt     DateTime @default(now())
+  assignedAt     DateTime        @default(now())
   dueAt          DateTime?
   // Completion
   completedAt    DateTime?
@@ -1012,7 +1022,7 @@ model KeyholderTask {
   responseText   String?
   // AI keyholder's reaction to the user's response (set after user completes the task)
   aiReactionText String?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime        @default(now())
 
   // Combined index for the open-tasks query: userId + completedAt=null + assignedAt order
   @@index([userId, completedAt, assignedAt(sort: Desc)])
@@ -1027,8 +1037,8 @@ model AiPersona {
   systemPrompt     String
   // Feste Aussehens-Beschreibung dieser Persona (Bild-Anker); beim Uebernehmen -> mediaPersonaAnchor.
   appearance       String?
-  seed             Int?     // fester Seed dieser Persona (Charakter-Konsistenz)
-  avatarPath       String?  // generiertes Profilbild dieser Persona (rel. Pfad unter uploads)
+  seed             Int? // fester Seed dieser Persona (Charakter-Konsistenz)
+  avatarPath       String? // generiertes Profilbild dieser Persona (rel. Pfad unter uploads)
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
   keyholderConfigs AiKeyholderConfig[]
@@ -1037,18 +1047,18 @@ model AiPersona {
 // Tägliche Selbsteinschätzung in 3 BDSM-relevanten Dimensionen (1–5).
 // Pro User und Tag genau ein Eintrag (UPSERT via userId+datum).
 model Tagesform {
-  id         String   @id @default(cuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   // Datum normiert auf Tagesbeginn (UTC-Mitternacht des Tages in User-Zeitzone)
-  datum      DateTime
+  datum     DateTime
   // 1 = kaum / 5 = extrem
-  erregung   Int      // Erregung / Frustration durch Keuschheit
-  koerper    Int      // Körperliches Wohlbefinden / Tragekomfort
-  headspace  Int      // Mentale Verfassung / sub-space-Tiefe
-  notiz      String?  // optionale Freitext-Notiz
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  erregung  Int // Erregung / Frustration durch Keuschheit
+  koerper   Int // Körperliches Wohlbefinden / Tragekomfort
+  headspace Int // Mentale Verfassung / sub-space-Tiefe
+  notiz     String? // optionale Freitext-Notiz
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([userId, datum])
   @@index([userId, datum(sort: Desc)])
@@ -1078,9 +1088,9 @@ model ZufallsPool {
   name        String
   aktiv       Boolean  @default(true)
   triggerType String   @default("MANUAL") // aktuell nur "MANUAL"
-  cooldownMin Int?     // Mindestabstand zwischen zwei Ziehungen (Minuten); null/0 = kein Cooldown
-  maxAddH     Float?   // Obergrenze für TIME_ADD-Stunden EINER Ziehung; null = keine Deckelung
-  createdBy   String   // "admin" | "keyholder" — wer den Pool angelegt hat
+  cooldownMin Int? // Mindestabstand zwischen zwei Ziehungen (Minuten); null/0 = kein Cooldown
+  maxAddH     Float? // Obergrenze für TIME_ADD-Stunden EINER Ziehung; null = keine Deckelung
+  createdBy   String // "admin" | "keyholder" — wer den Pool angelegt hat
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -1093,14 +1103,14 @@ model ZufallsPool {
 // Eine gewichtete Option eines Pools. `outcomeType` bestimmt die Konsequenz, `outcomeJson` trägt die
 // typspezifischen Parameter (siehe zufallService.ts). `weight` ist relativ; die Summe braucht nicht 100.
 model ZufallsOption {
-  id          String  @id @default(cuid())
+  id          String      @id @default(cuid())
   poolId      String
   pool        ZufallsPool @relation(fields: [poolId], references: [id], onDelete: Cascade)
   label       String
-  weight      Int     @default(1)
-  outcomeType String  // ZUFALL_OUTCOME_TYPES
+  weight      Int         @default(1)
+  outcomeType String // ZUFALL_OUTCOME_TYPES
   outcomeJson String?
-  sort        Int     @default(0)
+  sort        Int         @default(0)
 
   @@index([poolId])
 }
@@ -1109,17 +1119,17 @@ model ZufallsOption {
 // eingefroren, damit eine spätere Pool-Änderung die Historie nicht rückwirkend umschreibt.
 // `appliedRefType`/`appliedRefId` zeigen auf die erzeugte Konsequenz (SPERRZEIT, StrafeRecord …).
 model ZufallsZiehung {
-  id             String   @id @default(cuid())
+  id             String      @id @default(cuid())
   userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   poolId         String
   pool           ZufallsPool @relation(fields: [poolId], references: [id], onDelete: Cascade)
   optionId       String
   optionLabel    String
   outcomeType    String
-  drawnBy        String   // "sub" | "keyholder" | "ai" | "system"
-  drawnAt        DateTime @default(now())
-  appliedRefType String?  // z.B. "SPERRZEIT" | "STRAFE" | "ORGASMUS_ANFORDERUNG" | "KEYHOLDER_TASK"
+  drawnBy        String // "sub" | "keyholder" | "ai" | "system"
+  drawnAt        DateTime    @default(now())
+  appliedRefType String? // z.B. "SPERRZEIT" | "STRAFE" | "ORGASMUS_ANFORDERUNG" | "KEYHOLDER_TASK"
   appliedRefId   String?
   detail         String?
 
@@ -1135,8 +1145,8 @@ model ZufallsZiehung {
 model AirlockConfig {
   id        String   @id @default("singleton")
   enabled   Boolean  @default(false)
-  baseUrl   String?  // Basis-URL der erreichbaren Airlock-Instanz (HTTPS), ohne Slash am Ende
-  apiKeyEnc String?  // verschlüsselter AIRLOCK_KG_API_KEY (encrypt.ts). null = kein Key gesetzt
+  baseUrl   String? // Basis-URL der erreichbaren Airlock-Instanz (HTTPS), ohne Slash am Ende
+  apiKeyEnc String? // verschlüsselter AIRLOCK_KG_API_KEY (encrypt.ts). null = kein Key gesetzt
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -1164,25 +1174,196 @@ model AiBackendConfig {
   updatedAt          DateTime @updatedAt
 }
 
-
 // Airlock-NFC: die Sicht des KG-Trackers auf ein einzelnes Lock der Airlock-Instanz + die ZUORDNUNG
 // zu einem Sub. Die Airlock-App kennt nur Codes/Status/UID-Bindung, KEINE Nutzer:innen — welche
 // Person welches aktive Lock trägt, hält allein der KG-Tracker (hier). `status`/`nfcUid` sind ein
 // zwischengespeicherter Spiegel des letzten Airlock-Sync; die Wahrheit bleibt die Airlock-Registry.
 model AirlockLock {
-  id             String    @id @default(cuid())
-  code           String    @unique // 5-stellige Airlock-Nummer
-  nfcUid         String?   // gebundene Tag-UID (kanonisch, Grossbuchstaben), aus dem Airlock-Sync
-  status         String?   // Spiegel des Airlock-Status (reserved|generated|printed|registered|active|retired|voided)
-  assignedUserId String?
-  assignedUser   User?     @relation("AirlockAssignments", fields: [assignedUserId], references: [id], onDelete: SetNull)
-  assignedAt     DateTime? // wann einem Sub zugewiesen
-  releasedAt     DateTime? // wann die Zuweisung aufgehoben/das Lock freigegeben wurde
-  verifiedAt     DateTime? // Sicherheits-Feature: vom Sub per Tag-Scan bestaetigt; null = unverifiziert
-  lastSyncedAt   DateTime? // letzter erfolgreicher Abgleich mit der Airlock-API
+  id                String    @id @default(cuid())
+  code              String    @unique // 5-stellige Airlock-Nummer
+  nfcUid            String? // gebundene Tag-UID (kanonisch, Grossbuchstaben), aus dem Airlock-Sync
+  status            String? // Spiegel des Airlock-Status (reserved|generated|printed|registered|active|retired|voided)
+  assignedUserId    String?
+  assignedUser      User?     @relation("AirlockAssignments", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  assignedAt        DateTime? // wann einem Sub zugewiesen
+  releasedAt        DateTime? // wann die Zuweisung aufgehoben/das Lock freigegeben wurde
+  verifiedAt        DateTime? // Sicherheits-Feature: vom Sub per Tag-Scan bestaetigt; null = unverifiziert
+  lastSyncedAt      DateTime? // letzter erfolgreicher Abgleich mit der Airlock-API
   retireRequestedAt DateTime? // Airlock-NFC: Ablegen hat das Toeten (retired) angefordert. Solange gesetzt und der Server noch nicht retired/voided meldet, zieht der Reconcile den Statuswechsel nach — und der Sync darf das lokal getoetete Lock NICHT auf 'active' zuruecksetzen.
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@index([assignedUserId])
+}
+
+model Task {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title            String
+  description      String?
+  // Bis dahin müssen alle Bedingungen durchgehend gelten. Ohne Bedingungen: Frist zum Erledigen.
+  holdUntil        DateTime
+  // Kulanz zum Anlegen ab Erstellung. Wer erst danach beginnt, hat NICHT durchgehend gehalten und
+  // erfüllt die Aufgabe nicht — sonst wäre „eine Minute vor Schluss alles anlegen" eine Erfüllung.
+  startGraceMin    Int       @default(30)
+  // Als Strafe gestellt? Rein informativ — eine Aufgabe ist KEIN StrafeRecord (der kann per Design
+  // nur an einem bereits erkannten, vergangenen Vergehen hängen).
+  isPunishment     Boolean   @default(false)
+  penaltyReason    String?
+  createdAt        DateTime  @default(now())
+  // Selbstmeldung des Subs. Bei Aufgaben MIT Bedingungen zusätzlich zur Bedingungs-Erfüllung nötig
+  // (der Textteil — „ist die Wohnung sauber?" — ist maschinell nicht prüfbar); ohne Bedingungen IST
+  // sie die Erfüllung.
+  completedAt      DateTime?
+  completionNote   String?
+  withdrawnAt      DateTime?
+  // Wann das Ergebnis gemeldet wurde. Nur ein Versand-Stempel, KEIN Zustand: der Zustand einer
+  // Aufgabe wird immer aus den Einträgen abgeleitet. Ohne ihn meldete der Poller jede Minute neu.
+  resultNotifiedAt DateTime?
+
+  requirements  TaskRequirement[]
+  proofs        TaskProof[]
+  /// Die Urteile, deren Strafe DIESE Aufgabe ist. Eine Liste, kein einzelnes Feld: eine Sammelstrafe
+  /// über mehrere Vergehen soll später ohne Migration möglich sein.
+  strafeRecords StrafeRecord[]
+
+  @@index([userId, withdrawnAt, completedAt])
+  @@index([userId, holdUntil])
+  // Für `processDueTasks` im Minuten-Tick. Der sucht OHNE `userId` — die beiden Indizes darüber
+  // haben ihn als Präfix und sind damit unbrauchbar, die Abfrage lief als vollständiger Tabellen-Scan
+  // plus Sortierung, jede Minute, auf jeder Instanz. `resultNotifiedAt` steht vorn, weil es bei
+  // praktisch jeder Altzeile gesetzt ist: der IS-NULL-Bereich bleibt winzig, egal wie gross die
+  // Tabelle wird.
+  @@index([resultNotifiedAt, holdUntil])
+}
+
+model TaskProof {
+  id          String  @id @default(cuid())
+  taskId      String
+  task        Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  /// Soll-Reihenfolge: die Aufnahmezeiten müssen ihr folgen (Verschluss vor Plug vor Rechnungen).
+  sortOrder   Int     @default(0)
+  /// Was auf dem Bild zu sehen sein muss — Freitext der Keyholderin.
+  description String
+  /// Verlangt einen handschriftlichen Zufallscode im Bild. Nur damit ist der Nachweis maschinell
+  /// entscheidbar; ohne Code geht er zur Sichtung an die Keyholderin.
+  requireCode Boolean @default(false)
+  /// Der geforderte Code. Null, wenn `requireCode` false ist.
+  code        String?
+
+  // ── Einreichung durch den Sub ──
+  imageUrl                   String?
+  /// Aufnahmezeit aus den EXIF-Daten. MASSGEBLICH für die Reihenfolge — die Upload-Zeit wäre
+  /// wertlos, weil dann alle Fotos am Schluss hochgeladen einfach passten. Fehlt sie, ist die
+  /// Reihenfolge nicht prüfbar und der Nachweis geht zur Sichtung.
+  imageExifTime              DateTime?
+  /// Wann eingereicht. Nach `Task.holdUntil` eingereicht zählt NICHT mehr — sonst wäre die Frist
+  /// bedeutungslos.
+  submittedAt                DateTime?
+  /// Ergebnis der Code-Erkennung — DIESELBEN drei Felder wie am `Entry` einer Kontrolle, damit
+  /// `verifyCode.ts`/`toVerifyFailure()` unverändert darauf passen. Ein blosses `Boolean?` hätte den
+  /// Grund weggeworfen, den die Prüfung ohnehin liefert („kein Code im Bild" vs. „falscher Code, es
+  /// stand 41287 da") — und die nächste Etappe hätte ein zweites, paralleles Grund-Schema neben
+  /// `VerifyReason` gebraucht.
+  /// null = nicht geprüft · "ai" = erkannt und passend.
+  verifikationStatus         String?
+  /// `VerifyReason`-Code, wenn NICHT gematcht hat (codeMissing/codeWrong). Sprachneutral.
+  verifikationReason         String?
+  /// Bei `codeWrong`: die abweichend gelesene Nummer.
+  verifikationReasonDetected String?
+
+  // ── Sichtung durch die Keyholderin ──
+  reviewedAt     DateTime?
+  reviewAccepted Boolean?
+  reviewNote     String?
+
+  @@index([taskId, sortOrder])
+}
+
+model TaskRequirement {
+  id         String          @id @default(cuid())
+  taskId     String
+  task       Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  // "WEAR" = Gerät/Kategorie tragen (WEAR_BEGIN..WEAR_END)
+  // "KG_LOCKED" = verschlossen sein (VERSCHLUSS..OEFFNEN) — der KG ist bewusst KEINE Wear-Kategorie,
+  //   ein WEAR_BEGIN darauf wird abgewiesen (prepareWearEntry → WEAR_DEVICE_KG).
+  type       String
+  // WEAR: geforderte Kategorie („irgendein Plug"). SetNull, damit eine gelöschte Kategorie keine
+  // Aufgaben-Historie mitreisst — die Bedingung gilt dann als nicht mehr bewertbar.
+  categoryId String?
+  category   DeviceCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  // Optional das konkrete Gerät („DIESER Knebel"); enger als categoryId und hat Vorrang.
+  deviceId   String?
+  device     Device?         @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  sortOrder  Int             @default(0)
+
+  @@index([taskId])
+  @@index([categoryId])
+  @@index([deviceId])
+}
+
+model Message {
+  id            String @id @default(cuid())
+  // Der Sub, um den es geht — IMMER der Scope-Schlüssel, damit der Rechte-Check exakt der bestehende
+  // ist und kein zweiter Sichtbarkeits-Pfad entsteht.
+  subjectUserId String
+  subject       User   @relation(fields: [subjectUserId], references: [id], onDelete: Cascade)
+
+  // Wer getippt hat: "system" | "keyholder" | "ai" — Vorbild StrafeRecord.judgedBy. WELCHER Keyholder
+  // getippt hat, wird erst interessant, wenn ein Mensch selbst schreibt (Etappe 2) — bis dahin gibt es
+  // für eine Absender-Referenz keinen Schreiber und damit keinen Grund, sie zu führen.
+  senderKind String
+
+  // "sub" = an den Sub · "keyholders" = an dessen Keyholder (erst ab Etappe 2 belegt)
+  audience String
+
+  bodyKey    String?
+  bodyParams String? // JSON als String; SQLite/Prisma 5 kennen kein Json-Feld
+  body       String?
+
+  // Bezug aufs Tracking-Objekt, Muster von NoteRef. Freitexte werden VERLINKT statt kopiert: eine
+  // spätere Korrektur am Straftext wirkt damit rückwirkend richtig, statt zwei Wahrheiten zu erzeugen.
+  refEntityType String?
+  refEntityId   String?
+
+  createdAt DateTime @default(now())
+
+  reads MessageRead[]
+
+  // Der EINE Index, den die Abfragen brauchen: Liste, Zähler und "alle als gelesen" filtern alle
+  // auf (subjectUserId, audience) und sortieren nach createdAt.
+  @@index([subjectUserId, audience, createdAt])
+}
+
+model MessageRead {
+  id        String   @id @default(cuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt    DateTime @default(now())
+
+  @@unique([messageId, userId])
+}
+
+model AdminPasswordChange {
+  id               String    @id @default(cuid())
+  // Der Sub, dessen Sperrzeit lief — Eigentümer des Vergehens, Filter von buildStrafbuch.
+  subUserId        String
+  subUser          User      @relation("AdminPasswordChangeSub", fields: [subUserId], references: [id], onDelete: Cascade)
+  // Das Admin-Konto, dessen Passwort geändert wurde.
+  adminUserId      String
+  adminUsername    String // Abbild zum Zeitpunkt der Änderung — überlebt Umbenennung und Löschung
+  // Weg: "reset_token" (Postfach-Zugriff — der interessante Fall) | "self" | "set_by_other"
+  via              String
+  // Wer die Änderung ausgelöst hat; null beim Token-Weg (keine Sitzung).
+  actorUserId      String?
+  // Die Sperrzeit, die zum Zeitpunkt lief — für die Anzeige, nicht als Fremdschlüssel-Zwang:
+  // sie darf gelöscht werden, ohne das Vergehen mitzunehmen.
+  sperrzeitId      String?
+  sperrzeitEndetAt DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([subUserId, createdAt])
 }

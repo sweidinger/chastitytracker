@@ -30,6 +30,8 @@ interface Props {
   withdrawAction?: ReactNode;
   /** Geräte-Label (z.B. „Cage" / „Plug") — bei mehreren aktiven Kontrollen zur Unterscheidung. */
   deviceLabel?: string | null;
+  /** ZIEL der Kontrolle (Geraete-/Kategoriename), null = KG. Von Tasks#39/DashboardAlerts genutzt. */
+  target?: string | null;
 }
 
 export default function KontrolleBanner({
@@ -44,6 +46,7 @@ export default function KontrolleBanner({
   openLabel,
   withdrawAction,
   deviceLabel,
+  target,
   tz = APP_TZ,
   viewerTz,
 }: Props) {
@@ -84,6 +87,7 @@ export default function KontrolleBanner({
         <p className="text-sm font-bold">
           {overdue ? t("overdueTitle") : (openLabel ?? defaultOpenLabel)}
           {deviceLabel && <span className="ml-1.5 font-semibold opacity-70">· {deviceLabel}</span>}
+          {target && <span className="ml-1.5 font-semibold opacity-70">· {target}</span>}
         </p>
         <p className="text-xs opacity-80">
           {overdue ? t("overduePrefix") : t("untilPrefix")} {deadlineStr}

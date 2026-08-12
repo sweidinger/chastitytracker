@@ -1,4 +1,5 @@
 "use client";
+import { type ReactNode } from "react";
 
 import { AlertTriangle } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -25,6 +26,9 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
   theme = "user",
+  danger = false,
+  loading = false,
+  icon,
 }: {
   open: boolean;
   title: string;
@@ -33,6 +37,12 @@ export default function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
   theme?: "admin" | "user";
+  /** Zerstoerende Aktion: roter Bestaetigen-Knopf. */
+  danger?: boolean;
+  /** Laeuft die Aktion noch: Knopf zeigt Spinner. */
+  loading?: boolean;
+  /** Abweichendes Symbol; Default Warndreieck. */
+  icon?: ReactNode;
 }) {
   const t = useTranslations("common");
   return (
@@ -40,12 +50,14 @@ export default function ConfirmDialog({
       open={open}
       onClose={onCancel}
       title={title}
-      icon={<AlertTriangle size={20} style={{ color: "var(--color-warn)" }} />}
+      icon={icon ?? <AlertTriangle size={20} style={{ color: "var(--color-warn)" }} />}
       iconBg="var(--color-warn-bg)"
       theme={theme}
     >
       <p className="text-sm text-foreground-muted">{message}</p>
-      <Button fullWidth onClick={onConfirm}>{confirmLabel}</Button>
+      <Button variant={danger ? "danger" : "primary"} fullWidth loading={loading} onClick={onConfirm}>
+        {confirmLabel}
+      </Button>
       <Button variant="ghost" fullWidth onClick={onCancel}>{t("cancel")}</Button>
     </ActionModal>
   );

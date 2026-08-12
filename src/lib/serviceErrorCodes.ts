@@ -185,6 +185,34 @@ export const ZUFALL_CODES = [
 ] as const;
 
 /** Every code the service layer can return — the set the i18n parity test iterates. */
+export const TASK_CODES = [
+  "TASK_NOT_FOUND",
+  "TASK_NOT_EDITABLE",
+  "TASK_TITLE_REQUIRED",
+  "TASK_TITLE_TOO_LONG",
+  "TASK_DESCRIPTION_TOO_LONG",
+  "TASK_HOLD_UNTIL_TOO_SOON",
+  "TASK_REQUIREMENT_INVALID",
+  "TASK_REQUIREMENT_KG_CATEGORY",
+  "TASK_DUPLICATE_REQUIREMENT",
+  "TASK_PROOF_INVALID",
+  "TASK_TOO_MANY_PROOFS",
+  "TASK_PROOF_NOT_FOUND",
+  "TASK_PROOF_ALREADY_SUBMITTED",
+  "TASK_PROOF_TOO_LATE",
+  "TASK_PROOF_NOT_SUBMITTED",
+] as const;
+
+// Weitere Upstream-Codes (Ziel-Kontrollen / Geraet / Reinigungsfenster), vom Tasks#39-Port mitgezogen.
+export const PORTED_UPSTREAM_CODES = [
+  "USER_NOT_WEARING",
+  "INSPECTION_TARGET_INVALID",
+  "INSPECTION_DEVICE_NOT_ACTIVE",
+  "DEVICE_INVALID_CODE_REQUIREMENT",
+  "CLEANING_WINDOWS_TOO_MANY",
+  "timeRangeInvalid",
+] as const;
+
 export const SERVICE_ERROR_CODES = [
   ...new Set<string>([
     ...SHARED_SERVICE_CODES,
@@ -198,6 +226,8 @@ export const SERVICE_ERROR_CODES = [
     ...BOX_CODES,
     ...SETTINGS_CODES,
     ...ZUFALL_CODES,
+    ...TASK_CODES,
+    ...PORTED_UPSTREAM_CODES,
   ]),
 ] as readonly string[];
 
@@ -216,4 +246,6 @@ export type ServiceErrorCode =
   | (typeof DEVICE_CODES)[number]
   | (typeof BOX_CODES)[number]
   | (typeof SETTINGS_CODES)[number]
-  | (typeof ZUFALL_CODES)[number];
+  | (typeof ZUFALL_CODES)[number]
+  | (typeof TASK_CODES)[number]
+  | (typeof PORTED_UPSTREAM_CODES)[number];

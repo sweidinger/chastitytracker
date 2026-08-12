@@ -573,3 +573,20 @@ export async function withdrawVerschlussAnforderung(
   if (count > 0) void notifyHeimdallForUserId(userId); // Instant-Push: der Rückzug erreicht eine LIVE Box sofort
   return { ok: true, data: { count, hidden, notified } };
 }
+
+
+// ==== ported from upstream (Tasks #39) ====
+/**
+ * Das Ende der Sperrzeit, die diese Anforderung mitbringt — `null` heisst: sie bringt keine mit.
+ *
+ * Zwei Wege, EINE Regel: ein absolutes Sperr-Ende (`sperrEndetAt`, Wanduhr) gewinnt und bleibt fix,
+ * egal wann die Sperre zustande kommt; sonst zählt `dauerH` ab `abZeitpunkt`. Was dieser Zeitpunkt
+ * ist, entscheidet der Aufrufer und ist der einzige Unterschied zwischen den beiden Wegen, auf denen
+ * eine Sperrzeit entsteht: beim Erfüllen ist es der Verschluss des Subs (`entryFulfilment.ts`), bei
+ * einer terminierten Anforderung, die auf einen bereits verschlossenen Sub trifft, die Auslösung
+ * (`kontrollePoller.ts`) — dort wäre der lange zurückliegende Verschluss der falsche Anker: eine
+ * 24h-Sperre wäre bei einem seit 30h verschlossenen Sub im Moment ihrer Entstehung schon abgelaufen.
+ */
+export function sperrzeitEndeFromRequest(a: LockRequestSperrzeit, abZeitpunkt: Date): Date | null {
+  return a.sperrEndetAt ?? (a.dauerH ? new Date(abZeitpunkt.getTime() + a.dauerH * 60 * 60 * 1000) : null);
+}

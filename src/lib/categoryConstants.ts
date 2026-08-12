@@ -159,3 +159,46 @@ export function wearActionHref(opts: { categoryId: string; active: boolean; admi
   const base = opts.adminUserId ? `/admin/users/${opts.adminUserId}/aktionen` : "/dashboard/new";
   return `${base}/${form}?category=${opts.categoryId}`;
 }
+
+
+// ==== ported from upstream (Tasks #39) ====
+/** Query-Schlüssel für „diese Kategorie ist vorgewählt" — derselbe Name wie in den Trage-Formularen,
+ *  statt eines dritten für dieselbe Sache. An zwei Enden gebraucht (Link setzt ihn, Seite liest ihn):
+ *  als lose Zeichenkette schaltete ein Umbenennen die Vorwahl still ab. */
+export const CATEGORY_QUERY_KEY = "category";
+
+/**
+ * Fehlt dieser Kategorie das Gerät, ohne das sich darin nichts erfassen lässt? (Issue #49)
+ *
+ * Hier zentral, weil Dashboard und Kategorie-Seite dieselbe Frage stellen und sich die Antworten
+ * bereits widersprachen: das Dashboard wies eine Kategorie als unfertig aus, während die Verwaltung
+ * daneben „1 Device" zählte.
+ *
+ * Die Regel ist bewusst VOLLSTÄNDIG — sie beantwortet auch, für wen sie überhaupt gilt, statt das
+ * dem Aufrufer zu überlassen. Eine Bedingung, die per Kommentar an zwei Aufrufstellen erinnert
+ * werden muss, ist genau die Konstruktion, aus der dieses Issue entstanden ist; wer sie vergisst,
+ * bekäme ein plausibles „unfertig" auf dem KG.
+ *
+ * - **KG** bringt sein Gerät nicht über diese Seiten mit.
+ * - **Inventar-Kategorien** (Zeiterfassung aus) sind ohne Gerät leer, aber keine Sackgasse — dort
+ *   wird nichts erfasst.
+ * - `deviceCount` zählt nur NICHT-archivierte Geräte (`COUNTABLE_DEVICES_SELECT`).
+ * - Eine **laufende Session** schliesst „unfertig" aus: Geräte lassen sich mit offener Session
+ *   archivieren, und unter „Plug — läuft seit 14:00" darf nicht „hier lässt sich nichts erfassen"
+ *   stehen.
+ */
+export function categoryNeedsDevice(c: {
+  isBuiltIn: boolean;
+  trackingEnabled: boolean;
+  deviceCount: number;
+  hasActiveSession: boolean;
+}): boolean {
+  return !c.isBuiltIn && c.trackingEnabled && c.deviceCount === 0 && !c.hasActiveSession;
+}
+
+/** Link auf das Geräte-Formular mit vorgewählter Kategorie — der zweite Schritt nach dem Anlegen
+ *  einer Kategorie (Issue #49). Ohne die Vorwahl landet der Nutzer auf einer Liste und muss den
+ *  richtigen Knopf suchen; genau diese Reibung kostet das Onboarding. */
+export function deviceFormHref(categoryId: string): string {
+  return `/dashboard/geraete?${new URLSearchParams({ [CATEGORY_QUERY_KEY]: categoryId })}`;
+}

@@ -504,7 +504,7 @@ function normalizeBuildPairsOptions(
 }
 
 /** Filters entries to the given pair-types, then sorts ascending by startTime. */
-function filterAndSortPairEntries<E extends { type: string; startTime: Date }>(
+export function filterAndSortPairEntries<E extends { type: string; startTime: Date }>(
   entries: E[],
   types: PairTypes,
 ): E[] {
@@ -935,4 +935,18 @@ export function fromDatetimeLocal(local: string | null | undefined, tz = APP_TZ)
   // spring-forward gap (a wall-clock that doesn't exist locally — the result stays a valid instant).
   const candidate = guessUTC - tzOffsetMsAt(guessUTC, tz);
   return new Date(guessUTC - tzOffsetMsAt(candidate, tz));
+}
+
+// ==== ported from upstream (Tasks #39) ====
+/**
+ * Frische 5-stellige Zufalls-Nummer (10000–99999) — der handschriftliche Code, den ein Foto zeigen
+ * muss, damit die Bilderkennung es überhaupt beurteilen kann.
+ *
+ * Hier und nicht im Kontroll-Service, obwohl sie dort entstand: sie hat keinerlei Bezug zur
+ * `KontrollAnforderung` und wird inzwischen von drei fachlich verschiedenen Stellen gebraucht
+ * (Kontrolle, Auto-Kontrolle, Aufgaben-Nachweis). Der Aufgaben-Service zog sich sonst über einen
+ * Einzeiler den gesamten Mail-/Push-Importgraphen des Kontroll-Services herein.
+ */
+export function generateKontrollCode(): string {
+  return String(Math.floor(10000 + Math.random() * 90000));
 }

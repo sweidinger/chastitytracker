@@ -317,3 +317,51 @@ export async function judgeOffense(p: JudgeOffenseParams): Promise<ServiceResult
 
   return { ok: true, data: { status: status === "PUNISHED" ? "punished" : "dismissed", done: false, actionMessage, actionError } };
 }
+
+
+// ==== ported from upstream (Tasks #39) ====
+/**
+ * Bestrafen, indem eine AUFGABE gestellt wird — statt „20 Schläge" als Freitext eine Forderung mit
+ * Frist, deren Erfüllung die App selbst mitbekommt.
+ *
+ * Ein Vorgang, nicht zwei: Aufgabe und Urteil entstehen in derselben Transaktion. Nacheinander
+ * geschrieben liesse ein Abbruch dazwischen eine Strafaufgabe beim Sub stehen, über die nie jemand
+ * geurteilt hat — der Keyholder sähe das Vergehen weiter als offen und bestrafte es ein zweites Mal.
+ *
+ * Die Strafe im Urteil ist der TITEL der Aufgabe. Der Freitext bleibt damit gefüllt, auch wo nur er
+ * gelesen wird (MCP-Strafbuch, Nachricht), und `taskId` trägt die Verbindung für alles Weitere.
+ */
+export async function punishWithTask(
+  p: CreateTaskParams & { refId: string; judgedBy: JudgeOffenseParams["judgedBy"] },
+): Promise<ServiceResult<{ id: string }>> {
+  const now = new Date();
+
+  // Beide Prüfungen stehen VOR der Transaktion: sie lesen nur, und sie kosten zusammen ein Dutzend
+  // Abfragen. Innerhalb hielten sie die einzige SQLite-Verbindung dieser App für ihre ganze Dauer.
+  // Nur über ein aktuell ERKANNTES Vergehen lässt sich urteilen — dieselbe Schranke wie in
+  // `judgeOffense`.
+  const offense = await requireDetectedOffense(p.userId, p.refId, now);
+  if (!offense) return serviceFail(404, "OFFENSE_NOT_FOUND");
+
+  // Die Ablehnung des Formulars (Titel zu lang, Frist zu früh, Gerät fremd) erreicht den Aufrufer
+  // damit direkt, statt aus einem abgebrochenen Vorgang zurückgetragen werden zu müssen.
+  const checked = await checkTask(prisma, { ...p, isPunishment: true });
+  if (!checked.ok) return checked;
+
+  // Was bleibt, sind die zwei Schreibvorgänge, die zusammengehören: die Aufgabe und ihr Urteil.
+  const created = await prisma.$transaction(async (tx) => {
+    const task = await writeTask(tx, checked.data);
+    await writeJudgment(tx, {
+      userId: p.userId, offense, now,
+      status: "PUNISHED", reason: task.title, judgedBy: p.judgedBy, taskId: task.id,
+    });
+    return task;
+  });
+
+  // NACH der Transaktion: eine Mail lässt sich nicht zurückrollen. Und genau eine — die Strafe IST
+  // die Aufgabe, zwei Nachrichten wären zweimal dieselbe Neuigkeit.
+  await notifyUser(p.userId, strafaufgabeNotice(created, p.judgedBy));
+  markLastAction();
+
+  return { ok: true, data: { id: created.id } };
+}

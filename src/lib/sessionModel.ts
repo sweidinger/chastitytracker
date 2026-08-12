@@ -421,3 +421,36 @@ export function wearHourPairsByCategory(sessions: Session[], now: Date = new Dat
   for (const [categoryId, pairs] of byCategory) byCategory.set(categoryId, mergeWearPairs(pairs));
   return byCategory;
 }
+
+
+// ==== ported from upstream (Tasks #39) ====
+/**
+ * Dieselben Intervalle JE GERÄT — für Sichten, die ein BESTIMMTES Gerät meinen statt seiner
+ * Kategorie (heute: die Geräte-Bedingung einer Aufgabe).
+ *
+ * Zugerechnet wird über {@link segmentsByDevice}, also nach dem MASSGEBLICHEN Gerät
+ * (`deviceEffective`) und über ALLE Segmente — dieselbe Regel wie `deviceBreakdown` und
+ * `device_stats`. Bei WEAR-Sessions fällt das heute mit „Gerät des Kopf-Segments" zusammen (ein
+ * Segment, `deviceConfidence: "declared"`); die Regel hier zu wiederholen statt sie zu benutzen
+ * hiesse, sich auf genau diese Invariante zu verlassen, ohne sie zu nennen.
+ *
+ * Der Schlüssel ist die Geräte-**id**: eine Bedingung zeigt auf eine `Device`-Zeile. Segmente ohne
+ * id (Alt-Daten, unzugeordnet) fallen weg — auf sie kann keine Bedingung zeigen.
+ *
+ * Das Intervall reicht vom frühesten bis zum spätesten Segment des Geräts in dieser Session. Eine
+ * Reinigungspause dazwischen unterbricht also nicht — dieselbe Lesart wie bei der Kategorie-Variante,
+ * und dieselbe, die die App sonst überall auf „durchgehend getragen" anwendet.
+ */
+export function wearSessionPairsByDevice(sessions: Session[], now: Date = new Date()): Map<string, WearPair[]> {
+  const byDevice = new Map<string, WearPair[]>();
+  for (const s of sessions) {
+    for (const w of segmentsByDevice(s.segments).values()) {
+      if (!w.device.id) continue;
+      const pair: WearPair = { start: w.start, end: w.end ?? now };
+      const list = byDevice.get(w.device.id);
+      if (list) list.push(pair);
+      else byDevice.set(w.device.id, [pair]);
+    }
+  }
+  return byDevice;
+}
