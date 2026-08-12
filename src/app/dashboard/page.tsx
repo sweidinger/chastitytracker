@@ -24,6 +24,10 @@ import { buildBoxReinigungView } from "@/lib/boxReinigung";
 import { loadTelemetryKeyProof } from "@/lib/boxKeyProof";
 import { effectiveOrgasmusArten, resolveReasonLabel, resolveOrgasmusArtDisplay } from "@/lib/reasonsService";
 import { getTranslations, getLocale } from "next-intl/server";
+import OpenTasks from "@/app/dashboard/OpenTasks";
+import TaskList from "@/app/dashboard/TaskList";
+import { getEvaluatedTaskHistory, belongsOnDashboard, loadTaskProofViews } from "@/lib/taskIntervals";
+import { toTaskCard } from "@/lib/taskView";
 import DashboardClient, { type DashboardProps } from "./DashboardClient";
 import LaufendeSessionCard from "./LaufendeSessionCard";
 import LaufendePlugSessionCard from "./LaufendePlugSessionCard";
@@ -208,6 +212,17 @@ export default async function DashboardPage() {
 
   const { tagH, wocheH, monatH, jahrH } = calculateWearingHoursByRange(entries, now, tz);
 
+  // Tasks #39: Aufgaben laden + auswerten (Zustand wird abgeleitet; ohne Aufgaben kein Nachladen).
+  const tTasks = await getTranslations("tasks");
+  const evaluatedTasks = await getEvaluatedTaskHistory(userId, now, {
+    kgLabel: tTasks("requirementKgLocked"), kgEntries: entries, wearEntries: entries, reinigung,
+  });
+  const taskProofViews = await loadTaskProofViews(evaluatedTasks.map((e) => e.task.id));
+  const taskCard = (e: (typeof evaluatedTasks)[number], withLinks: boolean) =>
+    toTaskCard(e, withLinks, taskProofViews.get(e.task.id) ?? []);
+  const taskCards = evaluatedTasks.filter((e) => belongsOnDashboard(e, now)).reverse().map((e) => taskCard(e, true));
+  const taskListCards = evaluatedTasks.map((e) => taskCard(e, false));
+
   // "Offen"-Hero-Karte (Fork): zeigt beim geöffneten Käfig den Seit-Timer.
   const cageOpen = currentStatus?.type === "OEFFNEN";
   // Das KG-Ziel steht während einer Sperre in der grünen Session-Karte (LaufendeSessionCard). Läuft
@@ -373,6 +388,7 @@ export default async function DashboardPage() {
       />
       <DenialCounterCard lastOrgasmAt={lastOrgasmAt} budgetLine={orgasmBudgetLine} labels={denialLabels} />
       <StrafenBanner userId={userId} />
+      <OpenTasks tasks={taskCards} tz={tz} />
       {cageOpen && currentStatus && (
         <div className="w-full max-w-2xl mx-auto px-4 pt-4">
           <div className="rounded-2xl overflow-hidden border border-unlock-border">
@@ -523,6 +539,11 @@ export default async function DashboardPage() {
             ),
           }))}
       />
+{taskListCards.length > 0 && (
+        <DashboardBlock>
+          <TaskList tasks={taskListCards} tz={tz} />
+        </DashboardBlock>
+      )}
       <DashboardClient {...clientProps} tz={tz} />
       {pairs.length > 0 && (
         <DashboardBlock>
