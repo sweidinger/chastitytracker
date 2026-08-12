@@ -114,7 +114,7 @@ export default async function ChangelogPage() {
                 </div>
                 <ul className="flex flex-col gap-1.5">
                   {release.changes.map((change, j) => {
-                    const cfg = typeConfig[change.type];
+                    const cfg = typeConfig[change.type] ?? typeConfig.feat;
                     const Icon = cfg.icon;
                     return (
                       <li key={j} className="flex items-start gap-2 text-sm text-foreground-muted">
