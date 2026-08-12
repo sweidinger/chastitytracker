@@ -53,7 +53,7 @@ CREATE TABLE "TaskRequirement" (
 );
 
 -- CreateTable
-CREATE TABLE "Message" (
+CREATE TABLE IF NOT EXISTS "Message" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "subjectUserId" TEXT NOT NULL,
     "senderKind" TEXT NOT NULL,
@@ -68,7 +68,7 @@ CREATE TABLE "Message" (
 );
 
 -- CreateTable
-CREATE TABLE "MessageRead" (
+CREATE TABLE IF NOT EXISTS "MessageRead" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "messageId" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
@@ -78,7 +78,7 @@ CREATE TABLE "MessageRead" (
 );
 
 -- CreateTable
-CREATE TABLE "AdminPasswordChange" (
+CREATE TABLE IF NOT EXISTS "AdminPasswordChange" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "subUserId" TEXT NOT NULL,
     "adminUserId" TEXT NOT NULL,
@@ -164,10 +164,10 @@ CREATE INDEX "TaskRequirement_categoryId_idx" ON "TaskRequirement"("categoryId")
 CREATE INDEX "TaskRequirement_deviceId_idx" ON "TaskRequirement"("deviceId");
 
 -- CreateIndex
-CREATE INDEX "Message_subjectUserId_audience_createdAt_idx" ON "Message"("subjectUserId", "audience", "createdAt");
+CREATE INDEX IF NOT EXISTS "Message_subjectUserId_audience_createdAt_idx" ON "Message"("subjectUserId", "audience", "createdAt");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "MessageRead_messageId_userId_key" ON "MessageRead"("messageId", "userId");
+CREATE UNIQUE INDEX IF NOT EXISTS "MessageRead_messageId_userId_key" ON "MessageRead"("messageId", "userId");
 
 -- CreateIndex
-CREATE INDEX "AdminPasswordChange_subUserId_createdAt_idx" ON "AdminPasswordChange"("subUserId", "createdAt");
+CREATE INDEX IF NOT EXISTS "AdminPasswordChange_subUserId_createdAt_idx" ON "AdminPasswordChange"("subUserId", "createdAt");
