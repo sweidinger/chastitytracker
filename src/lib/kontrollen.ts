@@ -5,6 +5,7 @@ import { ANFORDERUNG_PILLS, getKombinierterPill } from "@/lib/kontrollePills";
 import { formatVerifyReason, type VerifyReason } from "@/lib/verifyReason";
 import { inspectionTargetLabel } from "@/lib/inspectionTarget";
 import { prisma } from "@/lib/prisma";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 import { keyholderVisibleKontrolleWhere, KONTROLLE_TARGET_INCLUDE } from "@/lib/queries";
 import type { AdminKontrolleRowData } from "@/app/admin/kontrollen/AdminKontrolleListClient";
 
@@ -54,7 +55,7 @@ type PruefungEntry = {
   id: string;
   startTime: Date;
   /** Das kontrollierte Gerät (Trage-Kontrollen ab v5.0.1); KG-Prüfungen tragen keines. */
-  device?: { name: string; category: { name: string; isBuiltIn: boolean } | null } | null;
+  device?: { name: string; category: { name: string; slug: string } | null } | null;
   imageUrl: string | null;
   boxImageUrl?: string | null;
   note: string | null;
@@ -127,7 +128,7 @@ export async function loadKontrolleRows(
       // Gerät, Trage-Kontrollen das gezeigte).
       include: {
         user: { select: { username: true, timezone: true } },
-        device: { select: { name: true, category: { select: { name: true, isBuiltIn: true } } } },
+        device: { select: { name: true, category: { select: { name: true, slug: true } } } },
       },
     }),
     prisma.kontrollAnforderung.findMany({
@@ -174,7 +175,7 @@ export function buildKontrolleRows(
       code: ka?.code ?? e.kontrollCode ?? null,
       // Das Ziel der ANFORDERUNG gewinnt: sie sagt, was verlangt war. Ohne Anforderung (freiwillige
       // Prüfung) bleibt das gezeigte Gerät — bei einer KG-Prüfung ist beides leer.
-      target: inspectionTargetLabel(ka) ?? (e.device && !e.device.category?.isBuiltIn ? e.device.name : null),
+      target: inspectionTargetLabel(ka) ?? (e.device && e.device.category?.slug !== KG_BUILTIN_SLUG ? e.device.name : null), // KG über den Slug (Plug ist auch eingebaut)
       deadline: ka?.deadline ?? null,
       createdAt: ka?.createdAt ?? null,
       fulfilledAt: e.startTime,

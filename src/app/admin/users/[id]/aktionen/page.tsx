@@ -1,12 +1,14 @@
 import { redirect } from "next/navigation";
-import { ClipboardCheck, ClipboardList, Droplets, Bell, Gavel, Scale } from "lucide-react";
+import { ClipboardCheck, ClipboardList, Droplets, Bell, Gavel, Scale, Anchor, PlayCircle, Dices } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { assertKeyholderOrAdmin } from "@/lib/authGuards";
 import { LOCK_FORM_PLAN_MODE } from "@/lib/lockRequestPlanning";
-import { getIsLocked } from "@/lib/queries";
+import { getIsLocked, getActivePlugAnforderung, getActivePlugSperrzeit } from "@/lib/queries";
 import { subLockPeriodCached } from "@/lib/dashboardData";
 import { buildNewEntryCategoryRows } from "@/lib/categoryRows";
+import { deviceCategoriesEnabled } from "@/lib/constants";
 import { categoryStyle, wearActionHref } from "@/lib/categoryConstants";
+import { plugCategoryId } from "@/lib/deviceCategories";
 import CategoryIconRender from "@/app/components/CategoryIcon";
 import Section from "@/app/components/Section";
 import { getTranslations } from "next-intl/server";
@@ -17,19 +19,32 @@ import { LockClosedIcon, LockOpenIcon } from "@/app/components/lockIcons";
 export default async function AktionenPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   await assertKeyholderOrAdmin(id);
-  const [t, tw, tt] = await Promise.all([
+  const [t, tw, tt, tz] = await Promise.all([
     getTranslations("admin"),
     getTranslations("wearForm"),
     getTranslations("tasks"),
+    getTranslations("zufall"),
   ]);
 
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) redirect("/admin");
 
-  const [isLocked, activeLockPeriod, categories] = await Promise.all([
+  const flagOn = deviceCategoriesEnabled();
+  const plugCatId = plugCategoryId(id);
+  const [isLocked, activeLockPeriod, categories, offenePlugAnforderung, activePlugSperrzeit, sessionCategories] = await Promise.all([
     getIsLocked(id),
     subLockPeriodCached(id),
     buildNewEntryCategoryRows(id),
+    // Fork: Plug-Anforderung/-Sperrdauer und Session-Kategorien.
+    flagOn ? getActivePlugAnforderung(id, plugCatId) : Promise.resolve(null),
+    flagOn ? getActivePlugSperrzeit(id, plugCatId) : Promise.resolve(null),
+    flagOn
+      ? prisma.deviceCategory.findMany({
+          where: { userId: id, isSessionCategory: true },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          select: { id: true, name: true },
+        })
+      : Promise.resolve([]),
   ]);
 
   const hasEmail = !!user.email;
@@ -37,6 +52,14 @@ export default async function AktionenPage({ params }: { params: Promise<{ id: s
   // Trage-Session ebenfalls (dieselbe Menge, die /api/admin/inspection-targets liefert).
   const hasInspectionTarget = isLocked || categories.some((c) => c.activeDeviceName !== null);
   const base = `/admin/users/${id}/aktionen`;
+
+  // Fork: die eingebaute Plug-Kategorie (feste ID) steht in denselben Trage-Kategorien.
+  const plugRow = categories.find((c) => c.id === plugCatId);
+  const hasPlug = !!plugRow;
+  const isWearingPlug = !!plugRow?.activeDeviceName;
+  const hasOffenePlugAnforderung = !!offenePlugAnforderung;
+  const hasActivePlugSperrzeit = !!activePlugSperrzeit;
+  const hasSessionCategories = sessionCategories.length > 0;
 
   return (
     <>
@@ -105,12 +128,43 @@ export default async function AktionenPage({ params }: { params: Promise<{ id: s
             />
           )}
 
+          {/* Fork: Session anfordern — nur mit Session-Kategorien. */}
+          {hasSessionCategories && (
+            <ActionRow
+              href={`${base}/session-anforderung`}
+              icon={<PlayCircle className="size-4" />}
+              title={t("requestSession")}
+              description={t("requestSessionHint")}
+            />
+          )}
+
           <ActionRow
             href={`${base}/orgasmus-anforderung`}
             icon={<Droplets className="size-4" />}
             title={t("requestOrgasm")}
             description={t("requestOrgasmHint")}
           />
+
+          {/* Fork: Plug — tragen anfordern bzw. Tragedauer setzen/bearbeiten. Eine offene
+              Anforderung sperrt eine zweite, solange der Plug noch nicht getragen wird. */}
+          {hasPlug && (
+            isWearingPlug ? (
+              <ActionRow
+                href={`${base}/plug-anforderung`}
+                icon={<Anchor className="size-4" />}
+                title={hasActivePlugSperrzeit ? t("editPlugWearDuration") : t("setPlugWearDuration")}
+                description={hasActivePlugSperrzeit ? t("editPlugWearDurationHint") : t("setPlugWearDurationHint")}
+              />
+            ) : (
+              <ActionRow
+                href={hasOffenePlugAnforderung ? undefined : `${base}/plug-anforderung`}
+                icon={<Anchor className="size-4" />}
+                title={t("requestWearPlug")}
+                description={t("requestWearPlugHint")}
+                lockedReason={hasOffenePlugAnforderung ? t("plugAlreadyHasAnforderung") : undefined}
+              />
+            )
+          )}
 
           {/* Kein Kategorien-Gate: „KG verschlossen" und reine Freitext-Aufgaben gehen auch ohne
               Gerätekategorien — siehe `aufgaben/page.tsx`. */}
@@ -218,6 +272,18 @@ export default async function AktionenPage({ params }: { params: Promise<{ id: s
               />
             );
           })}
+        </div>
+      </Section>
+
+      {/* Fork: Schicksalsrad einrichten */}
+      <Section title={tz("adminTitle")}>
+        <div className="divide-y divide-border-subtle">
+          <ActionRow
+            href={`/admin/users/${id}/zufall`}
+            icon={<Dices className="size-4" />}
+            title={tz("manageLink")}
+            description={tz("manageLinkHint")}
+          />
         </div>
       </Section>
     </>

@@ -5,14 +5,14 @@ import { prisma } from "@/lib/prisma";
 import { toDateLocale, formatDateTimeDual, formatDate, APP_TZ } from "@/lib/utils";
 import { type StrafbuchControlOffense } from "@/lib/strafbuch";
 import { requestNowMs, strafbuchCached } from "@/lib/dashboardData";
-import { cleaningNotRelockedRef } from "@/lib/strafurteilService";
+import { cleaningNotRelockedRef, OFFENSE_SEVERITY, SEVERITY_PENALTY_SUGGESTIONS, computeSeverities, type OffenseCanonicalType, type OffenseSeverity } from "@/lib/strafurteilService";
 import { missedWeightRef } from "@/lib/weightObligation";
 import { loadStatementsOfUser } from "@/lib/offenseStatementService";
 import { passwordChangeViaLabel } from "@/lib/constants";
 import type { CleaningBlockReason } from "@/lib/queries";
 import { getLocale, getTranslations } from "next-intl/server";
 import { boxPhotoMissingRef } from "@/lib/boxPhotoDue";
-import StrafbuchClient, { type KontrollRow, type UnerlaubteOeffnungRow, type StrafeRecordData, type CleaningLimitRow, type AufgabeRow, type NichtVerschlossenRow, type VerschlussVersaeumtRow, type OrgasmusVersaeumtRow, type OrgasmusFalscheArtRow, type FalschesGeraetRow, type AdminPasswortRow, type UnerlaubterOrgasmusRow, type ManuellesVergehenRow, type MissedWeightRow, type BoxPhotoMissingRow, type StatementView } from "./StrafbuchClient";
+import StrafbuchClient, { type KontrollRow, type UnerlaubteOeffnungRow, type StrafeRecordData, type CleaningLimitRow, type AufgabeRow, type NichtVerschlossenRow, type VerschlussVersaeumtRow, type OrgasmusVersaeumtRow, type OrgasmusFalscheArtRow, type FalschesGeraetRow, type AdminPasswortRow, type UnerlaubterOrgasmusRow, type ManuellesVergehenRow, type MissedWeightRow, type BoxPhotoMissingRow, type StatementView, type SessionVersaeumtRow, type ErektionRow, type PauseUeberzugRow, type OrgasmusUeberBudgetRow, type SeverityInfo, type SeverityMatrixRow } from "./StrafbuchClient";
 
 /** Warum eine als Reinigung erfasste Öffnung trotzdem im Strafbuch steht. */
 const CLEANING_BLOCK_STRAFBUCH_KEY = {
@@ -25,7 +25,7 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
   const session = await auth();
   const { id } = await params;
   await assertKeyholderOrAdmin(id);
-  const [t, tCommon, dl] = [await getTranslations("admin"), await getTranslations("common"), toDateLocale(await getLocale())];
+  const [t, tCommon, tOpen, dl] = [await getTranslations("admin"), await getTranslations("common"), await getTranslations("openForm"), toDateLocale(await getLocale())];
   // Die Anfrage-Uhr, nicht `new Date()`: das Layout zählt die offenen Vergehen für den Reiter aus
   // demselben Strafbuch (`strafbuchCached`), und die Ableitung läuft nur einmal, wenn beide denselben
   // Zeitpunkt nennen.
@@ -47,7 +47,19 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
   //
   // NEBEN der Ableitung, nicht dahinter: sie hängt an nichts, was `buildStrafbuch` liefert, und
   // hinter dem teuersten Aufruf der Seite eingereiht kostete sie eine eigene Runde zur Datenbank.
-  const [sb, statementRows] = await Promise.all([strafbuchCached(id, nowMs), loadStatementsOfUser(id)]);
+  const [sb, statementRows, sessionCategories] = await Promise.all([
+    strafbuchCached(id, nowMs),
+    loadStatementsOfUser(id),
+    // Fork: Session-Kategorien (+ Geräte) für die Inline-Konfiguration der Pflicht-Session-Aktion.
+    prisma.deviceCategory.findMany({
+      where: { userId: id, isSessionCategory: true },
+      orderBy: { sortOrder: "asc" },
+      select: {
+        id: true, name: true, maxSessionMinutes: true, requiresVideo: true,
+        devices: { where: { archivedAt: null }, select: { id: true, name: true } },
+      },
+    }),
+  ]);
 
   const cleaningLimitOffenses: CleaningLimitRow[] = sb.cleaningLimitViolations.map((v) => ({
     entryId: v.entryId,
@@ -122,6 +134,7 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
     endsAtStr: fmtDual(a.endsAt),
     fulfilledAtStr: a.fulfilledAt ? fmtDual(a.fulfilledAt) : null,
     message: a.message,
+    categoryName: a.categoryName,
   }));
 
   const orgasmusVersaeumt: OrgasmusVersaeumtRow[] = sb.missedOrgasmInstructions.map((m) => ({
@@ -171,6 +184,82 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
     createdBy: m.createdBy,
   }));
 
+  // ── Fork-Arten ──
+  const pauseGrundLabel = (grund: string | null): string | null =>
+    grund === "REINIGUNG" ? tOpen("grundReinigung") : grund === "TOILETTE" ? tOpen("grundToilette") : null;
+  const pauseDeviceLabel = (device: string | null): string =>
+    device === "PLUG" ? t("kontrolleDevicePlug") : device === "CAGE" ? t("kontrolleDeviceCage") : "–";
+
+  const sessionVersaeumt: SessionVersaeumtRow[] = sb.missedSessions.map((m) => ({
+    id: m.id,
+    endetAtStr: fmtDual(m.endetAt),
+    categoryName: m.categoryName,
+    nachricht: m.nachricht,
+  }));
+
+  const erektionen: ErektionRow[] = sb.erektionViolations.map((v) => ({
+    entryId: v.entryId,
+    startTimeStr: v.startTime ? fmtDual(v.startTime) : "–",
+    grundLabel: pauseGrundLabel(v.oeffnenGrund),
+    note: v.note,
+  }));
+
+  const pauseUeberzug: PauseUeberzugRow[] = sb.pauseOverageViolations.map((v) => {
+    const grund = pauseGrundLabel(v.grund);
+    return {
+      entryId: v.entryId,
+      startTimeStr: v.startTime ? fmtDual(v.startTime) : "–",
+      context: grund ? `${pauseDeviceLabel(v.device)} / ${grund}` : pauseDeviceLabel(v.device),
+      dauerStr: t("strafbuchPauseUeberzugDauer", { dauer: v.dauerMin, max: v.maxMin }),
+      note: v.note,
+    };
+  });
+
+  const orgasmusUeberBudget: OrgasmusUeberBudgetRow[] = sb.orgasmOverBudgetViolations.map((v) => ({
+    entryId: v.entryId,
+    startTimeStr: fmtDual(v.startTime),
+    orgasmusArt: v.orgasmusArt,
+    used: v.used,
+    limit: v.limit,
+  }));
+
+  // Fork: effektive Schwere je erkanntem Vergehen (inkl. Wiederholungs-Eskalation).
+  const severities: Record<string, SeverityInfo> = Object.fromEntries(
+    [...computeSeverities(sb, new Date(nowMs))].map(([refId, s]) => [refId, { severity: s.severity, escalated: s.escalated }]),
+  );
+
+  // Fork: Schwere-Übersicht (Legende) — je Stufe die zugehörigen Arten + Straf-Vorschläge. Die
+  // Beschriftung je Art ist dieselbe wie die Sektions-Überschrift im Client.
+  const typeLabelByCanonical: Record<OffenseCanonicalType, string> = {
+    unauthorized_opening: t("strafbuchUnerlaubteOeffnungen"),
+    late_control: t("strafbuchZuSpaet"),
+    rejected_control: t("strafbuchAbgelehnt"),
+    auto_removed_control: t("strafbuchAutoEntfernt"),
+    cleaning_limit: t("strafbuchReinigungLimit"),
+    wrong_device: t("strafbuchFalschesGeraet"),
+    missed_orgasm: t("strafbuchOrgasmusVersaeumt"),
+    wrong_orgasm_type: t("strafbuchOrgasmusFalscheArt"),
+    late_lock: t("strafbuchVerschlussVersaeumt"),
+    cleaning_not_relocked: t("strafbuchNichtVerschlossen"),
+    unfulfilled_task: t("strafbuchAufgaben"),
+    admin_password_change: t("strafbuchAdminPasswort"),
+    unauthorized_orgasm: t("strafbuchUnerlaubterOrgasmus"),
+    missed_weight_report: t("strafbuchGewichtVersaeumt"),
+    box_photo_missing: t("strafbuchBoxFotoFehlt"),
+    manual_offense: t("strafbuchManuelleVergehen"),
+    missed_session: t("strafbuchVersaeumteSession"),
+    erektion: t("strafbuchErektion"),
+    pause_overage: t("strafbuchPauseUeberzug"),
+    orgasm_over_budget: t("strafbuchOrgasmusUeberBudget"),
+  };
+  const matrix: SeverityMatrixRow[] = (["schwer", "mittel", "leicht"] as OffenseSeverity[]).map((severity) => ({
+    severity,
+    offenses: (Object.keys(OFFENSE_SEVERITY) as OffenseCanonicalType[])
+      .filter((c) => OFFENSE_SEVERITY[c] === severity)
+      .map((c) => typeLabelByCanonical[c]),
+    suggestions: SEVERITY_PENALTY_SUGGESTIONS[severity].map((s) => s.label),
+  }));
+
   // NEUESTE ZUERST: die Vorgeschichte im Urteils-Formular nimmt den ersten Treffer ihrer Art als
   // „zuletzt". Hier sortiert und nicht im Client, weil dort nur noch der formatierte Tag ankommt —
   // ein zweites Feld mit den Millisekunden bloss zum Sortieren wäre dieselbe Angabe zweimal.
@@ -180,13 +269,18 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
       refId: r.refId,
       offenseType: r.offenseType,
       status: r.status,
-      reason: r.reason,
+      // Fork-Altbestand: KI-Strafen aus dem Chat trugen ihren Text vor v4.8x nur in `notiz`.
+      reason: r.reason ?? r.notiz,
       judgedBy: r.judgedBy,
       judgedByName: r.judgedByName,
       judgedAtStr: formatDate(r.bestraftDatum, dl, tz),
       done: r.erledigtAt !== null,
       erledigtAtStr: r.erledigtAt ? formatDate(r.erledigtAt, dl, tz) : null,
       reportedDoneAtStr: r.reportedDoneAt ? formatDate(r.reportedDoneAt, dl, tz) : null,
+      // Fork-Extras zur Erledigt-Meldung.
+      nachweisUrl: r.nachweisUrl,
+      erledigungNotiz: r.erledigungNotiz,
+      ablehnungGrund: r.ablehnungGrund,
     }));
 
   const statements: Record<string, StatementView> = Object.fromEntries(
@@ -289,6 +383,49 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
     strafbuchNotiertVon: t("strafbuchNotiertVon"),
     strafbuchZurueckziehen: t("strafbuchZurueckziehen"),
     deviceLabel: t("deviceLabel"),
+    // ── Fork ──
+    strafbuchUrteilSchicksalsrad: t("strafbuchUrteilSchicksalsrad"),
+    strafbuchKeyholderStrafe: t("strafbuchKeyholderStrafe"),
+    strafbuchKeyholderStrafeHint: t("strafbuchKeyholderStrafeHint"),
+    strafbuchNachweis: t("strafbuchNachweis"),
+    strafbuchBestaetigen: t("strafbuchBestaetigen"),
+    strafbuchAblehnen: t("strafbuchAblehnen"),
+    strafbuchAblehnenPlaceholder: t("strafbuchAblehnenPlaceholder"),
+    strafbuchAbgelehntBadge: t("strafbuchAbgelehntBadge"),
+    strafbuchVorschlaege: t("strafbuchVorschlaege"),
+    schwereSchwer: t("strafbuchSchwereSchwer"),
+    schwereMittel: t("strafbuchSchwereMittel"),
+    schwereLeicht: t("strafbuchSchwereLeicht"),
+    strafbuchLegende: t("strafbuchLegende"),
+    strafbuchLegendeHint: t("strafbuchLegendeHint"),
+    strafbuchHochgestuft: t("strafbuchHochgestuft"),
+    strafbuchAktionStundenFehlt: t("strafbuchAktionStundenFehlt"),
+    strafbuchAktionFehlgeschlagen: t("strafbuchAktionFehlgeschlagen"),
+    strafbuchStrafeOderAktion: t("strafbuchStrafeOderAktion"),
+    strafbuchVersaeumteSession: t("strafbuchVersaeumteSession"),
+    strafbuchErektion: t("strafbuchErektion"),
+    strafbuchErektionDate: t("strafbuchErektionDate"),
+    strafbuchPauseUeberzug: t("strafbuchPauseUeberzug"),
+    strafbuchOrgasmusUeberBudget: t("strafbuchOrgasmusUeberBudget"),
+    strafbuchSessionKategorieOption: t("strafbuchSessionKategorieOption", { name: "{name}", max: "{max}" }),
+    aktSessionKategorie: t("sessionAnforderungCategory"),
+    aktSessionMin: t("sessionAnforderungMinLabel"),
+    aktSessionDelay: t("sessionAnforderungDelayLabel"),
+    aktSessionGeraet: t("sessionAnforderungDeviceLabel"),
+    aktSessionGeraetAny: t("sessionAnforderungDeviceAny"),
+    aktSessionVideo: t("sessionAnforderungRequireVideo"),
+    aktOrgasmusOeffnen: t("orgasmReqOpenAllowedLabel"),
+    aktSperreReinigung: t("reinigungErlaubtLabel"),
+    aktSperreToilette: t("toiletteErlaubtLabel"),
+    aktPlugDauer: t("strafbuchAktPlugDauer"),
+    aktPlugFrist: t("strafbuchAktPlugFrist"),
+    aktKontrolleGeraet: t("kontrolleDeviceLabel"),
+    aktKontrolleGeraetAllg: t("strafbuchAktKontrolleGeraetAllg"),
+    aktKontrolleGeraetCage: t("kontrolleDeviceCage"),
+    aktKontrolleGeraetPlug: t("kontrolleDevicePlug"),
+    aktKontrolleFrist: t("strafbuchAktKontrolleFrist"),
+    aktKontrolleCode: t("kontrolleRequireCode"),
+    aktEntzugKeinGuthaben: t("belohnungEntzugKeinGuthaben"),
   };
 
   return (
@@ -310,9 +447,18 @@ export default async function StrafbuchPage({ params }: { params: Promise<{ id: 
       adminPasswort={adminPasswort}
       unerlaubteOrgasmen={unerlaubteOrgasmen}
       manuelleVergehen={manuelleVergehen}
+      sessionVersaeumt={sessionVersaeumt}
+      erektionen={erektionen}
+      pauseUeberzug={pauseUeberzug}
+      orgasmusUeberBudget={orgasmusUeberBudget}
       strafeRecords={strafeRecords}
       statements={statements}
       labels={labels}
+      severities={severities}
+      suggestions={SEVERITY_PENALTY_SUGGESTIONS}
+      matrix={matrix}
+      sessionCategories={sessionCategories}
+      verdienteOrgasmen={user.verdienteOrgasmen}
     />
   );
 }

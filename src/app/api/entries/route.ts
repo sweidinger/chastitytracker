@@ -8,7 +8,7 @@ import { deriveSealCode, inspectionCodeRequired, plannedVerification, initialVer
 import { DEVICE_BEARING_TYPES, validateEntryPayload, parseRotation, BOX_PHOTO_TYPES, parseOrgasmusArtBase, lockmeboxEnabled } from "@/lib/constants";
 import { orgasmusValueAllowed, validOeffnenCodes } from "@/lib/reasonsService";
 import { isDevBypassEnabled } from "@/lib/devMode";
-import { validateDeviceOwnership, releaseLockPeriodsOnOpenDetailed, type CleaningBlockReason, prepareWearEntry, openLockRequestWhere, LOCK_REQUEST_ORDER, getLatestKgEntry } from "@/lib/queries";
+import { validateDeviceOwnership, releaseLockPeriodsOnOpenDetailed, type CleaningBlockReason, prepareWearEntry, getLatestKgEntry, getOpenLockRequest, subVisibleKontrolleWhere } from "@/lib/queries";
 import { resolveInspectionTarget, isKgTarget, inspectionTargetWhere } from "@/lib/inspectionTarget";
 import { entryGuardError, entryGuardCode } from "@/lib/entryErrors";
 import { isUniqueConstraintOn } from "@/lib/prismaErrors";
@@ -23,6 +23,17 @@ import { lockAwaitsBolt, openAwaitsBolt, findPendingLockTx, findPendingOpenTx } 
 import { boltFieldsFor } from "@/lib/lockPending";
 import { parseOfflineCapture } from "@/lib/offlineCapture";
 import { resolveEntryStart, startAfter, startIsNow } from "@/lib/entryStart";
+import { triggeredWhere } from "@/lib/delayedTrigger";
+import { getMidnightToday, APP_TZ } from "@/lib/utils";
+// Fork: Airlock-NFC, Sessions, Körperregion, Pausen, KI-Keyholderin, Belohnungs-Ökonomie.
+import { verifyForVerschluss, verifyForKontrolle } from "@/lib/airlock/verify";
+import { activateAirlockLock, retireLock } from "@/lib/airlock/service";
+import { getActiveSessionForCategory, fulfillSessionAnforderung, getActiveSessionAnforderung } from "@/lib/sessionService";
+import { findRegionConflict, type RegionConflict } from "@/lib/bodyRegion";
+import { getActivePause, pauseReasonsForDevice, type PauseDevice } from "@/lib/pauseService";
+import { parseCleaningWindows, activeCleaningWindow } from "@/lib/cleaningService";
+import { reactToSubEvent } from "@/lib/aiKeyholder/keyholderService";
+import { autoGrantReachedGoals } from "@/lib/belohnung";
 
 export async function GET() {
   const session = await requireApi();
@@ -42,13 +53,21 @@ export async function GET() {
   return NextResponse.json(entries);
 }
 
+/** Fork: die zwei Fälle, die kein 400 sind — ein bereits belegter Zustand ist ein Konflikt, kein Bad Request. */
+const GUARD_STATUS: Record<string, number> = { REGION_CONFLICT: 409, PAUSE_ALREADY_ACTIVE: 409 };
+
+/** Fork: Session-Einträge tragen ihr Gerät wie die Trage-Einträge (Kategorie mit `isSessionCategory`). */
+const SESSION_TYPES: readonly string[] = ["SESSION_BEGIN", "SESSION_END"];
+
 export async function POST(req: NextRequest) {
   const session = await requireApi();
   if (session instanceof NextResponse) return session;
 
   const body = await req.json();
   // verifikationStatus is never accepted from client – set server-side only
-  const { type, startTime, imageUrl, imageExifTime, note, oeffnenGrund, orgasmusArt, kontrollCode, deviceId, imageRotation, codeImageUrl, codeReadable, keyInBox, boxImageUrl, boxImageRotation, clientRequestId } = body;
+  const { type, startTime, imageUrl, imageExifTime, note, oeffnenGrund, orgasmusArt, kontrollCode, deviceId, imageRotation, codeImageUrl, codeReadable, keyInBox, boxImageUrl, boxImageRotation, clientRequestId, erektionGemeldet, videoUrl, sessionGoalAchieved, pauseDevice } = body;
+  // Fork: welche Typen ein Gerät tragen — Upstreams Liste plus die Session-Einträge.
+  const bearsDevice = DEVICE_BEARING_TYPES.includes(type) || SESSION_TYPES.includes(type);
 
   const devBypass = isDevBypassEnabled(req.headers.get("host"));
   // Reason-Codes gegen die (ggf. angepasste) Liste DES SESSION-USERS validieren; null-Config → Built-ins.
@@ -99,6 +118,12 @@ export async function POST(req: NextRequest) {
     if (schonDa) return NextResponse.json(schonDa);
   }
 
+  // Fork: Reinigung/Toilette laufen ausschliesslich über die Pause-Funktion (PAUSE_BEGIN/PAUSE_END) —
+  // nicht über ein volles Öffnen/Trage-Ende des Trägers. Der Keyholder-Pfad ist eine eigene Route.
+  if ((type === "OEFFNEN" || type === "WEAR_END") && (oeffnenGrund === "REINIGUNG" || oeffnenGrund === "TOILETTE")) {
+    return NextResponse.json({ error: "CLEANING_VIA_PAUSE" }, { status: 400 });
+  }
+
   // Replay-Schutz fürs Box-Foto (Kontrolle): dieselbe Aufnahme darf nicht ein zweites Mal als Nachweis
   // dienen — Begründung an `boxPhotoReused`.
   if (BOX_PHOTO_TYPES.has(type) && boxImageUrl && await boxPhotoReused(boxImageUrl)) {
@@ -132,10 +157,67 @@ export async function POST(req: NextRequest) {
   // "pending"-Startwert und den Lauf nach dem Commit. Vor der Transaktion, weil sie die
   // Foto-Prüfungs-Einstellung liest.
   const codeCheckRuns = type === "VERSCHLUSS" && (await codeChangeCheckApplies(codeImageUrl));
+
+  // Fork — Region-Exklusivität VORAB (ausserhalb der Transaktion) berechnen: findRegionConflict nutzt
+  // den globalen prisma-Client. INNERHALB der interaktiven $transaction (connection_limit=1 → nur EINE
+  // Verbindung, von der Transaktion gehalten) würde dieser Query ewig auf eine zweite Verbindung
+  // warten und die Transaktion ins Timeout treiben (Deadlock). Der eigentliche Abbruch (throw)
+  // passiert weiterhin IN der Transaktion, damit Status- und Fehler-Handling unverändert bleiben.
+  let regionConflict: RegionConflict | null = null;
+  if ((type === "WEAR_BEGIN" || type === "SESSION_BEGIN") && deviceId) {
+    const rcDev = await prisma.device.findUnique({ where: { id: deviceId }, select: { categoryId: true } });
+    if (rcDev?.categoryId) regionConflict = await findRegionConflict(session.user.id, rcDev.categoryId);
+  }
+
+  // Fork — Airlock-NFC (Weg A): den Tag-Nachweis VOR der Transaktion prüfen — das ist ein Netz-Call
+  // zur Airlock-API und darf (wie regionConflict oben) nicht in die connection_limit=1-Transaktion.
+  // Rein additiv: ohne `body.airlock` und ohne Airlock-Vorgabe bleibt alles unverändert. Siehe
+  // docs/AIRLOCK_NFC.md § 4.5/4.6.
+  let airlockProof: { code: string; uid: string } | null = null;
+  let kontrolleAirlockValidated = false;
+  // Beim Ablegen (OEFFNEN) zu tötendes Lock — in der Transaktion aus dem aktiven Verschluss
+  // ermittelt, NACH dem Commit best-effort retired.
+  let airlockToRetire: string | null = null;
+  if (type === "VERSCHLUSS") {
+    // Vorgabe aus der dringendsten offenen Anforderung (falls gesetzt): genau dieses Lock ist Pflicht.
+    const mandate = await getOpenLockRequest(session.user.id);
+    const mandatedAirlockCode = mandate?.airlockCode ?? null;
+    if (body.airlock) {
+      const r = await verifyForVerschluss(session.user.id, body.airlock, mandatedAirlockCode);
+      if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
+      airlockProof = { code: r.code, uid: r.uid };
+      // Sicherheits-Gate: ein ZUGEWIESENES Lock muss vom Sub vorab per Tag-Scan verifiziert worden
+      // sein (bestätigt, dass der Tag liest), bevor es zum Verschluss genutzt werden darf.
+      const alLock = await prisma.airlockLock.findUnique({ where: { code: r.code }, select: { assignedUserId: true, verifiedAt: true } });
+      if (alLock?.assignedUserId === session.user.id && !alLock.verifiedAt) {
+        return NextResponse.json({ error: "AIRLOCK_LOCK_UNVERIFIED" }, { status: 400 });
+      }
+    } else if (mandatedAirlockCode) {
+      // Die Keyholderin hat ein Airlock-Lock vorgegeben → der Verschluss MUSS per NFC damit erfolgen.
+      return NextResponse.json({ error: "AIRLOCK_VERSCHLUSS_REQUIRES_TAG" }, { status: 400 });
+    }
+  }
+  // Nur die KG-Kontrolle (ohne Gerät — mit Gerät ist es eine Trage-Kontrolle, siehe
+  // `resolveInspectionTarget`): war der aktive Verschluss ein Airlock, ersetzt der NFC-Scan die
+  // Handschrift-Code-Prüfung. `getLatestKgEntry` ist dieselbe Quelle wie für den Lock-Zustand;
+  // `airlockUid` steht nicht in ihrem schmalen `select` und wird gezielt nachgeladen.
+  if (type === "PRUEFUNG" && !deviceId) {
+    const latestKg = await getLatestKgEntry(session.user.id);
+    const activeAirlockUid = latestKg?.type === "VERSCHLUSS"
+      ? (await prisma.entry.findUnique({ where: { id: latestKg.id }, select: { airlockUid: true } }))?.airlockUid ?? null
+      : null;
+    if (activeAirlockUid) {
+      if (!body.airlock) return NextResponse.json({ error: "AIRLOCK_CONTROL_REQUIRES_TAG" }, { status: 400 });
+      const r = await verifyForKontrolle(activeAirlockUid, body.airlock);
+      if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
+      kontrolleAirlockValidated = true;
+    }
+  }
+
   try {
     entry = await prisma.$transaction(async (tx) => {
-      // Validate deviceId ownership inside transaction (VERSCHLUSS / WEAR_*)
-      if (deviceId && DEVICE_BEARING_TYPES.includes(type)) {
+      // Validate deviceId ownership inside transaction (VERSCHLUSS / WEAR_* / PRUEFUNG / SESSION_*)
+      if (deviceId && bearsDevice) {
         const device = await validateDeviceOwnership(deviceId, session.user.id, tx);
         if (!device) throw entryGuardError("INVALID_DEVICE");
       }
@@ -146,10 +228,137 @@ export async function POST(req: NextRequest) {
       // Eintrag ist das die Erfassungszeit, nicht die (u.U. abweichende) Formular-Zeit. Sonst würde
       // eine gültige Offline-Tragezeit gegen eine andere Uhr geprüft und fälschlich mit 400
       // abgewiesen — und die Warteschlange verwirft ein 400 als „schlechte Daten" (Datenverlust).
+      let wearCategoryId: string | null = null;
       if (type === "WEAR_BEGIN" || type === "WEAR_END") {
         const wearResult = await prepareWearEntry(tx, session.user.id, type, deviceId, effectiveStart, imageUrl, isNowStart);
         if (!wearResult.ok) throw entryGuardError(wearResult.code);
         effectiveStart = wearResult.start;
+        wearCategoryId = wearResult.categoryId;
+        // Fork — Körperregion-Exklusivität: kein zweites Gerät derselben Region gleichzeitig
+        // (z.B. Plug + Anal-Session).
+        if (type === "WEAR_BEGIN" && regionConflict) {
+          throw Object.assign(entryGuardError("REGION_CONFLICT"), { _blocking: regionConflict.blockingCategoryName });
+        }
+      }
+
+      // Fork — SESSION_BEGIN / SESSION_END: gegen den aktiven Session-Zustand dieser Kategorie prüfen.
+      let sessionCategoryId: string | null = null;
+      let sessionBeginTime: Date | null = null;
+      if (type === "SESSION_BEGIN" || type === "SESSION_END") {
+        if (!deviceId) throw entryGuardError("SESSION_DEVICE_REQUIRED");
+        const dev = await tx.device.findUnique({
+          where: { id: deviceId },
+          select: { categoryId: true, category: { select: { isSessionCategory: true, requiresVideo: true } } },
+        });
+        if (!dev?.categoryId || !dev.category?.isSessionCategory) {
+          throw entryGuardError("SESSION_WRONG_CATEGORY");
+        }
+        sessionCategoryId = dev.categoryId;
+        const active = await getActiveSessionForCategory(session.user.id, dev.categoryId, tx);
+        if (type === "SESSION_BEGIN" && active) throw entryGuardError("SESSION_ALREADY_ACTIVE");
+        // Körperregion-Exklusivität: kein zweites Gerät derselben Region (z.B. Anal-Session bei getragenem Plug).
+        if (type === "SESSION_BEGIN" && regionConflict) {
+          throw Object.assign(entryGuardError("REGION_CONFLICT"), { _blocking: regionConflict.blockingCategoryName });
+        }
+        if (type === "SESSION_END") {
+          if (!active) throw entryGuardError("SESSION_NOT_ACTIVE");
+          effectiveStart = startAfter(effectiveStart, active.startTime, isNowStart);
+          if (effectiveStart <= active.startTime) throw entryGuardError("TIME_BEFORE");
+          // Video-Pflicht: eine offene Session-Anforderung (Admin/KI) überschreibt den Kategorie-Standard.
+          const anf = await getActiveSessionAnforderung(session.user.id, dev.categoryId, tx);
+          const effRequireVideo = anf ? anf.requireVideo : dev.category.requiresVideo;
+          if (effRequireVideo && !videoUrl) throw entryGuardError("SESSION_VIDEO_REQUIRED");
+          sessionBeginTime = active.startTime;
+        }
+      }
+
+      // Fork — Foto-Pflicht aus einer offenen Orgasmus-Anforderung: verlangt die Anforderung im
+      // Fenster einen Nachweis, wird ein Orgasmus ohne Foto abgelehnt (das Formular prüft nur vorab).
+      // Dieselbe Fenster-Regel wie die Erfüllung (`applyEntryFulfilment`): Eintrags-Zeit, nur
+      // bereits ausgelöste Anforderungen.
+      if (type === "ORGASMUS" && !imageUrl) {
+        const fotoAnforderung = await tx.orgasmusAnforderung.findFirst({
+          where: {
+            userId: session.user.id, fulfilledAt: null, withdrawnAt: null, fotoPflicht: true,
+            beginsAt: { lte: effectiveStart }, endsAt: { gte: effectiveStart },
+            ...triggeredWhere(effectiveStart),
+          },
+          select: { id: true },
+        });
+        if (fotoAnforderung) throw entryGuardError("ORGASMUS_PHOTO_REQUIRED");
+      }
+
+      // Fork — PAUSE_BEGIN / PAUSE_END (Reinigungs-/Toiletten-Pause für KG bzw. Plug).
+      if (type === "PAUSE_BEGIN" || type === "PAUSE_END") {
+        const dev: PauseDevice | null = pauseDevice === "CAGE" || pauseDevice === "PLUG" ? pauseDevice : null;
+        if (!dev) throw entryGuardError("PAUSE_DEVICE_REQUIRED");
+        if (type === "PAUSE_END" && !imageUrl) throw entryGuardError("PAUSE_PHOTO_REQUIRED");
+
+        const activePause = await getActivePause(session.user.id, dev, tx);
+        if (type === "PAUSE_BEGIN") {
+          if (activePause) throw entryGuardError("PAUSE_ALREADY_ACTIVE");
+          // Ist das Gerät überhaupt in Gebrauch?
+          if (dev === "CAGE") {
+            const latestKg = await getLatestKgEntry(session.user.id, tx);
+            if (!latestKg || latestKg.type !== "VERSCHLUSS") throw entryGuardError("PAUSE_NOT_LOCKED");
+            // Airlock: ein physisches Einweg-Lock lässt sich nicht temporär öffnen und wieder
+            // schliessen — Reinigungs-/Toiletten-Pause bei aktivem Airlock-Verschluss gesperrt.
+            const lockRow = await tx.entry.findUnique({ where: { id: latestKg.id }, select: { airlockUid: true } });
+            if (lockRow?.airlockUid) throw entryGuardError("AIRLOCK_NO_TEMP_OPEN");
+          }
+          if (dev === "PLUG") {
+            const latestWear = await tx.entry.findFirst({
+              where: { userId: session.user.id, type: { in: ["WEAR_BEGIN", "WEAR_END"] } },
+              orderBy: { startTime: "desc" },
+              select: { type: true },
+            });
+            if (!latestWear || latestWear.type !== "WEAR_BEGIN") throw entryGuardError("PAUSE_NOT_WEARING");
+          }
+          // Grund (Reinigung/Toilette) + Tageslimit gemäss Einstellungen
+          const puser = await tx.user.findUnique({
+            where: { id: session.user.id },
+            select: {
+              cleaningAllowed: true, cleaningMaxMinutes: true, cleaningMaxPerDay: true,
+              toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true,
+              plugReinigungErlaubt: true, plugReinigungMaxMinuten: true, plugReinigungMaxProTag: true,
+              plugReinigungsFenster: true,
+              plugToiletteMaxMinuten: true,
+            },
+          });
+          const pauseReasons = puser
+            ? pauseReasonsForDevice(puser, dev)
+            : [];
+          if (pauseReasons.length > 0) {
+            const chosen = pauseReasons.find((r) => r.grund === oeffnenGrund);
+            if (!chosen) throw entryGuardError("PAUSE_REASON_REQUIRED");
+            const tzP = session.user.timezone ?? APP_TZ;
+            if (chosen.maxProTag > 0) {
+              // Im tx gezählt (nicht über `pauseBeginCountsToday`, das den globalen Client nutzt —
+              // connection_limit=1, siehe regionConflict oben); dieselben where-Bedingungen.
+              const todayCount = await tx.entry.count({
+                where: {
+                  userId: session.user.id, type: "PAUSE_BEGIN", pauseDevice: dev,
+                  oeffnenGrund: chosen.grund,
+                  startTime: { gte: getMidnightToday(new Date(), tzP) },
+                },
+              });
+              if (todayCount >= chosen.maxProTag) throw entryGuardError("PAUSE_LIMIT_REACHED");
+            }
+            // Plug-Reinigung nur innerhalb der konfigurierten Tages-Zeitfenster (falls gesetzt).
+            if (dev === "PLUG" && chosen.grund === "REINIGUNG" && puser) {
+              if (parseCleaningWindows(puser.plugReinigungsFenster).length > 0
+                && !activeCleaningWindow(puser.plugReinigungsFenster, new Date(), tzP)) {
+                throw entryGuardError("PLUG_REINIGUNG_FENSTER");
+              }
+            }
+          }
+        }
+        if (type === "PAUSE_END") {
+          if (!activePause) throw entryGuardError("PAUSE_NOT_ACTIVE");
+          effectiveStart = startAfter(effectiveStart, activePause.startTime, isNowStart);
+          if (effectiveStart <= activePause.startTime) throw entryGuardError("TIME_BEFORE");
+          // Pause-Überzug wird nicht hier bestraft, sondern im Strafbuch erkannt (buildStrafbuch).
+        }
       }
 
       // tx durchreichen: der Read-then-Write-Guard muss in DERSELBEN Transaktion lesen (TOCTOU).
@@ -176,6 +385,8 @@ export async function POST(req: NextRequest) {
         // diese Sperre legte der Träger Aufruf auf Aufruf, während die Box auf den ersten wartet.
         if (lockmeboxEnabled() && await findPendingOpenTx(tx, session.user.id)) throw entryGuardError("OPEN_ALREADY_PENDING");
         lockStartTime = latest.startTime;
+        // Fork — Airlock: war der aktive Verschluss ein Airlock, das Einweg-Lock nach dem Commit töten.
+        airlockToRetire = (await tx.entry.findUnique({ where: { id: latest.id }, select: { airlockCode: true } }))?.airlockCode ?? null;
         ({ broke: withdrawnLockPeriod, cleaningBlock } = await releaseLockPeriodsOnOpenDetailed(session.user.id, oeffnenGrund, tx, "user"));
         // LockMeBox: die Öffnung gilt erst mit „Riegel offen" (`lockCommit.ts`, docs/lockmebox.md).
         awaitsBolt = await openAwaitsBolt(tx, session.user.id, latest.keyInBox, withdrawnLockPeriod, new Date());
@@ -215,7 +426,12 @@ export async function POST(req: NextRequest) {
         : null;
       // "pending" nur, wenn danach wirklich eine Prüfung läuft, die es ersetzt (siehe unten);
       // "not_required", wenn das Gerät gar keinen Code verlangt und kein Siegel aktiv ist.
-      const initialVerifikationStatus = verification ? initialVerificationStatus(verification) : null;
+      //
+      // Fork — Airlock-Kontrolle: der vorab geprüfte Tag-Scan IST der Nachweis; es folgt keine
+      // Foto-Prüfung, die den Startwert ersetzen müsste (siehe `runInspectionVerification` unten).
+      const initialVerifikationStatus = kontrolleAirlockValidated
+        ? "verified"
+        : verification ? initialVerificationStatus(verification) : null;
       // Dasselbe für den Geräte-Check, der ebenfalls erst nach dem Commit läuft. Die Bedingung kommt
       // aus deviceCheckService — derselbe Ausdruck entscheidet unten, ob der Lauf gestartet wird, der
       // dieses "pending" wieder abräumen MUSS. Zwei getrennt hingeschriebene Bedingungen könnten
@@ -243,9 +459,11 @@ export async function POST(req: NextRequest) {
           deviceCheck: initialDeviceCheck,
           // PRUEFUNG trägt seit v5.0.1 ebenfalls ein Gerät: bei einer Trage-Kontrolle ist es das
           // gezeigte und damit das einzige, woran später erkennbar ist, WAS kontrolliert wurde.
-          deviceId: DEVICE_BEARING_TYPES.includes(type)
+          deviceId: bearsDevice
             ? (deviceId || null)
             : null,
+          // Fork: Pausen tragen statt eines Geräts die Geräte-ART (CAGE|PLUG).
+          pauseDevice: (type === "PAUSE_BEGIN" || type === "PAUSE_END") ? (pauseDevice || null) : null,
           // Bildersafe: versiegeltes Schlüsselbox-Code-Foto (nur VERSCHLUSS)
           codeImageUrl: type === "VERSCHLUSS" ? (codeImageUrl || null) : null,
           codeReadable: type === "VERSCHLUSS" && codeImageUrl ? (codeReadable ?? null) : null,
@@ -256,6 +474,15 @@ export async function POST(req: NextRequest) {
           ...boltFieldsFor(type, effectiveStart, awaitsBolt),
           // `keyDetected` bleibt hier ungesetzt (null) — das Urteil fällt nach dem Commit (siehe unten).
           boxImageUrl: BOX_PHOTO_TYPES.has(type) ? (boxImageUrl || null) : null,
+          // Fork — Erektion während einer Reinigungs-/Toiletten-Pause gemeldet (nur PAUSE_END).
+          erektionGemeldet: type === "PAUSE_END" && erektionGemeldet === true ? true : undefined,
+          // Fork — Session: Video-Beweis + Ziel-erreicht (nur SESSION_END).
+          videoUrl: type === "SESSION_END" ? (videoUrl || null) : null,
+          sessionGoalAchieved: type === "SESSION_END" && typeof sessionGoalAchieved === "boolean" ? sessionGoalAchieved : undefined,
+          // Fork — Airlock-NFC: bei per Tag validiertem Verschluss die Airlock-Nummer + gebundene UID
+          // festhalten (Anker für die spätere NFC-Kontrolle). null = normaler Verschluss ohne Airlock.
+          airlockCode: type === "VERSCHLUSS" ? (airlockProof?.code ?? null) : null,
+          airlockUid: type === "VERSCHLUSS" ? (airlockProof?.uid ?? null) : null,
         },
       });
 
@@ -288,17 +515,106 @@ export async function POST(req: NextRequest) {
       //
       // Ein schwebender Aufruf hakt NICHTS ab: eine Verschluss-Anforderung ist mit dem Riegel
       // erfüllt, nicht mit dem Aufruf. Das holt `commitPendingLock` nach, sobald die Box meldet.
+      //
+      // Fork — Airlock-Kontrolle: der vorab geprüfte Tag-Scan ersetzt die Code-Abfrage. Die
+      // dringendste offene KG-Anforderung wird ohne Code-Abgleich erfüllt — mit denselben Schranken
+      // wie der Rundum-Weg in `applyEntryFulfilment` (Ziel, Sichtbarkeit, Rückdatierung). Danach
+      // läuft die geteilte Erfüllung OHNE Kontroll-Zweig (`verification: null`), sonst schriebe sie
+      // dieselbe entryId ein zweites Mal (KontrollAnforderung.entryId ist @unique → P2002).
+      if (kontrolleAirlockValidated && inspectionTarget && !awaitsBolt) {
+        const nfcKontrolle = await tx.kontrollAnforderung.findFirst({
+          where: {
+            userId: session.user.id, entryId: null, withdrawnAt: null,
+            AND: [inspectionTargetWhere(inspectionTarget, submissionDeviceId), subVisibleKontrolleWhere(fulfilmentAt)],
+            createdAt: { lte: fulfilmentAt },
+          },
+          orderBy: { deadline: "asc" },
+          select: { id: true },
+        });
+        if (nfcKontrolle) {
+          await tx.kontrollAnforderung.update({
+            where: { id: nfcKontrolle.id },
+            data: { entryId: created.id, fulfilledAt: fulfilmentAt },
+          });
+        }
+      }
       requiredAnforderungDeviceIds = awaitsBolt ? [] : await applyEntryFulfilment(
         tx,
         created,
         {
-          verification,
+          verification: kontrolleAirlockValidated ? null : verification,
           targetWhere: inspectionTarget ? inspectionTargetWhere(inspectionTarget, submissionDeviceId) : null,
           // Ob es verlangt wird, sagt die Anforderung; ob es fehlt, weiss nur der Body.
           boxPhotoMissing: !boxImageUrl,
         },
         fulfilmentAt,
       );
+
+      // Fork — Belohnungs-Fenster eingelöst → Kontoauszug-Eintrag (das Guthaben wurde beim Gewähren
+      // abgebucht, delta 0). Liest die Anforderung, die `applyEntryFulfilment` soeben mit DIESEM
+      // Eintrag erfüllt hat — keine zweite Zuordnungs-Regel daneben.
+      if (type === "ORGASMUS") {
+        const redeemed = await tx.orgasmusAnforderung.findFirst({
+          where: { entryId: created.id, istBelohnung: true },
+          select: { user: { select: { verdienteOrgasmen: true } } },
+        });
+        if (redeemed) {
+          await tx.belohnungEvent.create({
+            data: {
+              userId: session.user.id, type: "EINGELOEST", delta: 0,
+              balanceAfter: redeemed.user.verdienteOrgasmen, detail: "Belohnung eingelöst",
+            },
+          });
+        }
+      }
+
+      // Fork — Trage-Anforderung (Plug & Co.) erfüllen: ein WEAR_BEGIN auf die Kategorie erfüllt die
+      // älteste offene, bereits ausgelöste Anforderung dieser Kategorie. KG-Anforderungen
+      // (deviceCategoryId null) erfüllt der VERSCHLUSS über `applyEntryFulfilment`.
+      if (type === "WEAR_BEGIN" && wearCategoryId) {
+        const wearAnf = await tx.verschlussAnforderung.findFirst({
+          where: {
+            userId: session.user.id,
+            art: "ANFORDERUNG",
+            deviceCategoryId: wearCategoryId,
+            fulfilledAt: null,
+            withdrawnAt: null,
+            createdAt: { lte: fulfilmentAt },
+            ...triggeredWhere(fulfilmentAt),
+          },
+          orderBy: { createdAt: "asc" },
+          select: { id: true },
+        });
+        if (wearAnf) {
+          await tx.verschlussAnforderung.update({ where: { id: wearAnf.id }, data: { fulfilledAt: fulfilmentAt } });
+        }
+        // WEAR_DEVICE-Task (KI-Keyholderin) erfüllen: WEAR_BEGIN schliesst einen offenen Trage-Task ab.
+        const openTask = await tx.keyholderTask.findFirst({
+          where: { userId: session.user.id, type: "WEAR_DEVICE", completedAt: null },
+          orderBy: { assignedAt: "asc" },
+          select: { id: true },
+        });
+        if (openTask) {
+          await tx.keyholderTask.update({ where: { id: openTask.id }, data: { completedAt: fulfilmentAt } });
+        }
+      }
+
+      // Fork — SessionAnforderung erfüllen, wenn SESSION_END erfasst wird — aber nur, wenn die
+      // Mindestdauer erreicht, ggf. Video vorhanden und (falls gesetzt) das richtige Gerät genutzt ist.
+      if (type === "SESSION_END" && sessionCategoryId) {
+        const offeneSessionAnf = await getActiveSessionAnforderung(session.user.id, sessionCategoryId, tx);
+        if (offeneSessionAnf) {
+          const durMin = sessionBeginTime
+            ? (effectiveStart.getTime() - sessionBeginTime.getTime()) / 60000
+            : 0;
+          const minOk = !offeneSessionAnf.minMinuten || durMin >= offeneSessionAnf.minMinuten;
+          const videoOk = !offeneSessionAnf.requireVideo || !!videoUrl;
+          const deviceOk = !offeneSessionAnf.deviceId || offeneSessionAnf.deviceId === deviceId;
+          if (minOk && videoOk && deviceOk) {
+            await fulfillSessionAnforderung(offeneSessionAnf.id, created.id, tx);
+          }
+        }
+      }
 
       // Box-Kopplung: die Heimdall-Box folgt dem Eintrag. Die Regel — samt der zwei Fälle, in denen
       // sie ihm NICHT folgt — steht in `boxCommandForEntry`. No-op ohne Heimdall/Box.
@@ -307,7 +623,10 @@ export async function POST(req: NextRequest) {
       if (cmd && await setBoxCommandForUser(tx, session.user.id, cmd)) boxCmd = cmd;
 
       return created;
-    });
+      // Fork — Timeout hochgesetzt: die Transaktion ist reine DB-Arbeit (Sekundenbruchteile), kann
+      // aber unter Schreib-Sperr-Contention mit dem Cron-Prozess auf die WAL-Sperre warten. 5 s
+      // (Default) war zu knapp → vereinzelte "Transaction already closed"-Fehler beim Speichern.
+    }, { timeout: 15000, maxWait: 10000 });
   } catch (e: unknown) {
     // Zwei gleiche Versuche GLEICHZEITIG: die Vorabprüfung oben sieht beide leer, beide schreiben,
     // der zweite läuft in den Index. Real, seit der Client abbricht — die erste Anfrage läuft
@@ -320,7 +639,14 @@ export async function POST(req: NextRequest) {
       const schonDa = await prisma.entry.findFirst({ where: { clientRequestId: requestKey, userId: session.user.id } });
       if (schonDa) return NextResponse.json(schonDa);
     }
-    return NextResponse.json({ error: entryGuardCode(e) }, { status: 400 });
+    const code = entryGuardCode(e);
+    // Fork: REGION_CONFLICT trägt zusätzlich die blockierende Kategorie — der stabile Code allein
+    // kann sie nicht transportieren, die UI kann den Namen aber anzeigen.
+    const blocking = code === "REGION_CONFLICT" ? ((e as { _blocking?: string })?._blocking ?? null) : undefined;
+    return NextResponse.json(
+      blocking === undefined ? { error: code } : { error: code, blocking },
+      { status: GUARD_STATUS[code] ?? 400 },
+    );
   }
 
   // Das Kommando ansagen (Heimdall-Instant-Push bzw. LockMeBox-Mitteilung ans Handy) — der
@@ -328,10 +654,20 @@ export async function POST(req: NextRequest) {
   // nicht dieselbe Bedingung noch einmal: sonst driften Pull und Push auseinander.
   if (boxCmd) announceBoxCommand(session.user.id, boxCmd);
 
+  // Fork — Airlock-NFC: das per Tag validierte Lock beim Verschluss auf `active` setzen (Airlock-
+  // Registry + lokaler Spiegel) — best-effort, blockiert die Antwort nicht (wie announceBoxCommand).
+  if (type === "VERSCHLUSS" && airlockProof) void activateAirlockLock(airlockProof.code, session.user.id);
+  // Fork — Airlock-NFC: beim Ablegen (OEFFNEN) das Einweg-Lock töten (retired). Best-effort; ist der
+  // Server nicht erreichbar, bleibt es lokal „retired" und der nächste Sync zieht den Wechsel nach.
+  if (type === "OEFFNEN" && airlockToRetire) void retireLock(airlockToRetire);
+
   // REINIGUNG-Limit wird NICHT mehr automatisch bestraft: eine Reinigungsöffnung über dem
   // Tageskontingent (auch ein Geräte-Wechsel) wird im Strafbuch nur noch ERKANNT (live in
   // buildStrafbuch abgeleitet); ob sie geahndet wird, entscheidet die Keyholderin. Das
   // Öffnen-Formular warnt weiterhin vorab — forcedReinigung bleibt rein informativ.
+  //
+  // Fork: dasselbe gilt für eine während einer Pause gemeldete Erektion (`erektionGemeldet`) — sie
+  // wird im Strafbuch nur ERKANNT; ob sie geahndet wird, entscheidet die Keyholderin.
 
   // Was einem wirksamen Eintrag FOLGT: automatische Ahndung eines falschen Geräts, Aktivitäts-
   // Stempel, die Kontrolle nach einer Reinigungspause („zeig mir, dass du wieder drin bist") und
@@ -362,6 +698,7 @@ export async function POST(req: NextRequest) {
       keyInBoxDeclared,
       lockStartTime,
       deviceId,
+      pauseDevice: type === "PAUSE_BEGIN" || type === "PAUSE_END" ? (pauseDevice || null) : null,
       reasonConfig: reasonUser,
     },
   });
@@ -391,7 +728,9 @@ export async function POST(req: NextRequest) {
   // Foto-Verifikation (Code bzw. nur Siegel) — der Vorgang inkl. der Pflicht, das oben gesetzte
   // "pending" durch einen Endzustand zu ersetzen, liegt in inspectionVerificationService. Hier steht
   // nur der Start, und `verification` ist derselbe Wert, der oben den Startwert bestimmt hat.
-  if (verification && imageUrl) {
+  // Fork: bei einer Airlock-Kontrolle ersetzt der Tag-Scan die Foto-Prüfung — der Status steht
+  // bereits auf „verified" und darf nicht von einer Code-Lesung im Foto überschrieben werden.
+  if (verification && imageUrl && !kontrolleAirlockValidated) {
     void runInspectionVerification({
       entryId: entry.id,
       userId: session.user.id,
@@ -413,6 +752,20 @@ export async function POST(req: NextRequest) {
 
   if (type === "VERSCHLUSS" || type === "OEFFNEN") {
     revalidatePath("/dashboard", "layout");
+  }
+
+  // Fork — Fire-and-forget: die KI-Keyholderin reagiert auf den neuen Eintrag (Chat-Nachricht; Push
+  // nur bei KG-Typen). WEAR_BEGIN/END bleiben aussen vor (Spam); Pausen sind für sie relevant. Ein
+  // schwebender Aufruf (Riegel) ist noch keine Tat — wie die Keyholder-Meldung oben nicht jetzt.
+  if (!awaitsBolt && ["VERSCHLUSS", "OEFFNEN", "PRUEFUNG", "ORGASMUS", "PAUSE_BEGIN", "PAUSE_END"].includes(type)) {
+    reactToSubEvent(session.user.id, session.user.name ?? session.user.id, type, note ?? null, imageUrl ?? null).catch(() => {});
+  }
+
+  // Fork — Fire-and-forget: erreicht dieser Eintrag ein Trainingsziel, entsteht das Belohnungs-
+  // Guthaben automatisch — die Keyholderin muss es danach nur noch gewähren. Nur trage-abschliessende
+  // Typen (OEFFNEN/WEAR_END) erhöhen die kumulierte Tragezeit.
+  if (!awaitsBolt && (type === "OEFFNEN" || type === "WEAR_END")) {
+    autoGrantReachedGoals(session.user.id).catch(() => {});
   }
 
   return NextResponse.json(entry, { status: 201 });

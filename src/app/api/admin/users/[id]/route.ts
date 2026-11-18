@@ -5,12 +5,15 @@ import { prisma } from "@/lib/prisma";
 import { prepareEmailInput } from "@/lib/loginIdentity";
 import { requireAdminApi, requireKeyholderOrAdminApi, requireKeyholderOrAdminActor, sessionActor } from "@/lib/authGuards";
 import bcrypt from "bcryptjs";
-import { passwordErrorCode, isValidLocale } from "@/lib/constants";
+import { passwordErrorCode, isValidLocale, CLEANING_MAX_MINUTES_RANGE, CLEANING_MAX_PER_DAY_RANGE } from "@/lib/constants";
+import { clamp } from "@/lib/utils";
 import { getActiveLockPeriod, getIsLocked } from "@/lib/queries";
 import { buildNewEntryCategoryRows } from "@/lib/categoryRows";
 import { isUniqueConstraintOn } from "@/lib/prismaErrors";
 import { recordAdminPasswordChange } from "@/lib/passwordAudit";
-import { setCleaningSettings } from "@/lib/cleaningService";
+import { setCleaningSettings, parseCleaningWindows } from "@/lib/cleaningService";
+import { setToiletteSettings } from "@/lib/toiletteService";
+import { setOrgasmBudgetSettings } from "@/lib/orgasmBudgetService";
 import { setAutoKontrolleSettings } from "@/lib/autoKontrolleService";
 import { setInspectionEscalationSettings } from "@/lib/inspectionEscalationService";
 import { setReasonConfig } from "@/lib/reasonsService";
@@ -120,6 +123,41 @@ export async function PATCH(
       windows: body.cleaningWindows, // roh — der Service validiert/normalisiert
       changedBy: sessionActor(actor),
     }));
+  }
+
+  if (
+    body.toiletteErlaubt !== undefined || body.toiletteMaxMinuten !== undefined ||
+    body.toiletteMaxProTag !== undefined
+  ) {
+    return serviceResponse(await setToiletteSettings(id, {
+      erlaubt: body.toiletteErlaubt !== undefined ? Boolean(body.toiletteErlaubt) : undefined,
+      maxMinuten: body.toiletteMaxMinuten !== undefined ? Number(body.toiletteMaxMinuten) : undefined,
+      maxProTag: body.toiletteMaxProTag !== undefined ? Number(body.toiletteMaxProTag) : undefined,
+    }));
+  }
+
+  if (body.orgasmBudget !== undefined || body.orgasmBudgetPeriode !== undefined) {
+    const r = await setOrgasmBudgetSettings(id, {
+      budget: body.orgasmBudget !== undefined ? (body.orgasmBudget === null ? null : Number(body.orgasmBudget)) : undefined,
+      periode: body.orgasmBudgetPeriode !== undefined ? String(body.orgasmBudgetPeriode) : undefined,
+    });
+    return r.ok ? NextResponse.json({ ok: true }) : NextResponse.json({ error: r.error }, { status: 400 });
+  }
+
+  if (
+    body.plugReinigungErlaubt !== undefined || body.plugReinigungMaxMinuten !== undefined ||
+    body.plugReinigungMaxProTag !== undefined || body.plugReinigungsFenster !== undefined ||
+    body.plugToiletteMaxMinuten !== undefined
+  ) {
+    const data: Record<string, unknown> = {};
+    if (body.plugReinigungErlaubt !== undefined) data.plugReinigungErlaubt = Boolean(body.plugReinigungErlaubt);
+    if (body.plugReinigungMaxMinuten !== undefined) data.plugReinigungMaxMinuten = clamp(Number(body.plugReinigungMaxMinuten), CLEANING_MAX_MINUTES_RANGE);
+    if (body.plugReinigungMaxProTag !== undefined) data.plugReinigungMaxProTag = clamp(Number(body.plugReinigungMaxProTag), CLEANING_MAX_PER_DAY_RANGE);
+    if (body.plugReinigungsFenster !== undefined) data.plugReinigungsFenster = JSON.stringify(parseCleaningWindows(body.plugReinigungsFenster));
+    // Plug-Toilette ist immer erlaubt & unbegrenzt — nur Max.-Dauer konfigurierbar.
+    if (body.plugToiletteMaxMinuten !== undefined) data.plugToiletteMaxMinuten = clamp(Number(body.plugToiletteMaxMinuten), CLEANING_MAX_MINUTES_RANGE);
+    await prisma.user.update({ where: { id }, data });
+    return NextResponse.json({ ok: true });
   }
 
   if (

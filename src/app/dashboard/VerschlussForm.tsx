@@ -34,9 +34,13 @@ interface Props {
   boxName?: string;
   /** Riegel-Schalter der Keyholderin: der Verschluss gilt erst, wenn die Box „Riegel zu" meldet. */
   boltGated?: boolean;
+  /** Airlock-NFC: dem Sub zugewiesene Locks (Pool). */
+  airlockAssignedCodes?: string[];
+  /** Airlock-NFC: von der Anforderung vorgegebenes Lock (Pflicht-Scan). null = keine Vorgabe. */
+  anforderungAirlockCode?: string | null;
 }
 
-export default function VerschlussForm({ initial, minTime, tz, nowDefault, mobileDesktopMode, redirectTo, devices, anforderungDeviceId, bildersafe, boxConfirm, boxName, boltGated }: Props) {
+export default function VerschlussForm({ initial, minTime, tz, nowDefault, mobileDesktopMode, redirectTo, devices, anforderungDeviceId, bildersafe, boxConfirm, boxName, boltGated, airlockAssignedCodes, anforderungAirlockCode }: Props) {
   const apiError = useApiError();
   const tDash = useTranslations("dashboard");
   const router = useRouter();
@@ -74,6 +78,8 @@ export default function VerschlussForm({ initial, minTime, tz, nowDefault, mobil
       boxConfirm={boxConfirm}
       boxName={boxName}
       boltGated={boltGated}
+      airlockAssignedCodes={airlockAssignedCodes}
+      anforderungAirlockCode={anforderungAirlockCode}
       isEdit={!!initial}
       submitFn={submitFn}
       onSuccess={onSuccess}

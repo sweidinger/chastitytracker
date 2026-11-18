@@ -28,6 +28,26 @@ export const ENTRY_GUARD_CODES = [
   "ALREADY_WEARING",
   "NOT_WEARING",
   "BOX_PHOTO_REQUIRED",
+  // Fork: Sessions, Pausen und Koerperregion-Exklusivitaet kennt der Upstream nicht.
+  "REGION_CONFLICT",
+  "SESSION_DEVICE_REQUIRED",
+  "SESSION_WRONG_CATEGORY",
+  "SESSION_ALREADY_ACTIVE",
+  "SESSION_NOT_ACTIVE",
+  "SESSION_VIDEO_REQUIRED",
+  "PAUSE_DEVICE_REQUIRED",
+  "PAUSE_PHOTO_REQUIRED",
+  "PAUSE_ALREADY_ACTIVE",
+  "PAUSE_NOT_ACTIVE",
+  "PAUSE_NOT_LOCKED",
+  "PAUSE_NOT_WEARING",
+  "PAUSE_REASON_REQUIRED",
+  "PAUSE_LIMIT_REACHED",
+  "PLUG_REINIGUNG_FENSTER",
+  "ORGASMUS_PHOTO_REQUIRED",
+  // Airlock-NFC: ein aktiver Airlock-Verschluss (Einweg-Lock) lässt keine temporäre Reinigungs-/
+  // Toiletten-Pause zu — nur endgültiges Ablegen. Siehe docs/AIRLOCK_NFC.md.
+  "AIRLOCK_NO_TEMP_OPEN",
 ] as const;
 
 /** Returned by `validateEntryPayload` (constants.ts) for a malformed create-payload. */
@@ -60,6 +80,21 @@ export const ENTRY_ROUTE_CODES = [
   "USER_NOT_FOUND",
   "BOX_PHOTO_REUSED",
   "DELETE_KEYHOLDER_ONLY",
+  // Airlock-NFC (Weg A): der Nachweis wird VOR der Transaktion geprüft (Netz-Call), diese Codes
+  // gibt die entries-Route direkt zurück. Siehe docs/AIRLOCK_NFC.md § 4.5/4.6.
+  "AIRLOCK_NOT_REACHABLE",
+  "AIRLOCK_TAG_INVALID",
+  "AIRLOCK_TAG_UID_MISMATCH",
+  "AIRLOCK_TAG_NOT_REGISTERED",
+  "AIRLOCK_TAG_RETIRED",
+  "AIRLOCK_WRONG_LOCK",
+  "AIRLOCK_CONTROL_REQUIRES_TAG",
+  // Die Keyholderin hat bei der Anforderung ein Airlock-Lock vorgegeben → der Verschluss muss per NFC damit erfolgen.
+  "AIRLOCK_VERSCHLUSS_REQUIRES_TAG",
+  // Sicherheits-Feature: zugewiesenes Lock erst nach Vorab-Verifikation (Tag-Scan) zum Verschluss nutzbar.
+  "AIRLOCK_LOCK_UNVERIFIED",
+  // Fork: Reinigung/Toilette laufen über die Pause-Funktion (PAUSE_BEGIN/PAUSE_END), nicht über OEFFNEN/WEAR_END.
+  "CLEANING_VIA_PAUSE",
 ] as const;
 
 export type EntryGuardCode = (typeof ENTRY_GUARD_CODES)[number];

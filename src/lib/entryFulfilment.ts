@@ -219,8 +219,14 @@ export async function applyEntryFulfilment(
   // Matching auf die vorgegebene Art, wenn gesetzt; sonst zählt jeder Orgasmus.
   // Das FENSTER prüft immer die Eintrags-Zeit (wann fand der Orgasmus statt?), unabhängig von `at`
   // — das war schon vor der Extraktion so und ist bei Rückdatierung erst recht richtig.
+  //
+  // Fork: ein Straf-Fenster (z.B. ruinierter Orgasmus, Pflicht) und ein Belohnungs-Fenster (Art
+  // "Belohnung") dürfen GLEICHZEITIG offen sein (getrennter Verdrängungs-Scope in
+  // `createOrgasmusAnforderung`). Deshalb alle offenen Fenster lesen und das neueste nehmen, dessen
+  // Art der Eintrag erfüllt — sonst nähme `findFirst` stur das neueste, und ein Orgasmus der
+  // anderen Art liesse das passende, ältere Fenster offen.
   if (type === "ORGASMUS") {
-    const offeneAnforderung = await tx.orgasmusAnforderung.findFirst({
+    const offeneAnforderungen = await tx.orgasmusAnforderung.findMany({
       where: {
         userId,
         fulfilledAt: null,
@@ -240,7 +246,8 @@ export async function applyEntryFulfilment(
     });
     // Welche Art die Vorgabe verlangt und wann ein Eintrag sie erfüllt, sagt `orgasmTypeSatisfies` —
     // dieselbe Frage stellt das Strafbuch, um „falsche Art" von „versäumt" zu trennen.
-    if (offeneAnforderung && orgasmTypeSatisfies(offeneAnforderung.requiredType, entry.orgasmusArt)) {
+    const offeneAnforderung = offeneAnforderungen.find((a) => orgasmTypeSatisfies(a.requiredType, entry.orgasmusArt));
+    if (offeneAnforderung) {
       await tx.orgasmusAnforderung.update({
         where: { id: offeneAnforderung.id },
         data: { fulfilledAt: at, entryId },

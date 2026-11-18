@@ -20,13 +20,16 @@ CREATE TABLE "new_KontrollAnforderung" (
     "autoMarkedRemovedAt" DATETIME,
     "autoMarkedEntryId" TEXT,
     "cleaningRelock" BOOLEAN NOT NULL DEFAULT false,
+    -- Fork-Spalten (sweidinger): beim Tabellen-Neuaufbau mitnehmen, sonst gehen sie verloren
+    "requireCode" BOOLEAN NOT NULL DEFAULT true,
+    "device" TEXT,
     CONSTRAINT "KontrollAnforderung_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "KontrollAnforderung_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "DeviceCategory" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "KontrollAnforderung_deviceId_fkey" FOREIGN KEY ("deviceId") REFERENCES "Device" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "KontrollAnforderung_entryId_fkey" FOREIGN KEY ("entryId") REFERENCES "Entry" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "KontrollAnforderung_autoMarkedEntryId_fkey" FOREIGN KEY ("autoMarkedEntryId") REFERENCES "Entry" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
-INSERT INTO "new_KontrollAnforderung" ("auto", "autoMarkedEntryId", "autoMarkedRemovedAt", "benachrichtigtAt", "benachrichtigtReminderAt", "cleaningRelock", "code", "createdAt", "deadline", "entryId", "fulfilledAt", "id", "kommentar", "userId", "wirksamAb", "withdrawnAt") SELECT "auto", "autoMarkedEntryId", "autoMarkedRemovedAt", "benachrichtigtAt", "benachrichtigtReminderAt", "cleaningRelock", "code", "createdAt", "deadline", "entryId", "fulfilledAt", "id", "kommentar", "userId", "wirksamAb", "withdrawnAt" FROM "KontrollAnforderung";
+INSERT INTO "new_KontrollAnforderung" ("auto", "autoMarkedEntryId", "autoMarkedRemovedAt", "benachrichtigtAt", "benachrichtigtReminderAt", "cleaningRelock", "code", "createdAt", "deadline", "entryId", "fulfilledAt", "id", "kommentar", "userId", "wirksamAb", "withdrawnAt", "requireCode", "device") SELECT "auto", "autoMarkedEntryId", "autoMarkedRemovedAt", "benachrichtigtAt", "benachrichtigtReminderAt", "cleaningRelock", "code", "createdAt", "deadline", "entryId", "fulfilledAt", "id", "kommentar", "userId", "wirksamAb", "withdrawnAt", "requireCode", "device" FROM "KontrollAnforderung";
 DROP TABLE "KontrollAnforderung";
 ALTER TABLE "new_KontrollAnforderung" RENAME TO "KontrollAnforderung";
 CREATE UNIQUE INDEX "KontrollAnforderung_entryId_key" ON "KontrollAnforderung"("entryId");

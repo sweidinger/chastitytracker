@@ -14,6 +14,8 @@ const config: CapacitorConfig = {
       "*.trublue.ch",
       "*.chastitytracker.ch",
       "*.chastity-tracker.com",
+      // Lokaler Beta-/Prod-Server (selbstsigniertes HTTPS) für On-Device-Tests im LAN.
+      "10.0.1.9",
     ],
     androidScheme: "https",
     // NUR für lokale Entwickler-Läufe: `CAP_DEV_URL=http://<mac-ip>:3000 npx cap sync ios` lässt die

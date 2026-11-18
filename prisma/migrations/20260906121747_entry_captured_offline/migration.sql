@@ -29,10 +29,18 @@ CREATE TABLE "new_Entry" (
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "source" TEXT NOT NULL DEFAULT 'user',
     "capturedOffline" BOOLEAN NOT NULL DEFAULT false,
+    -- Fork-Spalten (sweidinger): beim Tabellen-Neuaufbau mitnehmen, sonst gehen sie verloren
+    "erektionGemeldet" BOOLEAN NOT NULL DEFAULT false,
+    "falschesGeraet" BOOLEAN NOT NULL DEFAULT false,
+    "sessionGoalAchieved" BOOLEAN,
+    "videoUrl" TEXT,
+    "pauseDevice" TEXT,
+    "airlockCode" TEXT,
+    "airlockUid" TEXT,
     CONSTRAINT "Entry_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "Entry_deviceId_fkey" FOREIGN KEY ("deviceId") REFERENCES "Device" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
-INSERT INTO "new_Entry" ("boltConfirmedAt", "boxImageUrl", "clientRequestId", "codeImageUrl", "codeReadable", "createdAt", "deviceCheck", "deviceCheckExpected", "deviceCheckNote", "deviceId", "id", "imageExifTime", "imageUrl", "keyDetected", "keyInBox", "kontrollCode", "note", "oeffnenGrund", "orgasmusArt", "source", "startTime", "type", "userId", "verifikationReason", "verifikationReasonDetected", "verifikationStatus") SELECT "boltConfirmedAt", "boxImageUrl", "clientRequestId", "codeImageUrl", "codeReadable", "createdAt", "deviceCheck", "deviceCheckExpected", "deviceCheckNote", "deviceId", "id", "imageExifTime", "imageUrl", "keyDetected", "keyInBox", "kontrollCode", "note", "oeffnenGrund", "orgasmusArt", "source", "startTime", "type", "userId", "verifikationReason", "verifikationReasonDetected", "verifikationStatus" FROM "Entry";
+INSERT INTO "new_Entry" ("boltConfirmedAt", "boxImageUrl", "clientRequestId", "codeImageUrl", "codeReadable", "createdAt", "deviceCheck", "deviceCheckExpected", "deviceCheckNote", "deviceId", "id", "imageExifTime", "imageUrl", "keyDetected", "keyInBox", "kontrollCode", "note", "oeffnenGrund", "orgasmusArt", "source", "startTime", "type", "userId", "verifikationReason", "verifikationReasonDetected", "verifikationStatus", "erektionGemeldet", "falschesGeraet", "sessionGoalAchieved", "videoUrl", "pauseDevice", "airlockCode", "airlockUid") SELECT "boltConfirmedAt", "boxImageUrl", "clientRequestId", "codeImageUrl", "codeReadable", "createdAt", "deviceCheck", "deviceCheckExpected", "deviceCheckNote", "deviceId", "id", "imageExifTime", "imageUrl", "keyDetected", "keyInBox", "kontrollCode", "note", "oeffnenGrund", "orgasmusArt", "source", "startTime", "type", "userId", "verifikationReason", "verifikationReasonDetected", "verifikationStatus", "erektionGemeldet", "falschesGeraet", "sessionGoalAchieved", "videoUrl", "pauseDevice", "airlockCode", "airlockUid" FROM "Entry";
 DROP TABLE "Entry";
 ALTER TABLE "new_Entry" RENAME TO "Entry";
 CREATE INDEX "Entry_userId_idx" ON "Entry"("userId");

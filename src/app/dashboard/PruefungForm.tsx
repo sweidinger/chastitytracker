@@ -44,9 +44,11 @@ interface Props {
   boxPhotoRequired?: boolean;
   /** ZIEL der Kontrolle — nur für den Code-Push der Selbstkontrolle (siehe PruefungFormCore). */
   categoryId?: string | null;
+  /** Airlock-NFC: aktiver Verschluss war ein Airlock → NFC-Scan statt Handschrift-Code. */
+  airlockControl?: boolean;
 }
 
-export default function PruefungForm({ initial, minTime, tz, nowDefault, initialCode, initialKommentar, sealRequired, codeRequired, targetDeviceId, targetLabel, codePushControlId, categoryId, mobileDesktopMode, redirectTo, boxConfirm, boxPhotoRequired }: Props) {
+export default function PruefungForm({ initial, minTime, tz, nowDefault, initialCode, initialKommentar, sealRequired, codeRequired, targetDeviceId, targetLabel, codePushControlId, categoryId, mobileDesktopMode, redirectTo, boxConfirm, boxPhotoRequired, airlockControl }: Props) {
   const apiError = useApiError();
   const tDash = useTranslations("dashboard");
   const router = useRouter();
@@ -88,6 +90,7 @@ export default function PruefungForm({ initial, minTime, tz, nowDefault, initial
       mobileDesktopMode={mobileDesktopMode}
       boxConfirm={boxConfirm}
       boxPhotoRequired={boxPhotoRequired}
+      airlockControl={airlockControl}
       isEdit={!!initial}
       // Der Träger reicht über die Warteschlange nach (siehe submitFn): Foto offline zwischenspeicherbar.
       // NUR beim Anlegen — der Edit-Pfad sendet direkt per PATCH (submitFn), ein Offline-Marker

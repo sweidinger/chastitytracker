@@ -43,6 +43,7 @@ export async function GET(req: NextRequest) {
       imageUrl: true,
       purchasePrice: true,
       currency: true,
+      sortOrder: true,
       createdAt: true,
       archivedAt: true,
     },
@@ -62,6 +63,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
   const { name, description, imageUrl, purchasePrice, currency, categoryId, requireInspectionCode } = body;
+  const sortOrder = Number.isFinite(Number(body.sortOrder)) ? Math.trunc(Number(body.sortOrder)) : 0;
 
   // Admin OR keyholder of the target may create devices for that user
   let userId = session.user.id;
@@ -107,6 +109,7 @@ export async function POST(req: NextRequest) {
       currency: currency || null,
       categoryId: categoryId || null,
       ...(requireInspectionCode !== undefined ? { requireInspectionCode } : {}),
+      sortOrder,
     },
   });
 

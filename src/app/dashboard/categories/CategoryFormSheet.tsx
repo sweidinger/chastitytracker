@@ -23,6 +23,7 @@ import {
 import CategoryIconRender from "@/app/components/CategoryIcon";
 import { DEVICE_NAME_MAX_LENGTH } from "@/lib/constants";
 import Toggle from "@/app/components/Toggle";
+import Select from "@/app/components/Select";
 import type { CategoryRow } from "./CategoriesClient";
 
 interface Props {
@@ -58,6 +59,14 @@ export default function CategoryFormSheet({ category, onClose, onSaved, userId, 
   // nichts. Beide Schritte in einem Formular, damit sie gar nicht erst entstehen kann (Issue #49).
   // Optional bleibt es trotzdem: wer mehrere Kategorien vorbereitet, soll nicht ausgebremst werden.
   const [firstDeviceName, setFirstDeviceName] = useState("");
+  // Fork: Session-Kategorie (z.B. Dildo), max. Session-Dauer und Körperregion.
+  const [isSessionCategory, setIsSessionCategory] = useState<boolean>(
+    category?.isSessionCategory ?? false,
+  );
+  const [maxSessionMinutes, setMaxSessionMinutes] = useState<number>(
+    category?.maxSessionMinutes ?? 30,
+  );
+  const [region, setRegion] = useState<string>(category?.region ?? "other");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -81,6 +90,9 @@ export default function CategoryFormSheet({ category, onClose, onSaved, userId, 
       trackingEnabled,
       requirePhoto,
       allowVorgaben,
+      isSessionCategory,
+      maxSessionMinutes,
+      region,
     };
     if (userId) payload.userId = userId;
     if (!isEdit && firstDeviceName.trim()) payload.firstDeviceName = firstDeviceName.trim();
@@ -182,13 +194,67 @@ export default function CategoryFormSheet({ category, onClose, onSaved, userId, 
           </div>
         </div>
 
+        {/* Fork: Session-Kategorie + Körperregion. Keine der drei Upstream-REGELN — die Route nimmt
+            sie von jedem Bearbeiter an. Session-Kategorie nur bei nicht eingebauten Kategorien (die
+            Route ignoriert sie sonst); die Region gilt auch für die eingebaute Plug-Kategorie. Die
+            Regel-Felder (Tracking/Foto) setzt der Server bei einer Session-Kategorie selbst auf aus,
+            deshalb fasst der Schalter hier die Regel-Zustände nicht an (sonst lehnte die Route die
+            Änderung für einen Träger ohne Regel-Recht ab). */}
+        <div className="flex flex-col gap-3 pt-3 border-t border-border-subtle">
+          {!category?.isBuiltIn && (
+            <div className="flex flex-col gap-1.5">
+              <Toggle
+                label={t("isSessionCategory")}
+                checked={isSessionCategory}
+                onChange={setIsSessionCategory}
+                disabled={saving}
+              />
+              <p className="text-xs text-foreground-faint">{t("isSessionCategoryHint")}</p>
+            </div>
+          )}
+
+          {/* Körperregion — verhindert, dass zwei Geräte derselben Region gleichzeitig aktiv sind. */}
+          <div className="flex flex-col gap-1.5">
+            <Select
+              label={t("regionLabel")}
+              value={region}
+              onChange={(e) => setRegion(e.target.value)}
+              disabled={saving}
+              options={[
+                { value: "other", label: t("regionOther") },
+                { value: "genital", label: t("regionGenital") },
+                { value: "anal", label: t("regionAnal") },
+              ]}
+            />
+            <p className="text-xs text-foreground-faint">{t("regionHint")}</p>
+          </div>
+
+          {/* Max session duration. Video-Beweis + Orgasmus-Ziel werden pro „Session anfordern"
+              gesetzt, nicht mehr an der Kategorie. */}
+          {isSessionCategory && (
+            <Input
+              label={t("maxSessionMinutes")}
+              type="number"
+              value={String(maxSessionMinutes)}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (!isNaN(v)) setMaxSessionMinutes(Math.max(1, Math.min(120, v)));
+              }}
+              min={1}
+              max={120}
+              disabled={saving}
+              hint={t("maxSessionMinutesHint")}
+            />
+          )}
+        </div>
+
         {/* Die drei REGELN der Kategorie. Nur für Keyholder/Admin und nie bei der eingebauten
             Kategorie — dieselbe Schranke, die die Route durchsetzt (categories/[id]/route.ts).
             Ausgeblendet statt deaktiviert: ein Schalter, den man nie bewegen kann, erklärt sich dem
             Träger nicht und wirft nur die Frage auf, was ihm fehlt. Der Zustand bleibt derweil auf
             dem geladenen Wert, wird also unverändert mitgeschickt — und unverändert nimmt die Route
-            ihn von jedem an. */}
-        {canEditRules && !category?.isBuiltIn && (
+            ihn von jedem an. Fork: bei einer Session-Kategorie entfallen sie (keine Wear-Sessions). */}
+        {canEditRules && !category?.isBuiltIn && !isSessionCategory && (
         <div className="flex flex-col gap-3 pt-3 border-t border-border-subtle">
           <div className="flex flex-col gap-1.5">
             <Toggle

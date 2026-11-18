@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { resolveUserContext, notesForEntities, entityKey, makeIso, makeFmt, buildEnvelope, parseIsoDate, type Envelope, type NoteDTO } from "@/lib/mcp/common";
 import { buildStrafbuch, type StrafbuchControlOffense } from "@/lib/strafbuch";
-import { collectDetectedOffenses, cleaningNotRelockedRef, STORED_TYPE, type OffenseCanonicalType } from "@/lib/strafurteilService";
+import { collectDetectedOffenses, cleaningNotRelockedRef, computeSeverities, OFFENSE_SEVERITY, SEVERITY_RANK, SEVERITY_PENALTY_SUGGESTIONS, STORED_TYPE, type OffenseCanonicalType, type OffenseSeverity } from "@/lib/strafurteilService";
 import { offenseState, offenseNeedsAttention, type OffenseState } from "@/lib/offenseTypes";
 import { taskFailureKind, type TaskFailureKind } from "@/lib/tasks";
 import { missedWeightRef } from "@/lib/weightObligation";
@@ -32,9 +32,14 @@ export interface OffenseJudgment {
    *  abschliessen tust du (`judge_offense` complete). Rein additiv, kein schemaVersion-Bump. */
   reportedDoneAt: string | null;
   ref: { type: string; id: string };
+  /** Fork: effektive Schwere-Stufe (inkl. Wiederholungs-Eskalation) — Orientierung fuers Strafmass. */
+  severity: OffenseSeverity;
+  /** Fork: Basis-Schwere ohne Eskalation. */
+  baseSeverity: OffenseSeverity;
+  /** Fork: true = durch Wiederholung hochgestuft. */
+  escalated: boolean;
 }
 
-/** A Kontroll-based offense in Strafbuch form (Zwischenstufe von `get_offenses`). */
 export interface StrafbuchControlRow extends OffenseJudgment {
   /** null = Kontrolle ohne Code-Pflicht (Gerät mit `requireInspectionCode: false`). */
   code: string | null;
@@ -78,7 +83,13 @@ export interface StrafbuchOverview {
   missedOrgasmInstructions: ({ windowEndedAt: string; message: string | null; requiredType: string | null } & OffenseJudgment)[];
   wrongOrgasmTypes: ({ windowEndedAt: string; message: string | null; requiredType: string | null; reportedType: string | null } & OffenseJudgment)[];
   /** Lock requests whose deadline passed without a timely VERSCHLUSS. */
-  lateLocks: ({ deadline: string; fulfilledAt: string | null; message: string | null } & OffenseJudgment)[];
+  lateLocks: ({ deadline: string; fulfilledAt: string | null; message: string | null; categoryName: string | null } & OffenseJudgment)[];
+  /** Fork: Session-Anforderungen, deren Frist ohne passende Session ablief. */
+  missedSessions: ({ windowEndedAt: string; message: string | null; categoryName: string | null } & OffenseJudgment)[];
+  /** Fork: beim Oeffnen (Reinigung/Toilette) wurde eine Erektion gemeldet. */
+  erektionViolations: ({ time: string | null; oeffnenGrund: string | null; note: string | null } & OffenseJudgment)[];
+  /** Fork: abgeschlossene Pause ueber der erlaubten Maximaldauer. */
+  pauseOverageViolations: ({ time: string | null; device: string | null; grund: string | null; dauerMin: number; maxMin: number } & OffenseJudgment)[];
   /** REINIGUNG openings not (or too late) followed by a VERSCHLUSS within the re-lock deadline. */
   cleaningNotRelocked: ({ time: string; deadline: string; relockedAt: string | null; note: string | null } & OffenseJudgment)[];
   /** Aufgaben, die nicht erfüllt wurden — EIN Vergehenstyp, aber vier Arten ihn zu begehen.
@@ -111,6 +122,8 @@ export interface StrafbuchOverview {
   /** Von Hand notierte Vergehen — die einzigen, die nicht aus Einträgen abgeleitet sind. Entstehen
    *  über `record_offense` bzw. die Admin-Oberfläche. */
   manualOffenses: ({ time: string; title: string; description: string | null; recordedBy: string } & OffenseJudgment)[];
+  /** Orgasmen ueber dem Orgasmus-Budget des laufenden Zeitraums. */
+  orgasmOverBudgetViolations: ({ time: string | null; orgasmusArt: string | null; used: number; limit: number } & OffenseJudgment)[];
 }
 
 /** Baut den Strafbuch-Snapshot. Nimmt den bereits aufgelösten User: `getOffenses` hat ihn ohnehin
@@ -122,6 +135,7 @@ async function mcpStrafbuch(userId: string, timezone: string, now: Date): Promis
   // Urteil pro Vergehen (per refId aufgelöst).
   const judgmentByRef = new Map(sb.strafeRecords.map((r) => [r.refId, r]));
   const detected = collectDetectedOffenses(sb);
+  const sevMap = computeSeverities(sb, now);
 
   // Relevanz in einem Durchlauf: pending-penalty ⊂ open (= unbeurteilt ODER bestraft-nicht-erledigt).
   // Die Regel steht in `offenseNeedsAttention` — dieselbe, die `openOnly` und die `top`-Liste des
@@ -141,6 +155,8 @@ async function mcpStrafbuch(userId: string, timezone: string, now: Date): Promis
     // — die Ausgabe bleibt bitgleich, deshalb auch KEIN schemaVersion-Bump.
     const state = offenseState(rec);
     const judgment = state === "done" ? "punished" : state;
+    const sev = sevMap.get(refId);
+    const base = sev?.base ?? OFFENSE_SEVERITY[canonicalType as OffenseCanonicalType] ?? "mittel";
     return {
       judgment,
       penalty: judgment === "punished" ? (rec?.reason ?? null) : null,
@@ -152,6 +168,9 @@ async function mcpStrafbuch(userId: string, timezone: string, now: Date): Promis
       doneAt: rec?.erledigtAt ? fmt(rec.erledigtAt) : null,
       reportedDoneAt: rec?.reportedDoneAt ? fmt(rec.reportedDoneAt) : null,
       ref: { type: canonicalType, id: refId },
+      severity: sev?.severity ?? base,
+      baseSeverity: base,
+      escalated: sev?.escalated ?? false,
     };
   };
 
@@ -205,10 +224,31 @@ async function mcpStrafbuch(userId: string, timezone: string, now: Date): Promis
       reportedType: m.reportedType,
       ...judge("wrong_orgasm_type", m.id),
     })),
+    missedSessions: sb.missedSessions.map((m) => ({
+      windowEndedAt: fmt(m.endetAt),
+      message: m.nachricht,
+      categoryName: m.categoryName,
+      ...judge("missed_session", m.id),
+    })),
+    erektionViolations: sb.erektionViolations.map((v) => ({
+      time: v.startTime ? fmt(v.startTime) : null,
+      oeffnenGrund: v.oeffnenGrund,
+      note: v.note,
+      ...judge("erektion", v.entryId),
+    })),
+    pauseOverageViolations: sb.pauseOverageViolations.map((v) => ({
+      time: v.startTime ? fmt(v.startTime) : null,
+      device: v.device,
+      grund: v.grund,
+      dauerMin: v.dauerMin,
+      maxMin: v.maxMin,
+      ...judge("pause_overage", v.entryId),
+    })),
     lateLocks: sb.lateLocks.map((a) => ({
       deadline: fmt(a.endsAt),
       fulfilledAt: a.fulfilledAt ? fmt(a.fulfilledAt) : null,
       message: a.message,
+      categoryName: a.categoryName,
       ...judge("late_lock", a.id),
     })),
     cleaningNotRelocked: sb.cleaningNotRelocked.map((c) => ({
@@ -263,6 +303,13 @@ async function mcpStrafbuch(userId: string, timezone: string, now: Date): Promis
       recordedBy: m.createdBy,
       ...judge("manual_offense", m.id),
     })),
+    orgasmOverBudgetViolations: sb.orgasmOverBudgetViolations.map((v) => ({
+      time: v.startTime ? fmt(v.startTime) : null,
+      orgasmusArt: v.orgasmusArt,
+      used: v.used,
+      limit: v.limit,
+      ...judge("orgasm_over_budget", v.entryId),
+    })),
   };
 }
 
@@ -276,7 +323,7 @@ async function mcpStrafbuch(userId: string, timezone: string, now: Date): Promis
  *  markieren `possiblyClusterInternal`, statt automatisch zu verwerfen — die Entscheidung trifft
  *  der Keyholder via judge_offense. */
 
-/** Kanonische Offense-Taxonomie — ABGELEITET, nicht abgeschrieben. Die handgeführte Kopie hatte
+/** Kanonische Offense-Taxonomie — ABGELEITET, nicht abgeschrieben. Die handgefuehrte Kopie hatte
  *  `auto_removed_control` nie mitbekommen und driftete still von der Wahrheit weg (`STORED_TYPE`).
  *  Genau dieselbe Klasse Fehler liess `get_offenses` eine ganze Vergehens-Kategorie unterschlagen. */
 export const OFFENSE_TYPES = Object.keys(STORED_TYPE) as OffenseCanonicalType[];
@@ -284,6 +331,12 @@ export const OFFENSE_TYPES = Object.keys(STORED_TYPE) as OffenseCanonicalType[];
 export interface OffenseRow {
   id: string;
   type: string;
+  /** Effektive Schwere-Stufe (inkl. Wiederholungs-Eskalation) — Orientierung fuers Strafmass. */
+  severity: OffenseSeverity;
+  /** Basis-Schwere ohne Eskalation. */
+  baseSeverity: OffenseSeverity;
+  /** true = durch Wiederholung hochgestuft. */
+  escalated: boolean;
   /** ISO-8601 mit Offset. */
   detectedAt: string | null;
   status: "open" | "judged";
@@ -334,12 +387,18 @@ export interface LedgerResult extends Envelope {
    *  die mit einem Orgasmus ANDERER Art beantwortet wurde, zählt nicht mehr als `missed_orgasm`
    *  (versäumt), sondern als `wrong_orgasm_type` — dieselbe Zeile, dieselbe `ref`, ein bereits
    *  gefälltes Urteil bleibt an ihr hängen. `missed_orgasm` meint damit nur noch: im Fenster wurde
-   *  gar kein Orgasmus gemeldet. Die Art lässt sich mit `set_offense_rules` abschalten. */
+   *  gar kein Orgasmus gemeldet. Die Art lässt sich mit `set_offense_rules` abschalten.
+   *
+   *  Fork (rein additiv, daher kein Bump): `severity`/`baseSeverity`/`escalated` je Zeile,
+   *  `penaltySuggestionsBySeverity` und die Arten `missed_session`, `erektion`, `pause_overage`,
+   *  `orgasm_over_budget`; `context.categoryName` bei `late_lock`. */
   schemaVersion: 5;
   user: string;
   detectedOffenseCount: number;
   openOffenseCount: number;
   pendingPenaltyCount: number;
+  /** Straf-Vorschläge je Schwere-Stufe (Orientierung, nicht bindend). */
+  penaltySuggestionsBySeverity: Record<OffenseSeverity, string[]>;
   offenses: OffenseRow[];
 }
 
@@ -348,6 +407,9 @@ function toRow(detectedAt: string | null, j: OffenseJudgment, context: Record<st
   return {
     id: j.ref.id,
     type: j.ref.type,
+    severity: j.severity,
+    baseSeverity: j.baseSeverity,
+    escalated: j.escalated,
     detectedAt,
     status: j.judgment === "open" ? "open" : "judged",
     judgment: j.judgment,
@@ -408,7 +470,10 @@ export function buildOffenseRows(
     }),
     ...sb.missedOrgasmInstructions.map((m) => toRow(m.windowEndedAt, m, { message: m.message, requiredType: m.requiredType })),
     ...sb.wrongOrgasmTypes.map((m) => toRow(m.windowEndedAt, m, { message: m.message, requiredType: m.requiredType, reportedType: m.reportedType })),
-    ...sb.lateLocks.map((a) => toRow(a.fulfilledAt ?? a.deadline, a, { deadline: a.deadline, fulfilledAt: a.fulfilledAt, message: a.message })),
+    ...sb.missedSessions.map((m) => toRow(m.windowEndedAt, m, { message: m.message, categoryName: m.categoryName })),
+    ...sb.erektionViolations.map((v) => toRow(v.time, v, { oeffnenGrund: v.oeffnenGrund, note: v.note })),
+    ...sb.pauseOverageViolations.map((v) => toRow(v.time, v, { device: v.device, grund: v.grund, dauerMin: v.dauerMin, maxMin: v.maxMin })),
+    ...sb.lateLocks.map((a) => toRow(a.fulfilledAt ?? a.deadline, a, { deadline: a.deadline, fulfilledAt: a.fulfilledAt, message: a.message, categoryName: a.categoryName })),
     ...sb.cleaningNotRelocked.map((c) => toRow(c.relockedAt ?? c.deadline, c, { time: c.time, deadline: c.deadline, relockedAt: c.relockedAt, note: c.note })),
     ...sb.unfulfilledTasks.map((t) => toRow(t.failedAt ?? t.holdUntil, t, { title: t.title, holdUntil: t.holdUntil, state: t.state, failedAt: t.failedAt, failureKind: t.failureKind })),
     ...sb.adminPasswordChanges.map((p) => toRow(p.time, p, { adminUsername: p.adminUsername, via: p.via, lockPeriodEndedAt: p.lockPeriodEndedAt })),
@@ -416,6 +481,7 @@ export function buildOffenseRows(
     ...sb.missedWeightReports.map((m) => toRow(m.time, m, { day: m.day, days: m.days })),
     ...sb.boxPhotoMissing.map((b) => toRow(b.time, b, { boltClosedAt: b.boltClosedAt, entryId: b.entryId })),
     ...sb.manualOffenses.map((m) => toRow(m.time, m, { title: m.title, description: m.description, recordedBy: m.recordedBy })),
+    ...sb.orgasmOverBudgetViolations.map((v) => toRow(v.time, v, { orgasmusArt: v.orgasmusArt, used: v.used, limit: v.limit })),
   ];
 }
 
@@ -488,6 +554,9 @@ export async function getOffenses(username: string, opts: GetOffensesOptions = {
     r.statement = st ? { text: st.text, at: fmt(st.editedAt ?? st.createdAt) } : null;
   }
 
+  // Schwere zuerst (schwer→leicht), dann neueste zuerst.
+  rows.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || (b.detectedAt ?? "").localeCompare(a.detectedAt ?? ""));
+
   return {
     schemaVersion: 5,
     user: username,
@@ -495,6 +564,11 @@ export async function getOffenses(username: string, opts: GetOffensesOptions = {
     detectedOffenseCount: sb.detectedOffenseCount,
     openOffenseCount: sb.openOffenseCount,
     pendingPenaltyCount: sb.pendingPenaltyCount,
+    penaltySuggestionsBySeverity: {
+      schwer: SEVERITY_PENALTY_SUGGESTIONS.schwer.map((s) => s.label),
+      mittel: SEVERITY_PENALTY_SUGGESTIONS.mittel.map((s) => s.label),
+      leicht: SEVERITY_PENALTY_SUGGESTIONS.leicht.map((s) => s.label),
+    },
     offenses: rows,
   };
 }

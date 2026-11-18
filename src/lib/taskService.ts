@@ -26,6 +26,7 @@ import { structuredLog } from "@/lib/serverLog";
 import { deleteUploadedFiles } from "@/lib/imageUtils";
 import { NOT_PAUSED_WHERE, isHealthHoldActive } from "@/lib/healthHold";
 import { markLastAction } from "@/lib/appMeta";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 
 /**
  * Aufgaben-Service — Anlegen, Ändern, Zurückziehen, Erledigt-Melden.
@@ -371,17 +372,21 @@ async function checkRequirements(
   const deviceIds = [...new Set(normalized.map((r) => r.deviceId).filter((v): v is string => !!v))];
   const categoryIds = [...new Set(normalized.map((r) => r.categoryId).filter((v): v is string => !!v))];
 
-  const [devices, categories] = await Promise.all([
+  // KG = die eingebaute Kategorie mit slug "kg" — NICHT jede `isBuiltIn`-Kategorie: im Fork ist
+  // auch die Plug-Kategorie eingebaut, und auf sie darf ein Trage-Auftrag sehr wohl zielen.
+  type DeviceRow = { id: string; category: { slug: string } | null };
+  type CategoryRow = { id: string; slug: string };
+  const [devices, categories]: [DeviceRow[], CategoryRow[]] = await Promise.all([
     deviceIds.length
       ? db.device.findMany({
           where: { id: { in: deviceIds }, userId, archivedAt: null },
-          select: { id: true, category: { select: { isBuiltIn: true } } },
+          select: { id: true, category: { select: { slug: true } } },
         })
       : Promise.resolve([]),
     categoryIds.length
       ? db.deviceCategory.findMany({
           where: { id: { in: categoryIds }, userId },
-          select: { id: true, isBuiltIn: true },
+          select: { id: true, slug: true },
         })
       : Promise.resolve([]),
   ]);
@@ -395,7 +400,7 @@ async function checkRequirements(
       // Auch an der GERÄTE-Tür: ein Trage-Auftrag auf das KG-Gerät wäre unerfüllbar, weil ein
       // WEAR_BEGIN darauf abgewiesen wird (prepareWearEntry → WEAR_DEVICE_KG). Ohne diese Prüfung
       // liesse sich die Regel über `deviceId` umgehen.
-      if (n.type === "WEAR" && dev.category?.isBuiltIn) {
+      if (n.type === "WEAR" && dev.category?.slug === KG_BUILTIN_SLUG) {
         return serviceFail(400, "TASK_REQUIREMENT_KG_CATEGORY");
       }
     }
@@ -403,7 +408,7 @@ async function checkRequirements(
       const cat = categoryById.get(n.categoryId);
       if (!cat) return serviceFail(400, "INVALID_CATEGORY");
       // Der KG ist keine Trage-Kategorie — er wird über type=KG_LOCKED gefordert.
-      if (cat.isBuiltIn) return serviceFail(400, "TASK_REQUIREMENT_KG_CATEGORY");
+      if (cat.slug === KG_BUILTIN_SLUG) return serviceFail(400, "TASK_REQUIREMENT_KG_CATEGORY");
     }
   }
   return { ok: true, normalized };

@@ -2,7 +2,7 @@ import { formatDateTime, formatDate, formatTime, hasExifMismatch, toDateLocale, 
 export type { SessionEvent } from "@/lib/sessionHelpers";
 import { getTranslations, getLocale } from "next-intl/server";
 import { getKombinierterPill } from "@/lib/kontrollePills";
-import SessionDurationBadge from "./SessionDurationBadge";
+import { PauseAwareDuration, PauseControl, PauseQuotaLine } from "./PauseAwareTimer";
 import type { SessionEventData } from "./SessionEventRow";
 import SessionTimeline from "./SessionTimeline";
 import Section from "@/app/components/Section";
@@ -12,6 +12,7 @@ import PendingCallNotice from "@/app/components/PendingCallNotice";
 import BoxHardwareLine from "@/app/components/BoxHardwareLine";
 import LiveTrainingGoals from "./LiveTrainingGoals";
 import LockPeriodRemaining from "@/app/components/LockPeriodRemaining";
+import type { PauseQuotaEntry } from "@/lib/pauseService";
 
 import type { SessionEvent } from "@/lib/sessionHelpers";
 import { inspectionHref } from "@/lib/entryFormRoute";
@@ -65,6 +66,13 @@ interface Props {
   jahrH: number;
   /** Governing timezone of the data owner (sub). Defaults to APP_TZ (Europe/Zurich). */
   tz?: string;
+  /** ISO-Zeitstempel einer aktiven Cage-Pause (PAUSE_BEGIN ohne PAUSE_END). */
+  activeCagePauseSince?: string | null;
+  /** Heutiges Rest-Kontingent der Cage-Pausen (Reinigung/Toilette). Nur erlaubte Arten enthalten;
+   *  leer/weglassen = keine Zeile. Spiegelt die Tageslimit-Durchsetzung in api/entries. */
+  pauseQuota?: PauseQuotaEntry[];
+  /** Name des getragenen KG-Geräts (null = keins gewählt → Unterzeile ausgeblendet). */
+  deviceName?: string | null;
   /** Blendet die „Gerät"-Zeile im Kontroll-Detail ein (true, wenn der Nutzer Geräte hat). */
   userHasDevices?: boolean;
   /** Die Öffnung, die bei der LockMeBox noch auf „Riegel offen" wartet (docs/lockmebox.md) — nur in
@@ -94,8 +102,11 @@ export default async function LaufendeSessionCard({
   monatH,
   jahrH,
   tz = APP_TZ,
+  activeCagePauseSince = null,
+  deviceName = null,
   userHasDevices = false,
   openCall = null,
+  pauseQuota = [],
 }: Props) {
   const t = await getTranslations("dashboard");
   const tCommon = await getTranslations("common");
@@ -144,8 +155,10 @@ export default async function LaufendeSessionCard({
         tone="lock"
         word={t("locked")}
         icon={<LockClosedIcon size={15} strokeWidth={2.2} className="shrink-0" />}
-        value={<SessionDurationBadge since={sessionStart.toISOString()} pausedMs={interruptionPausedMs} />}
-        footnote={`${t("sessionSince")} ${sessionStartStr}`}
+        // Fork: pause-bewusst — während einer Cage-Pause steht die Zahl (Pausen zählen nicht).
+        value={<PauseAwareDuration since={sessionStart.toISOString()} alreadyPausedMs={interruptionPausedMs} activePauseSince={activeCagePauseSince} />}
+        // Fork: der getragene KG steht vor dem Beginn — welches Gerät, nicht nur dass.
+        footnote={`${deviceName ? `${deviceName} · ` : ""}${t("sessionSince")} ${sessionStartStr}`}
       >
         {/* Die Sperrzeit steht VOR der Hardware-Zeile und eine Stufe lauter (`text-fliess`).
             Sie war die kleinste Schrift des Bildschirms, obwohl sie das Einzige ist, was die
@@ -182,6 +195,20 @@ export default async function LaufendeSessionCard({
             Nicht bei `scheduledForStr`: eine erst geplante Sperrzeit bindet noch nichts. */}
         {showLockPeriod && !scheduledForStr && lockBreakNote && (
           <p className="relative mt-1 text-neben text-foreground-faint">{lockBreakNote}</p>
+        )}
+
+        {/* Fork: Pausen (Reinigung/Toilette) — Knopf und heutiges Rest-Kontingent. Nur in der Sicht
+            des Trägers: die Pause-Formulare liegen unter `/dashboard`, die Keyholder-Sicht
+            (`subjectId` gesetzt) würde dort von `proxy.ts` zurückgeworfen. */}
+        {!subjectId && (
+          <>
+            <PauseControl
+              activePauseSince={activeCagePauseSince}
+              pauseStartHref="/dashboard/new/pause-start?device=CAGE"
+              pauseEndHref="/dashboard/new/pause-end?device=CAGE"
+            />
+            <PauseQuotaLine quota={pauseQuota} />
+          </>
         )}
 
         {/* Wie FEST der Verschluss ist — zuletzt, weil es die leiseste der drei Auskünfte ist.

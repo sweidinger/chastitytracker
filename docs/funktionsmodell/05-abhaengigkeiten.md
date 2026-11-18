@@ -14,7 +14,7 @@ Zwei Arten von Kanten, und der Unterschied ist wichtig:
 - ***feste Regel*** — dahinter steht **kein** Schalter. Diese Kanten sind die, die im Betrieb
   überraschen: man sucht die Einstellung, die das verursacht hat, und es gibt keine.
 
-Insgesamt 160 Kanten über 19 Mechaniken, davon 20 fest verdrahtet.
+Insgesamt 192 Kanten über 19 Mechaniken, davon 20 fest verdrahtet.
 
 ## Einträge
 
@@ -27,6 +27,7 @@ flowchart LR
   nGerte["Geräte"] --> nEintrge
   nOrgasmus["Orgasmus"] --> nEintrge
   nAufgaben["Aufgaben"] --> nEintrge
+  nSperrzeit["Sperrzeit"] --> nEintrge
   nEintrge --> nKontrollen["Kontrollen"]
   nEintrge --> nAufgaben["Aufgaben"]
   nEintrge --> nOberflche["Oberfläche"]
@@ -49,6 +50,12 @@ flowchart LR
 | Geräte | `DeviceCategory.requirePhoto` | Ein Trage-Beginn dieser Kategorie verlangt ein Bild. Bei der eingebauten Kategorie unveränderlich. | `deviceCategoryService.ts:resolveCategoryRuleChanges` |
 | Orgasmus | `OrgasmusAnforderung.requiredType` | Verlangt eine bestimmte Orgasmus-Art; leer = beliebig. Nur ein passender Eintrag erfüllt. | — |
 | Aufgaben | `TaskRequirement.type` | `KG_LOCKED` (verschlossen bleiben) oder `WEAR` (etwas tragen). Der KG ist bewusst keine Trage-Kategorie. | — |
+| Geräte | `DeviceCategory.isSessionCategory` | Session-Kategorie: statt Tragezeit (Beginn/Ende) zeitlich begrenzte Sessions. Nicht für die eingebaute KG-Kategorie. | — |
+| Geräte | `DeviceCategory.requiresVideo` | Das Session-Ende dieser Kategorie braucht einen Video-Nachweis. | — |
+| Geräte | `DeviceCategory.region` | Körperregion: zwei aktive Geräte derselben Region (ausser `other`) schliessen sich aus. | — |
+| Sperrzeit | `VerschlussAnforderung.airlockCode` | Vorgegebenes Airlock-Lock aus dem Pool des Subs; der Verschluss muss genau dieses Lock per NFC nachweisen. | — |
+| Sperrzeit | `VerschlussAnforderung.fotoPflicht` | Foto-Pflicht beim Verschluss für genau diese Anforderung. `null` = Standard der Kategorie. | — |
+| Orgasmus | `OrgasmusAnforderung.fotoPflicht` | Foto-Nachweis beim Erfassen des Orgasmus erforderlich. | — |
 | Kontrollen | *feste Regel* | Eskalationsstufe 2 legt selbst einen Öffnen-Eintrag an — ohne Zutun des Subs und ohne dass die Box aufgeht. Eine Sperrzeit hebt sie dabei bewusst nicht auf. | `inspectionEscalationService.ts` |
 | Geräte | *feste Regel* | Das massgebliche Gerät eines Segments ist das EFFEKTIVE: bei einem Konflikt zwischen Bild und Deklaration gewinnt das Bild — ausser innerhalb eines Lookalike-Clusters. | `sessionModel.ts:effectiveDevice` |
 | Aufgaben | *feste Regel* | Die Bedingungen einer Aufgabe werden bei jedem Lesen aus den Einträgen abgeleitet. Ein nachgetragener Eintrag korrigiert die Aufgabe von selbst; es gibt nichts zu bestätigen. | `tasks.ts` |
@@ -82,6 +89,10 @@ flowchart LR
 | Kontrollen | `Entry.deviceId` | Welches Gerät der Eintrag betrifft. Bei einem Konflikt mit dem Bild gewinnt das Bild, nicht diese Deklaration. | — |
 | Sessions/Statistik | `Entry.startTime` | Der Zeitpunkt, den der Eintrag behauptet. Auf dem Sub-Pfad gegen Rückdatierung begrenzt, auf dem Keyholder-Pfad frei — dort erfüllt ein Nachtrag nur, was es zu seinem Zeitpunkt schon gab. | `entryFulfilment.ts` |
 | Strafbuch | `Entry.startTime` | Der Zeitpunkt, den der Eintrag behauptet. Auf dem Sub-Pfad gegen Rückdatierung begrenzt, auf dem Keyholder-Pfad frei — dort erfüllt ein Nachtrag nur, was es zu seinem Zeitpunkt schon gab. | `entryFulfilment.ts` |
+| Strafbuch | `Entry.erektionGemeldet` | Beim Öffnen (Reinigung/Toilette) gemeldet: es lag eine Erektion vor. Erscheint im Strafbuch, ohne automatisches Urteil. | — |
+| Strafbuch | `Entry.falschesGeraet` | Beim Verschluss: ein anderes Gerät als das von der Anforderung vorgegebene. Erscheint im Strafbuch, ohne automatisches Urteil. | — |
+| Sperrzeit | `Entry.falschesGeraet` | Beim Verschluss: ein anderes Gerät als das von der Anforderung vorgegebene. Erscheint im Strafbuch, ohne automatisches Urteil. | — |
+| Sessions/Statistik | `Entry.sessionGoalAchieved` | Beim Session-Ende: Ziel der Session erreicht? Entscheidet mit über die Erfüllung einer Session-Anforderung. | — |
 | Auto-Kontrollen | *feste Regel* | Bei eingeschalteter Verschluss-Kontrolle erzeugt JEDER neu erfasste Verschluss — vom Träger wie von der Keyholderin — eine zusätzliche Kontrolle, sofern der Träger dann auch verschlossen ist. Sie ersetzt keine geplante; der Tagesplan bleibt unberührt. Gerechnet wird ab dem Erfassen, nicht ab der Eintrags-Zeit. | `autoKontrolleService.ts:schedulePostLockInspection` |
 | Sperrzeit | *feste Regel* | Eine Öffnung ohne Deckung hebt JEDE aktive Sperrzeit auf. Eine erlaubte Reinigungsöffnung und ein Orgasmus-Öffnungsfenster tun das nicht. | `queries.ts:releaseLockPeriodsOnOpen` |
 | Sessions/Statistik | *feste Regel* | Sessions, Segmente und jede Stundenzahl entstehen beim LESEN aus den Einträgen. Nichts davon ist gestempelt — ein korrigierter Eintrag korrigiert alles Nachgelagerte mit. | `sessionModel.ts:buildSessions` |
@@ -108,6 +119,7 @@ flowchart LR
   nSperrzeit --> nStrafbuch["Strafbuch"]
   nSperrzeit --> nBenachrichtigungen["Benachrichtigungen"]
   nSperrzeit --> nNachrichten["Nachrichten"]
+  nSperrzeit --> nEintrge["Einträge"]
 ```
 
 ### Hängt ab von
@@ -126,6 +138,8 @@ flowchart LR
 | MCP | `HealthHold.active` | Gesundheits-Halt: setzt die Direktiven aus. Die eine Bremse, die über allem steht. | `healthHold.ts` |
 | MCP | `RecurringContext.deviceFree` | Der Slot verlangt Gerätefreiheit — die Information, wegen der der Keyholder ihn überhaupt führt. | — |
 | MCP | `Appointment.deviceFree` | Der Termin verlangt Gerätefreiheit. | — |
+| Reinigung | `User.toiletteErlaubt` | Ob Toiletten-Öffnungen erlaubt sind — eine erlaubte Toiletten-Pause bricht die Tragezeit nicht. Wie bei der Reinigung muss eine aktive Sperrzeit es zusätzlich erlauben. | — |
+| Einträge | `Entry.falschesGeraet` | Beim Verschluss: ein anderes Gerät als das von der Anforderung vorgegebene. Erscheint im Strafbuch, ohne automatisches Urteil. | — |
 | Einträge | *feste Regel* | Eine Öffnung ohne Deckung hebt JEDE aktive Sperrzeit auf. Eine erlaubte Reinigungsöffnung und ein Orgasmus-Öffnungsfenster tun das nicht. | `queries.ts:releaseLockPeriodsOnOpen` |
 | Box | *feste Regel* | Die Failsafes (leerer Akku, zu lange offline, absolutes Hard-Cap) öffnen physisch auch gegen eine laufende Sperrzeit und gegen den Keyholder. Der Tracker-Zustand ändert sich dabei NICHT — beide laufen dann auseinander. | `boxOpenOutlook.ts` |
 
@@ -142,6 +156,10 @@ flowchart LR
 | Strafbuch | `VerschlussAnforderung.deviceId` | Verlangt ein bestimmtes Gerät. Nur hieraus entsteht das Vergehen „falsches Gerät“ — der Bild-Abgleich allein tut es nie. | — |
 | Benachrichtigungen | `VerschlussAnforderung.wirksamAb` | Terminierte Auslösung. Bis dahin existiert die Direktive für den Sub nicht: keine Anzeige, keine Meldung, keine laufende Frist. | — |
 | Nachrichten | `VerschlussAnforderung.message` | Begleittext an den Sub; erscheint in der Meldung und im Posteingang. | — |
+| Geräte | `VerschlussAnforderung.deviceCategoryId` | Für welche Geräte-Kategorie die Anforderung gilt. `null` = KG. | — |
+| Einträge | `VerschlussAnforderung.airlockCode` | Vorgegebenes Airlock-Lock aus dem Pool des Subs; der Verschluss muss genau dieses Lock per NFC nachweisen. | — |
+| Einträge | `VerschlussAnforderung.fotoPflicht` | Foto-Pflicht beim Verschluss für genau diese Anforderung. `null` = Standard der Kategorie. | — |
+| Reinigung | `VerschlussAnforderung.toiletteErlaubt` | Ob eine Toiletten-Öffnung die Sperrzeit NICHT bricht; gilt für genau diese Sperrzeit und wird bei einer Anforderung mit Mindestdauer vererbt. | — |
 | Box | *feste Regel* | Läuft eine Sperrzeit, hält die Box den Schlüssel fest. Die Sperre ist damit mehr als ein Datenbank-Eintrag. | `boxCommand.ts` |
 
 ## Reinigung
@@ -170,6 +188,7 @@ flowchart LR
 | Einträge | `User.oeffnenGruendeConfig` | Auswahlliste der Öffnungsgründe. `REINIGUNG` ist der Grund, an dem die gesamte Reinigungslogik hängt — er lässt sich nicht wegkonfigurieren. | `reasonsService.ts` |
 | Sperrzeit | `VerschlussAnforderung.cleaningAllowed` | Erlaubt DIESE Sperrzeit eine Reinigungsöffnung (und damit einen Gerätewechsel)? Es müssen ALLE gleichzeitig aktiven Sperrzeiten erlauben, nicht nur die neueste. | `queries.ts:foldActiveLockPeriods` |
 | Einträge | `Entry.oeffnenGrund` | Grund einer Öffnung. `REINIGUNG` ist der eine Wert, an dem die gesamte Reinigungsmechanik hängt — er entscheidet, ob die Sperrzeit fällt. | `queries.ts:isAllowedCleaningOpen` |
+| Sperrzeit | `VerschlussAnforderung.toiletteErlaubt` | Ob eine Toiletten-Öffnung die Sperrzeit NICHT bricht; gilt für genau diese Sperrzeit und wird bei einer Anforderung mit Mindestdauer vererbt. | — |
 
 ### Wirkt auf
 
@@ -183,6 +202,18 @@ flowchart LR
 | Sessions/Statistik | `User.cleaningMaxMinutes` | Höchstdauer EINER Pause. Darüber hinaus zählt die Pause als Tragezeit-Unterbrechung und wird zum erkannten Vergehen. | `cleaningRules.ts:cleaningRulesAt` |
 | Strafbuch | `User.cleaningMaxPerDay` | ANZAHL Öffnungen pro Kalendertag des Subs (kein Minutenbudget). 0 = unbegrenzt. Wird nur erkannt, nie durchgesetzt. | `cleaningService.ts:maxPausesPerDaySentinel` |
 | Box | `User.cleaningWindows` | Tages-Zeitfenster (JSON-Liste). Binden NUR während einer Sperrzeit, die die Reinigung erlaubt. Leere Liste = nicht zeitgebunden, kein Verbot. | `queries.ts:cleaningWindowBindingStatus` |
+| Sperrzeit | `User.toiletteErlaubt` | Ob Toiletten-Öffnungen erlaubt sind — eine erlaubte Toiletten-Pause bricht die Tragezeit nicht. Wie bei der Reinigung muss eine aktive Sperrzeit es zusätzlich erlauben. | — |
+| Strafbuch | `User.toiletteErlaubt` | Ob Toiletten-Öffnungen erlaubt sind — eine erlaubte Toiletten-Pause bricht die Tragezeit nicht. Wie bei der Reinigung muss eine aktive Sperrzeit es zusätzlich erlauben. | — |
+| Strafbuch | `User.toiletteMaxMinuten` | Höchstdauer EINER Toiletten-Pause; darüber wird sie zum erkannten Vergehen. | — |
+| Sessions/Statistik | `User.toiletteMaxMinuten` | Höchstdauer EINER Toiletten-Pause; darüber wird sie zum erkannten Vergehen. | — |
+| Strafbuch | `User.toiletteMaxProTag` | Anzahl Toiletten-Öffnungen pro Kalendertag. 0 = unbegrenzt. | — |
+| Strafbuch | `User.plugReinigungErlaubt` | Ob Reinigungspausen des Plugs erlaubt sind — getrennt vom KG. | — |
+| Geräte | `User.plugReinigungErlaubt` | Ob Reinigungspausen des Plugs erlaubt sind — getrennt vom KG. | — |
+| Strafbuch | `User.plugReinigungMaxMinuten` | Höchstdauer EINER Plug-Reinigungspause. | — |
+| Sessions/Statistik | `User.plugReinigungMaxMinuten` | Höchstdauer EINER Plug-Reinigungspause. | — |
+| Strafbuch | `User.plugReinigungMaxProTag` | Anzahl Plug-Reinigungen pro Kalendertag. 0 = unbegrenzt. | — |
+| Strafbuch | `User.plugToiletteMaxMinuten` | Höchstdauer einer Plug-Toiletten-Pause. Die Pause selbst ist immer erlaubt und unbegrenzt oft. | — |
+| Sessions/Statistik | `User.plugToiletteMaxMinuten` | Höchstdauer einer Plug-Toiletten-Pause. Die Pause selbst ist immer erlaubt und unbegrenzt oft. | — |
 | Auto-Kontrollen | *feste Regel* | Jeder SELBST erfasste Wiederverschluss nach einer Reinigungspause erzeugt eine Kontrolle (15–45 min, im Schlaf-Fenster 5–15). Sie ersetzt die nächste noch nicht zugestellte Auto-Kontrolle des Tages. Feste Regel, keine Einstellung — nur der Hauptschalter der Automatik schaltet sie ab. Ist die Verschluss-Kontrolle eingeschaltet, übernimmt DIESE den Wiederverschluss und die Regel hier greift nicht. | `autoKontrolleService.ts:scheduleCleaningRelockInspection` |
 | Sessions/Statistik | *feste Regel* | Eine Pause zerlegt die KG-Session in Segmente und wird von der Tragedauer abgezogen — die Session bricht dabei nicht. | `sessionModel.ts:buildSessions` |
 | Geräte | *feste Regel* | Es gibt keinen eigenen Gerätewechsel: er läuft über eine Reinigungsöffnung und verbraucht damit deren Tageskontingent. | — |
@@ -263,6 +294,7 @@ Steckbrief: [35-orgasmus.md](35-orgasmus.md)
 flowchart LR
   nOrgasmus["Orgasmus"]
   nEintrge["Einträge"] --> nOrgasmus
+  nGerte["Geräte"] --> nOrgasmus
   nOrgasmus --> nStrafbuch["Strafbuch"]
   nOrgasmus --> nEintrge["Einträge"]
   nOrgasmus --> nSperrzeit["Sperrzeit"]
@@ -274,6 +306,7 @@ flowchart LR
 | Woher | Wodurch | Was passiert | Anker |
 |---|---|---|---|
 | Einträge | `User.orgasmusArtenConfig` | Auswahlliste der Orgasmus-Arten im Erfassungsformular (JSON). Leer = die eingebauten Arten. | `reasonsService.ts` |
+| Geräte | `DeviceCategory.orgasmusZiel` | Standard-Orgasmus-Ziel einer Session: KEINE, ERFORDERLICH oder VERBOTEN. Eine Session-Anforderung kann es überschreiben. | — |
 | Einträge | *feste Regel* | Ein passender Orgasmus-Eintrag im Fenster erfüllt die Direktive selbsttätig — passend heisst: die vorgegebene Art stimmt, sofern eine gesetzt ist. | `entryFulfilment.ts` |
 
 ### Wirkt auf
@@ -286,6 +319,10 @@ flowchart LR
 | Sperrzeit | `OrgasmusAnforderung.openingAllowed` | Erlaubt das Öffnen im Fenster, ohne dass es als unautorisiert zählt — der einzige Weg, eine Sperrzeit gezielt zu durchbrechen. | — |
 | Strafbuch | `OrgasmusAnforderung.openingAllowed` | Erlaubt das Öffnen im Fenster, ohne dass es als unautorisiert zählt — der einzige Weg, eine Sperrzeit gezielt zu durchbrechen. | — |
 | Nachrichten | `OrgasmusAnforderung.message` | Begleittext an den Sub. | — |
+| Strafbuch | `User.orgasmBudget` | Höchstzahl zählbarer Orgasmen je Zeitraum — echte Orgasmen ausserhalb einer erfüllten Anweisung. `null` = kein Budget. | — |
+| Strafbuch | `User.orgasmBudgetPeriode` | Zeitraum des Budgets: WOCHE oder MONAT. | — |
+| Strafbuch | `OrgasmusAnforderung.istStrafe` | Als Strafe angeordnet — Nicht-Erfüllung eskaliert strenger. | — |
+| Einträge | `OrgasmusAnforderung.fotoPflicht` | Foto-Nachweis beim Erfassen des Orgasmus erforderlich. | — |
 
 ## Aufgaben
 
@@ -405,6 +442,18 @@ flowchart LR
 | Aufgaben | `Task.isPunishment` | Als Strafe gestellt. Rein kennzeichnend — die Verknüpfung zum Urteil steht in `StrafeRecord.taskId`. | — |
 | Aufgaben | `Task.penaltyReason` | Begründung der Strafaufgabe. | — |
 | Aufgaben | `TaskProof.dueOffsetMin` | Eigene Frist dieses Nachweises, in Minuten ab dem Nullpunkt der Aufgabe. Verstreicht sie unerfüllt, ist die Aufgabe SOFORT versäumt, nicht erst am Ende. | `tasks.ts:proofDeadline` |
+| Reinigung | `User.toiletteErlaubt` | Ob Toiletten-Öffnungen erlaubt sind — eine erlaubte Toiletten-Pause bricht die Tragezeit nicht. Wie bei der Reinigung muss eine aktive Sperrzeit es zusätzlich erlauben. | — |
+| Reinigung | `User.toiletteMaxMinuten` | Höchstdauer EINER Toiletten-Pause; darüber wird sie zum erkannten Vergehen. | — |
+| Reinigung | `User.toiletteMaxProTag` | Anzahl Toiletten-Öffnungen pro Kalendertag. 0 = unbegrenzt. | — |
+| Reinigung | `User.plugReinigungErlaubt` | Ob Reinigungspausen des Plugs erlaubt sind — getrennt vom KG. | — |
+| Reinigung | `User.plugReinigungMaxMinuten` | Höchstdauer EINER Plug-Reinigungspause. | — |
+| Reinigung | `User.plugReinigungMaxProTag` | Anzahl Plug-Reinigungen pro Kalendertag. 0 = unbegrenzt. | — |
+| Reinigung | `User.plugToiletteMaxMinuten` | Höchstdauer einer Plug-Toiletten-Pause. Die Pause selbst ist immer erlaubt und unbegrenzt oft. | — |
+| Orgasmus | `User.orgasmBudget` | Höchstzahl zählbarer Orgasmen je Zeitraum — echte Orgasmen ausserhalb einer erfüllten Anweisung. `null` = kein Budget. | — |
+| Orgasmus | `User.orgasmBudgetPeriode` | Zeitraum des Budgets: WOCHE oder MONAT. | — |
+| Einträge | `Entry.erektionGemeldet` | Beim Öffnen (Reinigung/Toilette) gemeldet: es lag eine Erektion vor. Erscheint im Strafbuch, ohne automatisches Urteil. | — |
+| Einträge | `Entry.falschesGeraet` | Beim Verschluss: ein anderes Gerät als das von der Anforderung vorgegebene. Erscheint im Strafbuch, ohne automatisches Urteil. | — |
+| Orgasmus | `OrgasmusAnforderung.istStrafe` | Als Strafe angeordnet — Nicht-Erfüllung eskaliert strenger. | — |
 | Kontrollen | *feste Regel* | Versäumt, abgelehnt oder automatisch als abgenommen gebucht — in jedem Fall ein erkanntes Vergehen, unabhängig davon, ob die Eskalation eingeschaltet ist. | — |
 | Aufgaben | *feste Regel* | Eine nicht erfüllte Aufgabe ergibt GENAU EIN Vergehen — welcher der drei Vorwürfe gemeint ist, sagt erst die Ausfall-Art. | — |
 | Zugang | *feste Regel* | Wird das Passwort eines ADMIN-Kontos geändert, während eine Sperrzeit läuft, entsteht ein Vergehen — als einziges im Moment des Vorgangs festgeschrieben statt live abgeleitet. | `passwordAudit.ts` |
@@ -438,6 +487,7 @@ flowchart LR
   nGerte --> nStrafbuch["Strafbuch"]
   nGerte --> nOberflche["Oberfläche"]
   nGerte --> nEintrge["Einträge"]
+  nGerte --> nOrgasmus["Orgasmus"]
 ```
 
 ### Hängt ab von
@@ -452,6 +502,8 @@ flowchart LR
 | Trainingsziele | `TrainingVorgabe.categoryId` | Für welche Kategorie das Ziel gilt. Kategorien mit `allowVorgaben: false` sind hier nicht wählbar. | — |
 | Aufgaben | `TaskRequirement.categoryId` | Geforderte Kategorie bei einer Trage-Bedingung. | — |
 | Aufgaben | `TaskRequirement.deviceId` | Das konkrete Gerät; enger als die Kategorie und hat Vorrang. | — |
+| Reinigung | `User.plugReinigungErlaubt` | Ob Reinigungspausen des Plugs erlaubt sind — getrennt vom KG. | — |
+| Sperrzeit | `VerschlussAnforderung.deviceCategoryId` | Für welche Geräte-Kategorie die Anforderung gilt. `null` = KG. | — |
 | Reinigung | *feste Regel* | Es gibt keinen eigenen Gerätewechsel: er läuft über eine Reinigungsöffnung und verbraucht damit deren Tageskontingent. | — |
 
 ### Wirkt auf
@@ -476,6 +528,14 @@ flowchart LR
 | Oberfläche | `DeviceCategory.sortOrder` | Reihenfolge in Listen und Auswahlfeldern. | — |
 | Oberfläche | `DeviceCategory.color` | Farbmarke der Kategorie (CSS-Variablen-Suffix). | — |
 | Oberfläche | `DeviceCategory.icon` | Symbol der Kategorie (Name aus CATEGORY_ICONS). | — |
+| Oberfläche | `Device.sortOrder` | Reihenfolge der Geräte in Listen und Auswahlfeldern (auch die Grössenfolge für „nächstgrösserer Plug"). | — |
+| Einträge | `DeviceCategory.isSessionCategory` | Session-Kategorie: statt Tragezeit (Beginn/Ende) zeitlich begrenzte Sessions. Nicht für die eingebaute KG-Kategorie. | — |
+| Sessions/Statistik | `DeviceCategory.isSessionCategory` | Session-Kategorie: statt Tragezeit (Beginn/Ende) zeitlich begrenzte Sessions. Nicht für die eingebaute KG-Kategorie. | — |
+| Sessions/Statistik | `DeviceCategory.maxSessionMinutes` | Höchstdauer einer Session dieser Kategorie. | — |
+| Einträge | `DeviceCategory.requiresVideo` | Das Session-Ende dieser Kategorie braucht einen Video-Nachweis. | — |
+| Sessions/Statistik | `DeviceCategory.orgasmusZiel` | Standard-Orgasmus-Ziel einer Session: KEINE, ERFORDERLICH oder VERBOTEN. Eine Session-Anforderung kann es überschreiben. | — |
+| Orgasmus | `DeviceCategory.orgasmusZiel` | Standard-Orgasmus-Ziel einer Session: KEINE, ERFORDERLICH oder VERBOTEN. Eine Session-Anforderung kann es überschreiben. | — |
+| Einträge | `DeviceCategory.region` | Körperregion: zwei aktive Geräte derselben Region (ausser `other`) schliessen sich aus. | — |
 | Einträge | *feste Regel* | Das massgebliche Gerät eines Segments ist das EFFEKTIVE: bei einem Konflikt zwischen Bild und Deklaration gewinnt das Bild — ausser innerhalb eines Lookalike-Clusters. | `sessionModel.ts:effectiveDevice` |
 
 ## Box
@@ -750,6 +810,7 @@ flowchart LR
 | Geräte | `DeviceCategory.sortOrder` | Reihenfolge in Listen und Auswahlfeldern. | — |
 | Geräte | `DeviceCategory.color` | Farbmarke der Kategorie (CSS-Variablen-Suffix). | — |
 | Geräte | `DeviceCategory.icon` | Symbol der Kategorie (Name aus CATEGORY_ICONS). | — |
+| Geräte | `Device.sortOrder` | Reihenfolge der Geräte in Listen und Auswahlfeldern (auch die Grössenfolge für „nächstgrösserer Plug"). | — |
 
 ### Wirkt auf
 
@@ -793,6 +854,13 @@ flowchart LR
 | Trainingsziele | `TrainingVorgabe.minProWocheH` | Dasselbe je Woche. Die vier Perioden gelten nebeneinander, nicht alternativ. | — |
 | Trainingsziele | `TrainingVorgabe.minProMonatH` | Dasselbe je Monat. | — |
 | Trainingsziele | `TrainingVorgabe.minProJahrH` | Dasselbe je Jahr. | — |
+| Reinigung | `User.toiletteMaxMinuten` | Höchstdauer EINER Toiletten-Pause; darüber wird sie zum erkannten Vergehen. | — |
+| Reinigung | `User.plugReinigungMaxMinuten` | Höchstdauer EINER Plug-Reinigungspause. | — |
+| Reinigung | `User.plugToiletteMaxMinuten` | Höchstdauer einer Plug-Toiletten-Pause. Die Pause selbst ist immer erlaubt und unbegrenzt oft. | — |
+| Einträge | `Entry.sessionGoalAchieved` | Beim Session-Ende: Ziel der Session erreicht? Entscheidet mit über die Erfüllung einer Session-Anforderung. | — |
+| Geräte | `DeviceCategory.isSessionCategory` | Session-Kategorie: statt Tragezeit (Beginn/Ende) zeitlich begrenzte Sessions. Nicht für die eingebaute KG-Kategorie. | — |
+| Geräte | `DeviceCategory.maxSessionMinutes` | Höchstdauer einer Session dieser Kategorie. | — |
+| Geräte | `DeviceCategory.orgasmusZiel` | Standard-Orgasmus-Ziel einer Session: KEINE, ERFORDERLICH oder VERBOTEN. Eine Session-Anforderung kann es überschreiben. | — |
 | Reinigung | *feste Regel* | Eine Pause zerlegt die KG-Session in Segmente und wird von der Tragedauer abgezogen — die Session bricht dabei nicht. | `sessionModel.ts:buildSessions` |
 | Einträge | *feste Regel* | Sessions, Segmente und jede Stundenzahl entstehen beim LESEN aus den Einträgen. Nichts davon ist gestempelt — ein korrigierter Eintrag korrigiert alles Nachgelagerte mit. | `sessionModel.ts:buildSessions` |
 | Trainingsziele | *feste Regel* | Ein Ziel MISST nur. Es fordert nichts ein, erzeugt keine Frist, keine Meldung und kein Vergehen — es liefert eine Zahl, die der Keyholder bewertet. | `vorgaben.ts` |

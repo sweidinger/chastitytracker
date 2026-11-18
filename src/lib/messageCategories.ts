@@ -105,6 +105,23 @@ const CATEGORY_BY_BODY_KEY: Record<MessageBodyKey, MessageCategory> = {
   // laufende Sperrzeit nicht durchgesetzt wird und er öffnen darf.
   healthHoldStartedMessage: "lock",
   healthHoldEndedMessage: "lock",
+
+  // ── Fork ──
+  penaltyConfirmedMessage: "penalty",
+  penaltyConfirmedMessagePlain: "penalty",
+  penaltyRejectedMessage: "penalty",
+  // Verdient ist eine Orgasmus-Gutschrift; Entzug und Verschiebung sind Strafen.
+  rewardEarnedMessage: "orgasm",
+  rewardRevokedMessage: "penalty",
+  rewardPostponedMessage: "penalty",
+  // Wie der Upstream-Gesundheits-Halt oben.
+  healthHoldOnMessage: "lock",
+  healthHoldOffMessage: "lock",
+  // Die Pause ist Teil des Verschlusses — und die automatische Öffnung beendet ihn.
+  pauseExpiredMessageSub: "lock",
+  pauseExpiredMessageKeyholder: "lock",
+  // Die meisten Ergebnisse des Schicksalsrads verändern die Sperrzeit (TIME_ADD/TIME_SUB).
+  zufallResultMessage: "lock",
 };
 
 /**
@@ -191,6 +208,16 @@ const PRIORITY_BY_BODY_KEY: Record<MessageBodyKey, MessagePriority> = {
   // Derselbe Code: der Verschluss hält womöglich nicht, was er verspricht. Der unsichere Vergleich
   // bleibt Alltag — er heisst nur „bitte selbst nachsehen", und er kommt bei schlechten Fotos oft.
   lockboxCodeSameMessageKeyholder: "important",
+  // Fork: abgelehnte Erledigung (Strafe wieder offen), Entzug/Verschiebung als Strafe, Gesundheits-
+  // Stopp, automatisch beendete Pause, Ergebnis des Schicksalsrads.
+  penaltyRejectedMessage: "important",
+  rewardRevokedMessage: "important",
+  rewardPostponedMessage: "important",
+  healthHoldOnMessage: "important",
+  healthHoldOffMessage: "important",
+  pauseExpiredMessageSub: "important",
+  pauseExpiredMessageKeyholder: "important",
+  zufallResultMessage: "important",
 
   // Alltag: ein Rückzug nimmt eine Pflicht WEG, eine Bestätigung schliesst sie ab.
   offenseDismissedMessage: "info",
@@ -211,6 +238,10 @@ const PRIORITY_BY_BODY_KEY: Record<MessageBodyKey, MessagePriority> = {
   weightReleaseWithdrawnMessage: "info",
   weightReleaseOpenedMessageKeyholder: "info",
   lockboxCodeUncertainMessageKeyholder: "info",
+  // Fork: bestätigte Erledigung schliesst den Loop, eine Gutschrift fordert nichts.
+  penaltyConfirmedMessage: "info",
+  penaltyConfirmedMessagePlain: "info",
+  rewardEarnedMessage: "info",
 };
 
 /** Siehe {@link PRIORITY_BY_BODY_KEY}. Ein unbekannter Schlüssel gilt als `important`: lieber einmal

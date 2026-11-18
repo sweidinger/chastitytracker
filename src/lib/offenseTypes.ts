@@ -52,6 +52,16 @@ export const STORED_TYPE = {
   // Von Hand notiert (`ManualOffense`), nicht abgeleitet. Die einzige Art ohne Regel-Schalter:
   // ein ausdrücklich notiertes Vergehen abzuschalten hiesse, die Notiz zu ignorieren.
   manual_offense: "MANUAL_OFFENSE",
+  // Fork-Arten (Sessions, Pausen, Erektions-Meldung, Orgasmus-Budget). Die gespeicherten Strings sind
+  // die des Forks — bestehende Urteile in der DB müssen weiter auf ihr Vergehen passen.
+  // Eine Session-Anforderung (Kategorie mit `isSessionCategory`) lief ab, ohne erfüllt zu werden.
+  missed_session: "SESSION_VERSAEUMT",
+  // Beim Öffnen eine Erektion gemeldet (`Entry.erektionGemeldet`).
+  erektion: "EREKTION",
+  // Eine Tragepause wurde über ihre erlaubte Dauer hinaus ausgedehnt (`pauseOverstayService.ts`).
+  pause_overage: "PAUSE_OVERAGE",
+  // Mehr Orgasmen als das verdiente Budget (`orgasmBudget`/`verdienteOrgasmen`) hergibt.
+  orgasm_over_budget: "ORGASMUS_UEBER_BUDGET",
 } as const;
 
 /**

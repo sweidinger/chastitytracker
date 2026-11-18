@@ -6,7 +6,7 @@
 Was der Tracker kann — flach aufgelistet, nach Mechanik gruppiert. Für den Betrieb, nicht für
 Endnutzer: die Spalte **Endpunkt** nennt die API-Route bzw. das MCP-Werkzeug dahinter.
 
-122 Funktionen über 19 Mechaniken, davon 14 ohne jede Bedienung — sie laufen von selbst.
+140 Funktionen über 21 Mechaniken, davon 17 ohne jede Bedienung — sie laufen von selbst.
 
 **Wer** ist der Auslöser, **Wo** die Oberfläche. Eine Funktion mit zwei Oberflächen ist EINE
 Funktion: „Kontrolle anfordern" gibt es in der App und über den MCP, und beide Wege enden im
@@ -32,6 +32,7 @@ Steckbrief: [15-eintraege.md](15-eintraege.md)
 | **Roh-Einträge lesen** | Die unaufbereitete Eintragsliste für die Keyholder-KI. | Keyholder (MCP) | MCP | `list_entries` |
 | **Foto hochladen und ausliefern** | Nimmt Bilder entgegen (Endungs-Whitelist, Magic-Byte-Prüfung, Grössenlimit) und liefert sie nur authentifiziert wieder aus. | Sub, Keyholder (UI) | App (Träger), App (Keyholder) | `/api/upload` `/api/uploads/[...path]` |
 | **Bild an die Keyholder-KI geben** | Liefert ein hinterlegtes Foto an den MCP, damit die KI es selbst ansehen kann. | Keyholder (MCP) | MCP | `get_image` |
+| **Video hochladen** | Nimmt den Video-Nachweis einer Session entgegen (Container-Prüfung über die Magic Bytes) und trägt den Besitz ein wie beim Foto. | Sub | App (Träger) | `/api/upload-video` |
 
 ## Sessions/Statistik
 
@@ -41,6 +42,7 @@ Steckbrief: [15-eintraege.md](15-eintraege.md)
 |---|---|---|---|---|
 | **Auswertungen lesen** | Session mit Segmenten und Geräte-Aufschlüsselung, Geräte-Statistik, Rekorde, Perioden-Zusammenfassung, Enthaltsamkeits-Trend und Zeitleiste. | Keyholder (MCP) | MCP | `get_session` `device_stats` `records` `period_summary` `denial_trend` `timeline` |
 | **Statistik-Seiten** | Kalender, Monatsübersicht und Zielerreichung — dieselbe Ansicht für den Träger und für den Keyholder. <br>*Server-Komponente ohne eigene Route.* | Sub, Keyholder (UI) | App (Träger), App (Keyholder) | — |
+| **Session anfordern** | Fordert eine zeitlich begrenzte Session mit einem Gerät einer Session-Kategorie an — mit Frist, Mindestdauer, Video-Pflicht und Orgasmus-Ziel; zurückziehen oder von Hand als erfüllt markieren. <br>*Erfüllt wird sie durch das SESSION_END des Trägers; als Strafe angeordnet eskaliert sie strenger.* | Keyholder (UI), Keyholder (MCP) | App (Keyholder), MCP | `/api/admin/session-anforderung` `/api/admin/session-anforderung/[id]` `request_session` |
 
 ## Sperrzeit
 
@@ -101,6 +103,9 @@ Steckbrief: [35-orgasmus.md](35-orgasmus.md)
 |---|---|---|---|---|
 | **Orgasmus-Fenster stellen** | Ein Zeitfenster als Pflicht (Anweisung) oder Erlaubnis (Gelegenheit), wahlweise mit vorgegebener Art und Öffnungserlaubnis. <br>*Es ist immer nur EINE Direktive aktiv; die Erfüllung passiert automatisch beim passenden Eintrag.* | Keyholder (UI), Keyholder (MCP) | App (Keyholder), MCP | `/api/admin/orgasmus-anforderung` `request_orgasm` |
 | **Orgasmus-Fenster zurückziehen** | Nimmt eine offene Direktive zurück. Die Route kennt nur diese eine Aktion. <br>*ÄNDERN gibt es für diese Direktive nirgends — weder in der App noch über den MCP. Anders wollen heisst zurückziehen und neu stellen; als einzige Direktive fehlt ihr das Gegenstück zu `edit_lock_period`, `edit_task` und `edit_training_goal`.* | Keyholder (UI), Keyholder (MCP) | App (Keyholder), MCP | `/api/admin/orgasmus-anforderung/[id]` `withdraw` |
+| **Belohnungs-Fenster gewähren** | Löst ein verdientes Guthaben ein: öffnet eine Orgasmus-Gelegenheit der Art „Belohnung" und merkt dafür 1 Guthaben vor. <br>*Nur bei Guthaben ≥ 1 und ohne bereits laufendes Fenster. Ein zurückgezogenes, noch laufendes Fenster erstattet das Guthaben.* | Keyholder (UI), Keyholder (MCP) | App (Keyholder), MCP | `/api/admin/belohnung` `grant_reward` |
+| **Belohnung gutschreiben** | Schreibt für ein erreichtes Trainingsziel +1 Guthaben gut — einmal je Ziel und Zeitraum. <br>*Normalerweise unnötig: die Gutschrift läuft automatisch (`reward-reconcile`); dies ist der manuelle Nachtrag.* | Keyholder (UI), Keyholder (MCP) | App (Keyholder), MCP | `/api/admin/belohnung/gutschrift` `credit_reward` |
+| **Belohnungen automatisch gutschreiben** | Schreibt erreichte Trainingsziele aller Träger als Belohnungs-Guthaben gut, unabhängig davon, ob jemand hinschaut. | System | läuft von selbst | `/api/rewards/reconcile` |
 
 ## Aufgaben
 
@@ -140,6 +145,7 @@ Steckbrief: [50-strafbuch.md](50-strafbuch.md)
 | **Urteilen** | Verwerfen, bestrafen (Freitext oder als gestellte Aufgabe), erledigen oder wieder aufnehmen. <br>*Es gibt keine automatische Strafe und keinen Straftypen-Zoo. Eine erfüllte Strafaufgabe schliesst das Urteil selbst.* | Keyholder (UI), Keyholder (MCP) | App (Keyholder), MCP | `/api/admin/strafe` `judge_offense` |
 | **Vergehens-Regeln umlegen** | Legt je Art fest, ob sie zählt — aus, nur während einer Sperrzeit, oder immer. <br>*Historisiert: eine Änderung schreibt die Vergangenheit nicht um, sie wirkt nach vorn. `manual_offense` ist nicht schaltbar — eine selbst notierte Tat verwirft man mit dem Urteil, nicht mit der Regel.* | Keyholder (UI), Keyholder (MCP) | App (Keyholder), MCP | `/api/admin/offense-rules` `set_offense_rules` |
 | **Vergehen melden** | Stellt erkannte, bestrafte und verworfene Vergehen beiden Seiten in den Posteingang. <br>*Abgeleitete Vergehen erst ab dem Stichtag der Instanz — sonst kippte das erste Update die ganze Historie hinein.* | System | läuft von selbst | — |
+| **Strafe mit Nachweis als erledigt melden** | Der Träger sieht seine verhängten Strafen und meldet eine als erledigt — optional mit Nachweis-Foto und Notiz; die Keyholderin bestätigt oder lehnt mit Grund ab. <br>*Fork-Variante neben `penalty-report-done` (gemeldetAt/nachweisUrl statt nur reportedDoneAt).* | Sub | App (Träger) | `/api/strafen` |
 
 ## Geräte
 
@@ -156,6 +162,8 @@ Steckbrief: [55-geraete.md](55-geraete.md)
 | **Kategorie löschen** | Entfernt eine Kategorie endgültig — nur, solange weder Geräte noch Trainingsziele darauf verweisen. <br>*Archivierte Geräte und soft-gelöschte Trainingsziele blockieren mit — sonst verlöre deren Historie still die Zuordnung.* | Sub, Keyholder (UI), Keyholder (MCP) | App (Träger), App (Keyholder), MCP | `delete_category` |
 | **Gerät im Foto vorschlagen** | Schlägt beim Erfassen anhand des Bildes das getragene Gerät vor. | Sub | App (Träger) | `/api/detect-device` |
 | **Geräte-Abgleich beim Kontroll-Foto** | Vergleicht nach dem Einreichen das Bild mit den Referenzbildern des deklarierten Geräts. <br>*Beratend: ein Abweichen ist KEIN Vergehen — das entsteht nur aus einer Anforderung.* | System | läuft von selbst | — |
+| **Airlock-NFC prüfen** | Liest UID und NDEF eines Airlock-Tags und lässt die Echtheit beim Airlock-Dienst prüfen; beim Verschluss zusätzlich, ob es das vorgegebene bzw. zugewiesene Lock ist. <br>*Der Tracker hält keine Krypto und keine Registry (Weg A, docs/AIRLOCK_NFC.md).* | Sub | App (Träger), Gegenstelle | `/api/airlock/verify` |
+| **Airlock einrichten und Locks zuweisen** | Verbindung zum Airlock-Dienst einstellen und testen, die Lock-Registry spiegeln, Locks einem Träger zuweisen oder freigeben. | Keyholder (UI) | App (Keyholder) | `/api/admin/airlock/config` `/api/admin/airlock/test` `/api/admin/airlock/locks` `/api/admin/airlock/assign` `/api/admin/airlock/assigned` |
 
 ## Box
 
@@ -222,6 +230,8 @@ Steckbrief: [80-kontext.md](80-kontext.md)
 | **Änderungen seit dem letzten Blick abfragen** | Sagt der Keyholder-KI für ein paar Bytes, ob und in welchen Bereichen sich seit ihrem letzten Aufruf etwas geändert hat, samt Uhrzeit. <br>*Zählt über Datenbank-Trigger jede Änderung, egal von wem; Register und Ausnahmen in `mcp/stateAreas.ts`. Nur diese Antwort trägt ein Token; eigene Writes erscheinen danach als Änderung.* | Keyholder (MCP) | MCP | `check_updates` |
 | **Handlungsprotokoll lesen** | Jeder schreibende MCP-Aufruf mit Werkzeug, Handelndem, Pflicht-Begründung und betroffenem Objekt. | Keyholder (MCP) | MCP | `get_action_log` |
 | **MCP-Endpunkt** | Die Gegenstelle, über die eine Keyholder-KI alle Werkzeuge erreicht. <br>*Die Werkzeugliste ist pro Verbindung gecacht — ein neuer Chat allein genügt nicht.* | Keyholder (MCP) | Gegenstelle | `/api/[transport]` |
+| **Gesundheits-Stopp selbst auslösen** | Der Träger setzt den Gesundheits-Halt für sich selbst und hebt ihn wieder auf — jederzeit, ohne Keyholderin. | Sub | App (Träger) | `/api/health-hold` |
+| **Tagesform erfassen** | Erregung, Körpergefühl und Headspace des Tages samt Notiz — Kontext für die Keyholderin (`get_overview`). | Sub | App (Träger) | `/api/tagesform` |
 
 ## Zugang
 
@@ -267,6 +277,24 @@ Steckbrief: [85-zugang.md](85-zugang.md)
 | **Tagebuch einstellen** | Standard-Sichtbarkeit neuer Einträge und Leitfragen an/aus. <br>*Eigene Tabelle, nicht am Konto: die Keyholderin sieht die Einstellungen nicht und kann sie nicht setzen.* | Sub | App (Träger) | `/api/settings/journal` |
 | **Geteilte Tagebuch-Einträge lesen** | Die vom Sub freigegebenen Einträge samt Stimmung; bei „Stimmung zeigen" ohne Text und Leitfrage. <br>*Strenger als jede andere Keyholder-Sicht: nur wer dem Sub ZUGEORDNET ist, nicht schon die Admin-Rolle — auch für die KI (OAuth-Zugang des zugeordneten Kontos; der statische Token liest nichts). Private Einträge werden gar nicht geladen — kein Zähler, keine Lücke.* | Keyholder (UI), Keyholder (MCP) | App (Keyholder), MCP | `/api/admin/users/[id]/journal` `get_shared_journal` |
 
+## Zufall
+
+| Funktion | Was sie tut | Wer | Wo | Endpunkt |
+|---|---|---|---|---|
+| **Zufalls-Pools pflegen und ziehen** | Gewichtete Pools möglicher Folgen (Sperrzeit verlängern, Strafe, Anweisung, Aufgabe) je Träger anlegen; der Träger oder die Keyholderin zieht, das Ergebnis wird sofort angewandt. <br>*Die Wahrscheinlichkeiten bleiben dem Träger verborgen — er sieht nur das gezogene Ergebnis. Die Folge zählt in ihrem eigenen Bereich.* | Sub, Keyholder (UI) | App (Träger), App (Keyholder) | `/api/admin/zufall` `/api/zufall` |
+
+## KI-Keyholderin
+
+| Funktion | Was sie tut | Wer | Wo | Endpunkt |
+|---|---|---|---|---|
+| **Eingebaute KI-Keyholderin einrichten** | Schaltet die eingebaute KI-Keyholderin je Träger ein, setzt Persona, Intensität und Zeitplan, zeigt ihren Laufstatus und löscht auf Wunsch Verlauf und Gedächtnis. | Keyholder (UI) | App (Keyholder) | `/api/admin/ai-keyholder/[userId]` `/api/admin/ai-keyholder/[userId]/status` `/api/admin/ai-keyholder/[userId]/messages` |
+| **KI-Backend einrichten** | Instanzweite LLM- und Medien-Verbindung der eingebauten KI-Keyholderin; Schlüssel werden nie ausgeliefert. | Keyholder (UI) | App (Keyholder) | `/api/admin/ai-backend/config` |
+| **Persona-Vorlagen pflegen** | Vorlagen für Persönlichkeit und Regeln der eingebauten KI-Keyholderin anlegen, ändern und löschen. | Keyholder (UI) | App (Keyholder) | `/api/admin/ai-personas` `/api/admin/ai-personas/[id]` |
+| **Mit der KI-Keyholderin chatten** | Der Träger schreibt der eingebauten KI-Keyholderin, optional mit Foto; die Antwort kommt gestreamt und kann eine Aktion auslösen. | Sub | App (Träger) | `/api/ai-keyholder/chat` |
+| **Aufgaben der KI-Keyholderin erledigen** | Der Träger sieht die Aufgaben der eingebauten KI-Keyholderin (Medium ansehen, Antwort schreiben) und erledigt sie. | Sub | App (Träger) | `/api/ai-keyholder/tasks` |
+| **Autonomer Lauf der KI-Keyholderin** | Der Cron-Lauf, in dem die eingebaute KI-Keyholderin selbst entscheidet und handelt — gesichert über ein gemeinsames Geheimnis. | System | läuft von selbst | `/api/ai-keyholder/run` |
+| **Medien und Avatar erzeugen** | Stellt Bild-/Video-Aufträge und Avatar-Erzeugung in die Warteschlange; der Cron arbeitet sie ab und stellt fertige Medien als Aufgabe zu. | Keyholder (UI), System | App (Keyholder), läuft von selbst | `/api/ai-keyholder/generate-media` `/api/ai-keyholder/generate-avatar` `/api/ai-keyholder/media-poll` |
+
 ## Läuft von selbst
 
 Dieselben Funktionen noch einmal beisammen — die, die niemand auslöst. Sie sind der häufigste
@@ -288,3 +316,6 @@ Grund für die Frage, welche Einstellung etwas verursacht hat: bei den meisten g
 | **Terminierte Direktiven zustellen** | Benachrichtigungen | Der Minuten-Takt stellt Kontrollen, Sperrzeiten, Orgasmus-Fenster und Aufgaben zu, sobald sie wirksam werden. |
 | **Auf neue Fassung prüfen** | Zugang | Liest den Changelog der veröffentlichten Fassung und meldet, wenn diese Instanz zurückliegt. |
 | **Lebenszeichen** | Zugang | Der Takt, an dem die zeitgesteuerten Abläufe hängen. |
+| **Belohnungen automatisch gutschreiben** | Orgasmus | Schreibt erreichte Trainingsziele aller Träger als Belohnungs-Guthaben gut, unabhängig davon, ob jemand hinschaut. |
+| **Autonomer Lauf der KI-Keyholderin** | KI-Keyholderin | Der Cron-Lauf, in dem die eingebaute KI-Keyholderin selbst entscheidet und handelt — gesichert über ein gemeinsames Geheimnis. |
+| **Medien und Avatar erzeugen** | KI-Keyholderin | Stellt Bild-/Video-Aufträge und Avatar-Erzeugung in die Warteschlange; der Cron arbeitet sie ab und stellt fertige Medien als Aufgabe zu. |

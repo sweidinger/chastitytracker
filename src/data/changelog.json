@@ -1,5 +1,32 @@
 [
   {
+    "version": "6.7.0",
+    "date": "2026-11-18",
+    "changes": [
+      {
+        "type": "chore",
+        "text": {
+          "de": "Fork: Stand des Originals (trublue-2) bis v6.6.1 übernommen. Das Original hat seine Git-Historie neu geschrieben; der Merge setzt auf der gemeinsamen Basis v4.55.3 auf, künftige Updates lassen sich wieder normal mergen.",
+          "en": "Fork: merged upstream (trublue-2) up to v6.6.1. Upstream rewrote its git history; the merge is based on the common base v4.55.3, so future updates merge normally again."
+        }
+      },
+      {
+        "type": "chore",
+        "text": {
+          "de": "Fork: Die Datenbank-Migrationen des Originals, die Tabellen neu aufbauen (User, Entry, KontrollAnforderung, StrafeRecord, Device), nehmen die Fork-Spalten mit – kein Datenverlust beim Update.",
+          "en": "Fork: upstream migrations that rebuild tables (User, Entry, KontrollAnforderung, StrafeRecord, Device) now carry the fork columns along – no data loss on update."
+        }
+      },
+      {
+        "type": "feat",
+        "text": {
+          "de": "Fork-Funktionen bleiben erhalten: Pausen (Reinigung/Toilette) für Käfig und Plug, KI-Keyholderin (Chat, Bilder, Persona, Stimmung, Wochenrückblick), Strafbuch-Erledigung, Belohnungs-Guthaben und Orgasmus-Budget, Denial-Zähler, Session-Kategorien, Zufalls-Engine, Airlock-NFC. Die Einzel-Einträge der Fork-Versionen 4.59–4.136 stehen in der Git-Historie.",
+          "en": "Fork features are kept: pauses (cleaning/toilet) for cage and plug, AI keyholder (chat, images, persona, mood, weekly review), penalty completion, reward balance and orgasm budget, denial counter, session categories, random engine, Airlock NFC. The individual entries of fork versions 4.59–4.136 are in the git history."
+        }
+      }
+    ]
+  },
+  {
     "version": "6.6.1",
     "date": "2026-11-15",
     "changes": [

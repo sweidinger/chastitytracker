@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { LOCK_ENDED_REASON, orgasmTypeSatisfies } from "@/lib/constants";
+import { LOCK_ENDED_REASON, PAUSE_ABGELAUFEN_REASON, orgasmTypeSatisfies } from "@/lib/constants";
 import { deployCutoff } from "@/lib/appMeta";
 import { mapAnforderungStatus, tzDayKey, isPastDeadlineUnfulfilled, dateAtLocalMinutes, APP_TZ, hhmmToMinutes } from "@/lib/utils";
 import { cleaningBlockReason, type CleaningBlockReason, type CleaningPermissionUser } from "@/lib/queries";
 import { activeCleaningWindow, CLEANING_USER_SELECT } from "@/lib/cleaningService";
+import { getOrgasmOverBudgetViolations } from "@/lib/orgasmBudgetService";
+import { pauseReasonsForDevice, pauseSettingsForDevice, type PauseDevice, type PauseReasonUserFields } from "@/lib/pauseService";
 
 import { evaluateTasks, TASK_INCLUDE } from "@/lib/taskIntervals";
 import { isTaskOffense, type TaskOffenseState } from "@/lib/tasks";
@@ -61,7 +63,14 @@ export interface StrafbuchData {
     startTime: Date | null;
     note: string | null;
   }[];
-  /** Lock entries where the user wore a different device than the Anforderung specified. */
+  /** Orgasmen ueber dem Orgasmus-Budget des laufenden Zeitraums — Erkennung, keine automatische Strafe. */
+  orgasmOverBudgetViolations: {
+    entryId: string;
+    startTime: Date;
+    orgasmusArt: string | null;
+    used: number;
+    limit: number;
+  }[];
   wrongDeviceViolations: {
     entryId: string;
     startTime: Date | null;
@@ -74,6 +83,8 @@ export interface StrafbuchData {
     endsAt: Date;
     message: string | null;
     requiredType: string | null;
+    /** Fork: true = die Anweisung war selbst eine Strafe (strengere Eskalation bei Nicht-Erfüllung). */
+    istStrafe: boolean;
   }[];
   /** Orgasmus-Anweisungen, in deren Fenster ein Orgasmus gemeldet wurde — aber nicht von der geforderten
    *  Art. Dieselben Zeilen zählten bis 6.5.2 als versäumt; als eigene Art lassen sie sich getrennt
@@ -85,12 +96,41 @@ export interface StrafbuchData {
     requiredType: string | null;
     reportedType: string | null;
   }[];
+  /** Fork: Session-Anforderungen, deren Frist ohne erfüllende Session ablief. Feldnamen deutsch wie
+   *  im Fork-Modell `SessionAnforderung`. */
+  missedSessions: {
+    id: string;
+    endetAt: Date;
+    nachricht: string | null;
+    categoryName: string | null;
+    /** true = die Session war selbst eine Strafe (strengere Eskalation bei Nicht-Erfüllung). */
+    istStrafe: boolean;
+  }[];
+  /** Fork: Pause-Enden (REINIGUNG/TOILETTE) mit `erektionGemeldet` — nur erkannt (kein Auto-Urteil). */
+  erektionViolations: {
+    entryId: string;
+    startTime: Date | null;
+    oeffnenGrund: string | null;
+    note: string | null;
+  }[];
+  /** Fork: abgeschlossene (oder vom Poller zwangsgeöffnete) Pausen über der konfigurierten Maximaldauer. */
+  pauseOverageViolations: {
+    entryId: string;
+    startTime: Date | null;
+    device: string | null;
+    grund: string | null;
+    dauerMin: number;
+    maxMin: number;
+    note: string | null;
+  }[];
   /** Verschluss-Anforderungen (lock requests) whose deadline (`endsAt`) passed without a timely VERSCHLUSS. */
   lateLocks: {
     id: string;
     endsAt: Date;
     fulfilledAt: Date | null;
     message: string | null;
+    /** Fork: Käfig (null) vs. Plug/andere Kategorie — der Keyholder muss wissen, worum es ging. */
+    categoryName: string | null;
   }[];
   /** REINIGUNG-Öffnungen during an active, cleaning-permitted Sperrzeit whose re-lock deadline
    *  (active daily cleaning window's end, or open time + cleaningMaxMinutes as fallback) passed
@@ -198,6 +238,11 @@ export interface StrafbuchData {
      *  Strafen-Sicht des Trägers braucht sie, um eine Strafe, die schon als Aufgabe auf dem
      *  Dashboard steht, nicht ein zweites Mal in voller Länge zu zeigen. */
     taskId: string | null;
+    // Fork-Extras zur Erledigt-Meldung (`reportedDoneAt`): optionales Nachweis-Foto und Notiz des
+    // Trägers, dazu der Grund, mit dem die Keyholderin die letzte Meldung abgelehnt hat.
+    nachweisUrl: string | null;
+    erledigungNotiz: string | null;
+    ablehnungGrund: string | null;
   }[];
 }
 
@@ -337,6 +382,15 @@ export const OFFENSE_LISTS = {
   box_photo_missing: spec("boxPhotoMissing", (b) => boxPhotoMissingRef(b.entryId), (b) => b.at),
   manual_offense: spec("manualOffenses", (m) => m.id, (m) => m.occurredAt,
     (m) => ({ title: m.title, description: m.description, recordedBy: m.createdBy })),
+  // ── Fork-Arten ──
+  // ACHTUNG refs: `erektion` und `pause_overage` teilen sich den PAUSE_END-Eintrag, `orgasm_over_budget`
+  // den ORGASMUS-Eintrag mit `unauthorized_orgasm` — bare Entry-ids wie im Fork, damit bestehende
+  // Urteile hängen bleiben. Da `StrafeRecord.refId` global eindeutig ist, trifft ein Urteil über die
+  // eine Art auch die andere auf demselben Eintrag (vgl. `cleaningNotRelockedRef` für die Lösung).
+  missed_session: spec("missedSessions", (m) => m.id, (m) => m.endetAt),
+  erektion: spec("erektionViolations", (v) => v.entryId, (v) => v.startTime),
+  pause_overage: spec("pauseOverageViolations", (v) => v.entryId, (v) => v.startTime),
+  orgasm_over_budget: spec("orgasmOverBudgetViolations", (v) => v.entryId, (v) => v.startTime),
 } satisfies Record<OffenseCanonicalType, {
   key: keyof StrafbuchData;
   ref: (row: never) => string;
@@ -657,6 +711,17 @@ function cleaningOpeningBlock(
   return cleaningBlockReason(effectiveUser, [lockPeriod], o.startTime);
 }
 
+/** Toiletten-Gegenstück zu {@link isAllowedCleaningOpening} (Fork). Bewusst getrennt und
+ *  schlichter: für die Toilette gibt es weder Zeitfenster noch Stichtag, nur die beiden
+ *  Freigaben — beim User und auf der Sperrzeit. */
+function isAllowedToiletteOpening(
+  o: { oeffnenGrund: string | null },
+  lockPeriod: { toiletteErlaubt: boolean } | undefined,
+  userToiletteErlaubt: boolean,
+): boolean {
+  return !!lockPeriod && o.oeffnenGrund === "TOILETTE" && userToiletteErlaubt && lockPeriod.toiletteErlaubt;
+}
+
 /**
  * Die Frist, bis zu der eine Reinigungsöffnung wieder verschlossen sein muss, DAMIT SIE KEIN
  * VERGEHEN WIRD — oder `null`, wenn für diese Öffnung gar keine solche Pflicht besteht.
@@ -713,16 +778,25 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
 
   // Der Stichtag hängt im selben Promise.all wie alles andere — einmal je Strafbuch, nicht je
   // Öffnung, und ohne zusätzlichen Roundtrip.
-  const [enforcedFrom, cleaningRuleChanges, timezoneChanges, user, openings, verschluesse, lockPeriods, lockRequests, kontrollAnforderungen, strafeRecordsRaw, orgasmusAnforderungen, tasks, adminPasswordChangesRaw, orgasmusEintraege, manualOffensesRaw, weightRows, healthHolds, boxPhotoEnforcedFrom] = await Promise.all([
+  const [enforcedFrom, cleaningRuleChanges, timezoneChanges, user, openings, verschluesse, lockPeriods, lockRequests, kontrollAnforderungen, strafeRecordsRaw, orgasmusAnforderungen, tasks, adminPasswordChangesRaw, orgasmusEintraege, manualOffensesRaw, weightRows, healthHolds, boxPhotoEnforcedFrom, sessionAnforderungen, pauseEntries] = await Promise.all([
     cleaningWindowEnforcedFrom(now),
     prisma.cleaningRuleChange.findMany({ where: { userId }, select: CLEANING_RULE_CHANGE_SELECT }),
     prisma.timezoneChange.findMany({ where: { userId }, select: TIMEZONE_CHANGE_SELECT }),
-    prisma.user.findUnique({ where: { id: userId }, select: { ...CLEANING_USER_SELECT, timezone: true, boxPhotoDeadlineHours: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: {
+      ...CLEANING_USER_SELECT, timezone: true, boxPhotoDeadlineHours: true,
+      // Fork: Toiletten-/Plug-Pausen-Freigaben (Toiletten-Ausnahme, Pause-Überzug).
+      toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true,
+      plugReinigungErlaubt: true, plugReinigungMaxMinuten: true, plugReinigungMaxProTag: true,
+      plugToiletteMaxMinuten: true,
+    } }),
     // Eine wartende Öffnung (LockMeBox) ist noch nicht passiert — beurteilt wird sie erst vollzogen.
     prisma.entry.findMany({ where: { userId, type: "OEFFNEN", openAwaitsBolt: false }, orderBy: { startTime: "desc" }, select: KG_ENTRY_SELECT }),
     prisma.entry.findMany({ where: { userId, type: "VERSCHLUSS", ...CONFIRMED_LOCK_FILTER }, orderBy: { startTime: "asc" }, select: { ...KG_ENTRY_SELECT, ...BOX_PHOTO_SELECT } }),
     prisma.verschlussAnforderung.findMany({ where: { userId, art: "SPERRZEIT", ...triggeredWhere(now) } }),
-    prisma.verschlussAnforderung.findMany({ where: { userId, art: "ANFORDERUNG", withdrawnAt: null, ...triggeredWhere(now) } }),
+    prisma.verschlussAnforderung.findMany({
+      where: { userId, art: "ANFORDERUNG", withdrawnAt: null, ...triggeredWhere(now) },
+      include: { deviceCategory: { select: { name: true } } },
+    }),
     prisma.kontrollAnforderung.findMany({
       where: { userId, OR: [{ entryId: { not: null } }, { autoMarkedRemovedAt: { not: null } }] },
       include: { entry: true, autoMarkedEntry: true },
@@ -759,6 +833,17 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
     // lautlos aus — und ausgerechnet für ihn wäre sie folgenlos.
     prisma.healthHold.findMany({ where: { userId }, select: { createdAt: true, resolvedAt: true } }),
     boxPhotoMissingEnforcedFrom(now),
+    // Fork: versäumte Session-Anforderungen — Frist abgelaufen, nicht erfüllt/zurückgezogen, ausgelöst.
+    prisma.sessionAnforderung.findMany({
+      where: { userId, fulfilledAt: null, withdrawnAt: null, endetAt: { lt: now }, ...triggeredWhere(now) },
+      include: { deviceCategory: { select: { name: true } } },
+    }),
+    // Fork: Pausen-Einträge für Erektions-Meldung und Pause-Überzug.
+    prisma.entry.findMany({
+      where: { userId, type: { in: ["PAUSE_BEGIN", "PAUSE_END"] } },
+      orderBy: { startTime: "asc" },
+      select: { id: true, type: true, startTime: true, pauseDevice: true, oeffnenGrund: true, note: true, erektionGemeldet: true },
+    }),
   ]);
 
   // Öffnungen, Verschlüsse und die Reinigungs-Regeln liegen aus demselben Promise.all vor —
@@ -843,21 +928,92 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
   const isOrgasmusOpenAllowed = (openTime: Date): boolean =>
     openingAllowedWindows.some((w) => windowCovers(w, openTime));
   const resolveRule = offenseRuleResolver(offenseRuleChanges);
+  const userToiletteErlaubt = user?.toiletteErlaubt ?? false;
+  const orgasmOverBudgetViolations = await getOrgasmOverBudgetViolations(userId, now, subTz);
 
-  // Wrong-device: StrafeRecord.refId points at the offending VERSCHLUSS entry (für Geräte-Namen laden).
-  const wrongDeviceRecords = strafeRecordsRaw.filter((r) => r.offenseType === "FALSCHES_GERAET");
-  const offenseEntryIds = wrongDeviceRecords.map((r) => r.refId);
-  const offenseEntries = offenseEntryIds.length > 0
-    ? await prisma.entry.findMany({
-        where: { id: { in: offenseEntryIds } },
-        // Drei Felder plus der Gerätename — genau das, was `wrongDeviceViolations` unten baut.
-        select: { id: true, startTime: true, note: true, device: { select: { name: true } } },
-      })
-    : [];
+  // Fork: Erektion + Pause-Überzug — LIVE aus den Pausen abgeleitet (keine automatische Bestrafung).
+  // Erektion wird beim Pause-Ende gemeldet; Pause-Überzug = abgeschlossene Pause über der
+  // konfigurierten Maximaldauer. Beides sind ERKENNUNGEN — Urteil durch Keyholderin (AI) oder Admin.
+  // maxMin <= 0 gilt als unbegrenzt (keine Überzug-Erkennung).
+  const erektionViolations: StrafbuchData["erektionViolations"] = [];
+  const pauseOverageViolations: StrafbuchData["pauseOverageViolations"] = [];
+  // Die Felder, die `pauseService` erwartet (Reinigungs-Spalten seit dem Upstream-Rename `cleaning*`).
+  const pauseUser: PauseReasonUserFields | null = user && {
+    cleaningAllowed: user.cleaningAllowed, cleaningMaxMinutes: user.cleaningMaxMinutes, cleaningMaxPerDay: user.cleaningMaxPerDay,
+    toiletteErlaubt: user.toiletteErlaubt, toiletteMaxMinuten: user.toiletteMaxMinuten, toiletteMaxProTag: user.toiletteMaxProTag,
+    plugReinigungErlaubt: user.plugReinigungErlaubt, plugReinigungMaxMinuten: user.plugReinigungMaxMinuten,
+    plugReinigungMaxProTag: user.plugReinigungMaxProTag, plugToiletteMaxMinuten: user.plugToiletteMaxMinuten,
+  };
+  if (pauseUser) {
+    const maxMinutesFor = (device: PauseDevice, grund: string | null): number =>
+      (grund ? pauseReasonsForDevice(pauseUser, device).find((r) => r.grund === grund)?.maxMinuten : undefined)
+        ?? pauseSettingsForDevice(pauseUser, device).maxMinuten;
+    for (const device of ["CAGE", "PLUG"] as PauseDevice[]) {
+      let openBegin: (typeof pauseEntries)[number] | null = null;
+      for (const e of pauseEntries) {
+        if (e.pauseDevice !== device) continue;
+        if (e.type === "PAUSE_BEGIN") {
+          openBegin = e;
+        } else if (e.type === "PAUSE_END" && openBegin) {
+          const grund = openBegin.oeffnenGrund ?? null;
+          if (e.erektionGemeldet)
+            erektionViolations.push({ entryId: e.id, startTime: e.startTime, oeffnenGrund: grund, note: e.note });
+          const max = maxMinutesFor(device, grund);
+          const dauerMin = (e.startTime.getTime() - openBegin.startTime.getTime()) / 60000;
+          if (max > 0 && dauerMin > max) {
+            pauseOverageViolations.push({
+              entryId: e.id, startTime: e.startTime, device, grund,
+              dauerMin: Math.round(dauerMin), maxMin: max, note: e.note,
+            });
+          }
+          openBegin = null;
+        }
+      }
+    }
+
+    // Zwangsgeöffnete Pausen (PAUSE_ABGELAUFEN): der Poller öffnet eine überzogene CAGE-Pause per
+    // OEFFNEN (KEIN PAUSE_END). Für jede solche Öffnung die zugehörige offene PAUSE_BEGIN finden und
+    // den Überzug erfassen — so erscheint er trotz fehlendem PAUSE_END im Strafbuch.
+    const cageBegins = pauseEntries.filter((e) => e.pauseDevice === "CAGE" && e.type === "PAUSE_BEGIN");
+    const cageEnds = pauseEntries.filter((e) => e.pauseDevice === "CAGE" && e.type === "PAUSE_END");
+    for (const o of openings) {
+      if (o.oeffnenGrund !== PAUSE_ABGELAUFEN_REASON) continue;
+      const begin = cageBegins.filter((b) => b.startTime < o.startTime).at(-1); // aufsteigend sortiert
+      if (!begin) continue;
+      if (cageEnds.some((e) => e.startTime > begin.startTime && e.startTime < o.startTime)) continue;
+      const grund = begin.oeffnenGrund ?? null;
+      const dauerMin = (o.startTime.getTime() - begin.startTime.getTime()) / 60000;
+      pauseOverageViolations.push({
+        entryId: o.id, startTime: o.startTime, device: "CAGE", grund,
+        dauerMin: Math.round(dauerMin), maxMin: maxMinutesFor("CAGE", grund), note: o.note,
+      });
+    }
+    erektionViolations.sort((a, b) => (b.startTime?.getTime() ?? 0) - (a.startTime?.getTime() ?? 0));
+    pauseOverageViolations.sort((a, b) => (b.startTime?.getTime() ?? 0) - (a.startTime?.getTime() ?? 0));
+  }
+
+  // Falsches Gerät: zwei Quellen, beide gelten. Upstream schreibt beim Verschluss sofort einen
+  // `FALSCHES_GERAET`-StrafeRecord (refId = VERSCHLUSS-Eintrag, `entryFulfilment.ts`); der Fork
+  // markiert den Eintrag nur (`falschesGeraet`) und überlässt das Urteil der Keyholderin. Die Vereinigung
+  // hält Altbestand beider Wege sichtbar — ein Eintrag zählt einmal, egal über welche Quelle.
+  const wrongDeviceRecordIds = strafeRecordsRaw.filter((r) => r.offenseType === "FALSCHES_GERAET").map((r) => r.refId);
+  const offenseEntries = await prisma.entry.findMany({
+    where: {
+      OR: [
+        ...(wrongDeviceRecordIds.length > 0 ? [{ id: { in: wrongDeviceRecordIds } }] : []),
+        { userId, type: "VERSCHLUSS", falschesGeraet: true },
+      ],
+    },
+    orderBy: { startTime: "desc" },
+    // Drei Felder plus der Gerätename — genau das, was `wrongDeviceViolations` unten baut.
+    select: { id: true, startTime: true, note: true, device: { select: { name: true } } },
+  });
   const offenseEntryById = new Map(offenseEntries.map((e) => [e.id, e]));
-  const wrongDeviceViolations = wrongDeviceRecords.map((r) => {
-    const entry = offenseEntryById.get(r.refId);
-    return { entryId: r.refId, startTime: entry?.startTime ?? null, note: entry?.note ?? null, deviceName: entry?.device?.name ?? null };
+  // Record-Zeilen behalten ihre ref auch dann, wenn der Eintrag nicht mehr existiert (`startTime: null`).
+  const wrongDeviceIds = [...new Set([...offenseEntries.map((e) => e.id), ...wrongDeviceRecordIds])];
+  const wrongDeviceViolations = wrongDeviceIds.map((id) => {
+    const entry = offenseEntryById.get(id);
+    return { entryId: id, startTime: entry?.startTime ?? null, note: entry?.note ?? null, deviceName: entry?.device?.name ?? null };
   });
 
   const cleaningLimitRows = cleaningLimitViolations(openings, cleaningAt, tzAt, quotaEverSet);
@@ -883,6 +1039,8 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
   const unauthorizedOpenings = openings.flatMap((o) => {
     const lockPeriod = findActiveLockPeriod(o.startTime, enforcingLockPeriods);
     if (o.source === "system" || !lockPeriod || isOrgasmusOpenAllowed(o.startTime)) return [];
+    // Fork: eine Toilettenöffnung bricht die Sperre nicht, wenn User UND Sperrzeit sie erlauben.
+    if (isAllowedToiletteOpening(o, lockPeriod, userToiletteErlaubt)) return [];
     let cleaningBlock: CleaningBlockReason | null = null;
     if (o.oeffnenGrund === "REINIGUNG") {
       cleaningBlock = cleaningOpeningBlock(o, lockPeriod, cleaningPermissionUserAt(cleaningAt(o.startTime), tzAt(o.startTime)), enforcedFrom);
@@ -954,7 +1112,7 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
     .filter((a) => !isHiddenFromSub(a))
     .filter((a): a is typeof a & { endsAt: Date } => a.endsAt !== null)
     .filter((a) => isLateLock(a, now))
-    .map((a) => ({ id: a.id, endsAt: a.endsAt, fulfilledAt: a.fulfilledAt, message: a.message }));
+    .map((a) => ({ id: a.id, endsAt: a.endsAt, fulfilledAt: a.fulfilledAt, message: a.message, categoryName: a.deviceCategory?.name ?? null }));
 
   // Cleaning not relocked — a REINIGUNG opening during an active, cleaning-permitted Sperrzeit
   // whose re-lock deadline passed without a timely VERSCHLUSS. No offense if the Sperrzeit itself
@@ -1083,11 +1241,18 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
       .filter((k) => k.autoMarkedRemovedAt !== null)
       .map(toAutoRemovedControl),
     cleaningLimitViolations: cleaningLimitRows,
+    orgasmOverBudgetViolations,
     wrongDeviceViolations,
-    missedOrgasmInstructions: classifiedInstructions.flatMap(({ a, reported }) => reported ? [] : [{ id: a.id, endsAt: a.endsAt, message: a.message, requiredType: a.requiredType }]),
+    erektionViolations,
+    pauseOverageViolations,
+    missedOrgasmInstructions: classifiedInstructions.flatMap(({ a, reported }) => reported ? [] : [{ id: a.id, endsAt: a.endsAt, message: a.message, requiredType: a.requiredType, istStrafe: a.istStrafe }]),
     wrongOrgasmTypes: classifiedInstructions.flatMap(({ a, reported }) => reported
       ? [{ id: a.id, endsAt: a.endsAt, message: a.message, requiredType: a.requiredType, reportedType: reported.orgasmusArt }]
       : []),
+    missedSessions: sessionAnforderungen
+      .filter((s): s is typeof s & { endetAt: Date } => s.endetAt !== null)
+      .sort((a, b) => b.endetAt.getTime() - a.endetAt.getTime())
+      .map((s) => ({ id: s.id, endetAt: s.endetAt, nachricht: s.nachricht, categoryName: s.deviceCategory?.name ?? null, istStrafe: s.istStrafe })),
     lateLocks,
     cleaningNotRelocked,
     unfulfilledTasks,
@@ -1118,8 +1283,12 @@ export async function buildStrafbuch(userId: string, now: Date = new Date()): Pr
       judgedBy: r.judgedBy,
       judgedByName: r.judgedByName,
       erledigtAt: r.erledigtAt,
-      reportedDoneAt: r.reportedDoneAt,
+      // Fork-Altbestand: Meldungen vor dem Merge stehen in `gemeldetAt` — als Erledigt-Meldung lesen.
+      reportedDoneAt: r.reportedDoneAt ?? r.gemeldetAt,
       taskId: r.taskId,
+      nachweisUrl: r.nachweisUrl,
+      erledigungNotiz: r.erledigungNotiz,
+      ablehnungGrund: r.ablehnungGrund,
     })),
   };
 

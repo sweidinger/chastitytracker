@@ -7,6 +7,8 @@ import JournalHeaderLink from "@/app/components/JournalHeaderLink";
 import SkipLink from "@/app/components/SkipLink";
 import { headerActionsCls, headerBarCls, headerBrandCls, headerHostCls, headerNameCls, headerRowCls } from "@/app/components/inputStyles";
 import { ownTrackerHidden } from "@/lib/ownTracker";
+import { airlockEnabled } from "@/lib/airlock/config";
+import { getAssignedLocks } from "@/lib/airlock/service";
 import pkg from "../../package.json";
 import { instanceHostname } from "@/lib/appMeta";
 import { APP_NAME } from "@/lib/constants";
@@ -19,6 +21,14 @@ export default async function Header() {
   // Proxy ohnehin nach /admin zurück. Der Test steht hier, weil diese Kopfzeile den Betroffenen
   // trotzdem erreicht: /dashboard/settings und /dashboard/changelog sind vom Rauswurf ausgenommen.
   const hideOwnTracker = await ownTrackerHidden(user);
+
+  // Airlock: „Meine Airlock-Schlösser" nur zeigen, wenn die Integration scharf ist UND dem Sub
+  // mindestens ein Lock zugewiesen ist (sonst wäre der Menüpunkt für die meisten leer/verwirrend).
+  let showMyAirlock = false;
+  if (user?.id) {
+    const [on, locks] = await Promise.all([airlockEnabled(), getAssignedLocks(user.id)]);
+    showMyAirlock = on && locks.length > 0;
+  }
 
   const hostname = instanceHostname();
 
@@ -51,6 +61,7 @@ export default async function Header() {
               settingsHref="/dashboard/settings"
               theme="user"
               version={pkg.version}
+              showMyAirlock={showMyAirlock}
             />
           )}
         </div>

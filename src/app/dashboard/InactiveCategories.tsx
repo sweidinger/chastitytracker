@@ -16,6 +16,8 @@ export interface InactiveCategoryRow {
   icon: string;
   /** Hours worn today in this category (already 0 if no sessions). */
   todayHours: number;
+  /** Fork: When true, links to session-begin instead of wear-begin. */
+  isSessionCategory?: boolean;
 }
 
 interface Props {
@@ -44,7 +46,9 @@ export default function InactiveCategories({ categories }: Props) {
       {open && (
         <ul className="flex flex-col gap-2">
           {categories.map((c) => {
-            const beginHref = wearActionHref({ categoryId: c.id, active: false });
+            const beginHref = c.isSessionCategory
+              ? `/dashboard/new/session-begin?category=${c.id}`
+              : wearActionHref({ categoryId: c.id, active: false });
             return (
               <li key={c.id}>
                 <CategoryLinkRow

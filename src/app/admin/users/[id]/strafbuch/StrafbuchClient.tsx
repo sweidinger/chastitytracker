@@ -5,7 +5,7 @@ import Section from "@/app/components/Section";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Button from "@/app/components/Button";
-import { CheckCircle, ClipboardList, Plus, Undo2, XCircle } from "lucide-react";
+import { CheckCircle, ChevronDown, ClipboardList, Clock, Plus, Undo2, XCircle } from "lucide-react";
 import { parseApiErrorCode } from "@/lib/apiClient";
 import { useApiError } from "@/app/hooks/useApiError";
 import FormError from "@/app/components/FormError";
@@ -14,6 +14,8 @@ import EmptyState from "@/app/components/EmptyState";
 import { blockInsetCls } from "@/app/components/inputStyles";
 import { Quote } from "@/app/components/QuotedField";
 import Select from "@/app/components/Select";
+import Checkbox from "@/app/components/Checkbox";
+import ImageViewer from "@/app/components/ImageViewer";
 import { useActionPatch } from "@/app/hooks/useActionPatch";
 import useToast from "@/app/hooks/useToast";
 import { taskFormHref } from "@/lib/entryFormRoute";
@@ -45,6 +47,90 @@ export interface StrafeRecordData {
   erledigtAtStr: string | null;
   /** Wann der Träger die Strafe als erledigt gemeldet hat — null, solange nicht. */
   reportedDoneAtStr: string | null;
+  /** Fork-Extras zur Erledigt-Meldung: optionales Nachweis-Foto und Notiz des Trägers, dazu der
+   *  Grund, mit dem die letzte Meldung abgelehnt wurde. Optional, weil nur die Meldung sie trägt. */
+  nachweisUrl?: string | null;
+  erledigungNotiz?: string | null;
+  ablehnungGrund?: string | null;
+}
+
+/** Fork: Schwere-Stufe eines Vergehens (Spiegel von `OffenseSeverity` in `strafurteilService.ts` —
+ *  hier eigen getippt, weil jener Service Prisma zieht und aus dem Client unerreichbar ist). */
+export type OffenseSeverity = "leicht" | "mittel" | "schwer";
+
+/** Fork: effektive Schwere einer Zeile (inkl. Wiederholungs-Eskalation), nach `refId`. */
+export interface SeverityInfo {
+  severity: OffenseSeverity;
+  escalated: boolean;
+}
+
+/** Fork: optionale Straf-Aktion, die beim Bestrafen mitgeschickt wird (Server führt sie aus). */
+export type PenaltyActionInput = {
+  type: string;
+  hours?: number;
+  windowHours?: number;
+  oeffnenErlaubt?: boolean;
+  categoryId?: string;
+  minMinuten?: number;
+  delayMinutes?: number;
+  deviceId?: string;
+  requireVideo?: boolean;
+  reinigungErlaubt?: boolean;
+  toiletteErlaubt?: boolean;
+  dauerH?: number;
+  fristH?: number;
+  device?: "CAGE" | "PLUG";
+  deadlineH?: number;
+  requireCode?: boolean;
+};
+
+/** Fork: Session-Kategorie (+ Geräte) für die Inline-Konfiguration der Pflicht-Session-Aktion. */
+export type SessionCategoryOption = { id: string; name: string; maxSessionMinutes: number; requiresVideo: boolean; devices: { id: string; name: string }[] };
+/** Fork: ein Vorschlags-Chip — Text + optionale Aktion mit optionalem Zahlen-Parameter. */
+export type PenaltySuggestion = { label: string; action?: string; param?: { field: "hours" | "windowHours"; label: string; default: number } };
+
+/** Fork: eine Zeile der Schwere-Übersicht (Legende). */
+export interface SeverityMatrixRow {
+  severity: OffenseSeverity;
+  offenses: string[];
+  suggestions: string[];
+}
+
+/** Fork: versäumte Session-Anforderung. */
+export interface SessionVersaeumtRow {
+  id: string;
+  endetAtStr: string;
+  categoryName: string | null;
+  nachricht: string | null;
+}
+
+/** Fork: beim Pause-Ende gemeldete Erektion. */
+export interface ErektionRow {
+  entryId: string;
+  startTimeStr: string;
+  /** Übersetzter Pause-Grund (Reinigung/Toilette), falls bekannt. */
+  grundLabel: string | null;
+  note: string | null;
+}
+
+/** Fork: Pause über der konfigurierten Maximaldauer (auch vom Poller zwangsgeöffnet). */
+export interface PauseUeberzugRow {
+  entryId: string;
+  startTimeStr: string;
+  /** Gerät + Grund, schon übersetzt. */
+  context: string;
+  /** „x Min statt max. y Min", schon übersetzt. */
+  dauerStr: string;
+  note: string | null;
+}
+
+/** Fork: Orgasmus über dem Orgasmus-Budget des laufenden Zeitraums. */
+export interface OrgasmusUeberBudgetRow {
+  entryId: string;
+  startTimeStr: string;
+  orgasmusArt: string | null;
+  used: number;
+  limit: number;
 }
 
 /** Die Stellungnahme des Trägers zu einem Vergehen, anzeigefertig. */
@@ -165,6 +251,8 @@ export interface VerschlussVersaeumtRow {
   /** null = nie eingeschlossen; sonst der verspätete Zeitpunkt. */
   fulfilledAtStr: string | null;
   message: string | null;
+  /** Fork: Käfig (null) vs. Plug/andere Kategorie. */
+  categoryName: string | null;
 }
 
 /** Abgelaufene Orgasmus-Anweisung ohne passenden Orgasmus. */
@@ -315,6 +403,50 @@ interface Labels {
   strafbuchBoxFotoFehlt: string;
   strafbuchBoxFotoFrist: string;
   deviceLabel: string;
+  // ── Fork ──
+  strafbuchUrteilSchicksalsrad: string;
+  strafbuchKeyholderStrafe: string;
+  strafbuchKeyholderStrafeHint: string;
+  strafbuchNachweis: string;
+  strafbuchBestaetigen: string;
+  strafbuchAblehnen: string;
+  strafbuchAblehnenPlaceholder: string;
+  strafbuchAbgelehntBadge: string;
+  strafbuchVorschlaege: string;
+  schwereSchwer: string;
+  schwereMittel: string;
+  schwereLeicht: string;
+  strafbuchLegende: string;
+  strafbuchLegendeHint: string;
+  strafbuchHochgestuft: string;
+  strafbuchAktionStundenFehlt: string;
+  strafbuchAktionFehlgeschlagen: string;
+  strafbuchStrafeOderAktion: string;
+  strafbuchVersaeumteSession: string;
+  strafbuchErektion: string;
+  strafbuchErektionDate: string;
+  strafbuchPauseUeberzug: string;
+  strafbuchOrgasmusUeberBudget: string;
+  /** Vorlage mit `{name}`/`{max}` — Option der Session-Kategorie-Auswahl. */
+  strafbuchSessionKategorieOption: string;
+  aktSessionKategorie: string;
+  aktSessionMin: string;
+  aktSessionDelay: string;
+  aktSessionGeraet: string;
+  aktSessionGeraetAny: string;
+  aktSessionVideo: string;
+  aktOrgasmusOeffnen: string;
+  aktSperreReinigung: string;
+  aktSperreToilette: string;
+  aktPlugDauer: string;
+  aktPlugFrist: string;
+  aktKontrolleGeraet: string;
+  aktKontrolleGeraetAllg: string;
+  aktKontrolleGeraetCage: string;
+  aktKontrolleGeraetPlug: string;
+  aktKontrolleFrist: string;
+  aktKontrolleCode: string;
+  aktEntzugKeinGuthaben: string;
 }
 
 interface Props {
@@ -335,10 +467,25 @@ interface Props {
   missedWeightReports: MissedWeightRow[];
   boxPhotoMissing: BoxPhotoMissingRow[];
   manuelleVergehen: ManuellesVergehenRow[];
+  // Fork-Arten
+  sessionVersaeumt: SessionVersaeumtRow[];
+  erektionen: ErektionRow[];
+  pauseUeberzug: PauseUeberzugRow[];
+  orgasmusUeberBudget: OrgasmusUeberBudgetRow[];
   strafeRecords: StrafeRecordData[];
   /** Die Stellungnahmen des Trägers, nach `refId` — leer, wo er nichts geschrieben hat. */
   statements: Record<string, StatementView>;
   labels: Labels;
+  /** Fork: effektive Schwere je `refId` (nur erkannte Vergehen). */
+  severities: Record<string, SeverityInfo>;
+  /** Fork: Straf-Vorschläge je Schwere-Stufe (Chip = Text + optionale Aktion). */
+  suggestions: Record<OffenseSeverity, PenaltySuggestion[]>;
+  /** Fork: Schwere-Übersicht (Legende). */
+  matrix: SeverityMatrixRow[];
+  /** Fork: Session-Kategorien (+ Geräte) für die Pflicht-Session-Aktion. */
+  sessionCategories: SessionCategoryOption[];
+  /** Fork: Belohnungs-Guthaben — der Entzug (`deny_orgasm`) ist bei Stand 0 gesperrt. */
+  verdienteOrgasmen: number;
 }
 
 /** Eine Zeile einer Strafbuch-Sektion, schon fertig gerendert. `body` bekommt `judged`, weil die
@@ -411,6 +558,17 @@ export function priorPunishments(
 const FACT_CLS = "text-xs text-foreground-faint";
 /** Freitext — Notiz des Subs, Anweisung, Ablehnungsgrund. */
 const NOTE_CLS = "text-xs text-foreground-faint italic";
+
+/** Fork: `judgedBy` einer vom Schicksalsrad gezogenen Strafe (geschrieben in `zufallService.ts`). */
+const SCHICKSALSRAD_AUTHOR = "schicksalsrad";
+
+/** Fork: Farbe des Schwere-Badges je Stufe. */
+const SEV_STYLE: Record<OffenseSeverity, string> = {
+  schwer: "text-warn border-warn",
+  mittel: "text-sperrzeit border-[var(--color-sperrzeit)]",
+  leicht: "text-foreground-faint border-border",
+};
+const SEV_BADGE_CLS = "text-[0.65rem] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border";
 
 // Ohne Fokus-Klassen — aus demselben Grund wie in `VorgabeForm`: die ungeschichtete
 // `:focus-visible`-Regel in `globals.css` gewinnt gegen jede Utility, die Kombination hier war also
@@ -490,6 +648,12 @@ interface JudgmentCtx {
   apiError: (code: string | null | undefined) => string;
   onUndo: (refId: string) => void;
   onMarkDone: (refId: string, done: boolean) => void;
+  /** Fork: gemeldete Erledigung ablehnen — liefert die Fehlermeldung oder `null`. */
+  onRejectReport: (refId: string, grund: string) => Promise<string | null>;
+  severities: Record<string, SeverityInfo>;
+  suggestions: Record<OffenseSeverity, PenaltySuggestion[]>;
+  sessionCategories: SessionCategoryOption[];
+  verdienteOrgasmen: number;
 }
 
 
@@ -523,7 +687,185 @@ function OffenseSection({ labels, title, openCount, totalCount, children }: { la
   );
 }
 
-/** Gemeinsames Urteils-Formular (bestrafen ODER verwerfen) — Freitext + Abbrechen/Submit. */
+/** Fork: Konfiguration der optionalen Straf-Aktion — EIN Zustand statt eines Dutzends einzelner. */
+interface ActionCfg {
+  param: string;
+  oeffnenErlaubt: boolean;
+  sCatId: string;
+  sMin: string;
+  sDelay: string;
+  sDevId: string;
+  sReqVideo: boolean;
+  reinigungErl: boolean;
+  toiletteErl: boolean;
+  plugDauer: string;
+  plugFrist: string;
+  kDevice: "" | "CAGE" | "PLUG";
+  kDeadline: string;
+  kReqCode: boolean;
+}
+
+/** Vorgabe der Extra-Kontrolle (Stunden) — dieselbe 4-h-Frist wie die gewöhnliche Kontrolle. */
+const EXTRA_CONTROL_DEFAULT_DEADLINE_H = "4";
+
+function initialActionCfg(s: PenaltySuggestion | null, sessionCategories: SessionCategoryOption[]): ActionCfg {
+  const c0 = sessionCategories[0];
+  return {
+    param: s?.param ? String(s.param.default) : "",
+    oeffnenErlaubt: false,
+    sCatId: c0?.id ?? "", sMin: "", sDelay: "", sDevId: "", sReqVideo: c0?.requiresVideo ?? false,
+    reinigungErl: false, toiletteErl: false,
+    plugDauer: "", plugFrist: "",
+    kDevice: "", kDeadline: EXTRA_CONTROL_DEFAULT_DEADLINE_H, kReqCode: true,
+  };
+}
+
+/** Eine positive Zahl aus einem Eingabefeld — sonst `undefined` (Feld leer oder unbrauchbar). */
+function positive(v: string): number | undefined {
+  const n = Number(v);
+  return v.trim() !== "" && Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/** Baut aus Chip + Konfiguration die Aktion für den Server. `null` = Pflicht-Zahl fehlt. */
+function buildPenaltyAction(s: PenaltySuggestion & { action: string }, cfg: ActionCfg): PenaltyActionInput | null {
+  const action: PenaltyActionInput = { type: s.action };
+  if (s.param) {
+    const v = positive(cfg.param);
+    if (v === undefined) return null;
+    action[s.param.field] = v;
+  }
+  switch (s.action) {
+    case "ruined_orgasm":
+      action.oeffnenErlaubt = cfg.oeffnenErlaubt;
+      break;
+    case "mandatory_session":
+      if (cfg.sCatId) action.categoryId = cfg.sCatId;
+      action.minMinuten = positive(cfg.sMin);
+      action.delayMinutes = positive(cfg.sDelay);
+      if (cfg.sDevId) action.deviceId = cfg.sDevId;
+      action.requireVideo = cfg.sReqVideo;
+      break;
+    case "extend_lock":
+      action.reinigungErlaubt = cfg.reinigungErl;
+      action.toiletteErlaubt = cfg.toiletteErl;
+      break;
+    case "bigger_plug":
+      action.dauerH = positive(cfg.plugDauer);
+      action.fristH = positive(cfg.plugFrist);
+      break;
+    case "extra_control":
+      if (cfg.kDevice) action.device = cfg.kDevice;
+      action.deadlineH = positive(cfg.kDeadline);
+      action.requireCode = cfg.kReqCode;
+      break;
+  }
+  return action;
+}
+
+/** Fork: die Felder der gewählten Straf-Aktion. Zustandslos — der Zustand gehört dem Formular. */
+function PenaltyActionFields({ ctx, sug, cfg, update }: {
+  ctx: JudgmentCtx; sug: PenaltySuggestion & { action: string }; cfg: ActionCfg; update: (patch: Partial<ActionCfg>) => void;
+}) {
+  const l = ctx.labels;
+  const selCat = ctx.sessionCategories.find((c) => c.id === cfg.sCatId) ?? null;
+  return (
+    <div className="flex flex-col gap-2 border-t border-border-subtle pt-2 mt-0.5">
+      {sug.action === "mandatory_session" && (
+        <>
+          <Select
+            label={l.aktSessionKategorie}
+            value={cfg.sCatId}
+            onChange={(e) => {
+              const c = ctx.sessionCategories.find((x) => x.id === e.target.value);
+              update({ sCatId: e.target.value, sReqVideo: c?.requiresVideo ?? false, sDevId: "" });
+            }}
+            options={ctx.sessionCategories.map((c) => ({
+              value: c.id,
+              label: l.strafbuchSessionKategorieOption.replace("{name}", c.name).replace("{max}", String(c.maxSessionMinutes)),
+            }))}
+          />
+          <div className="flex flex-wrap gap-2">
+            <div className="w-28">
+              <label className="block text-xs text-foreground-faint mb-1">{l.aktSessionMin}</label>
+              <input type="number" min={1} value={cfg.sMin} onChange={(e) => update({ sMin: e.target.value })} placeholder="—" className={fieldCls} />
+            </div>
+            <div className="w-24">
+              <label className="block text-xs text-foreground-faint mb-1">{l.aktSessionDelay}</label>
+              <input type="number" min={0} value={cfg.sDelay} onChange={(e) => update({ sDelay: e.target.value })} placeholder="0" className={fieldCls} />
+            </div>
+          </div>
+          {selCat && selCat.devices.length > 0 && (
+            <Select
+              label={l.aktSessionGeraet}
+              value={cfg.sDevId}
+              onChange={(e) => update({ sDevId: e.target.value })}
+              options={[{ value: "", label: l.aktSessionGeraetAny }, ...selCat.devices.map((d) => ({ value: d.id, label: d.name }))]}
+            />
+          )}
+          <Checkbox label={l.aktSessionVideo} checked={cfg.sReqVideo} disabled={selCat?.requiresVideo}
+            onChange={(e) => update({ sReqVideo: e.target.checked })} />
+        </>
+      )}
+      {sug.action === "ruined_orgasm" && (
+        <Checkbox label={l.aktOrgasmusOeffnen} checked={cfg.oeffnenErlaubt} onChange={(e) => update({ oeffnenErlaubt: e.target.checked })} />
+      )}
+      {sug.action === "extend_lock" && (
+        <>
+          <Checkbox label={l.aktSperreReinigung} checked={cfg.reinigungErl} onChange={(e) => update({ reinigungErl: e.target.checked })} />
+          <Checkbox label={l.aktSperreToilette} checked={cfg.toiletteErl} onChange={(e) => update({ toiletteErl: e.target.checked })} />
+        </>
+      )}
+      {sug.action === "bigger_plug" && (
+        <div className="flex flex-wrap gap-2">
+          <div className="w-28">
+            <label className="block text-xs text-foreground-faint mb-1">{l.aktPlugDauer}</label>
+            <input type="number" min={1} value={cfg.plugDauer} onChange={(e) => update({ plugDauer: e.target.value })} placeholder="—" className={fieldCls} />
+          </div>
+          <div className="w-28">
+            <label className="block text-xs text-foreground-faint mb-1">{l.aktPlugFrist}</label>
+            <input type="number" min={1} value={cfg.plugFrist} onChange={(e) => update({ plugFrist: e.target.value })} placeholder="—" className={fieldCls} />
+          </div>
+        </div>
+      )}
+      {sug.action === "extra_control" && (
+        <>
+          <div className="flex flex-wrap gap-2">
+            <div className="w-32">
+              <Select
+                label={l.aktKontrolleGeraet}
+                value={cfg.kDevice}
+                onChange={(e) => update({ kDevice: e.target.value as ActionCfg["kDevice"] })}
+                options={[
+                  { value: "", label: l.aktKontrolleGeraetAllg },
+                  { value: "CAGE", label: l.aktKontrolleGeraetCage },
+                  { value: "PLUG", label: l.aktKontrolleGeraetPlug },
+                ]}
+              />
+            </div>
+            <div className="w-24">
+              <label className="block text-xs text-foreground-faint mb-1">{l.aktKontrolleFrist}</label>
+              <input type="number" min={1} value={cfg.kDeadline} onChange={(e) => update({ kDeadline: e.target.value })} className={fieldCls} />
+            </div>
+          </div>
+          <Checkbox label={l.aktKontrolleCode} checked={cfg.kReqCode} onChange={(e) => update({ kReqCode: e.target.checked })} />
+        </>
+      )}
+      {/* Zahlen-Parameter: Sperrzeit-Stunden / Fenster / Frist */}
+      {sug.param && (
+        <div className="w-36">
+          <label className="block text-xs text-foreground-faint mb-1">{sug.param.label}</label>
+          <input type="number" min={1} value={cfg.param} onChange={(e) => update({ param: e.target.value })} className={fieldCls} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Gemeinsames Urteils-Formular (bestrafen ODER verwerfen) — Freitext + Abbrechen/Submit.
+ *
+ *  Fork: beim Bestrafen zusätzlich die Straf-Vorschläge der Schwere-Stufe als Chips. Ein Text-Chip
+ *  hängt seinen Text an, ein Aktions-Chip (⚡) wählt EINE Aktion, die der Server mit dem Urteil
+ *  ausführt (`penaltyActions.ts`); ohne Freitext wird ihr Label zum Straftext. */
 function JudgmentForm({ ctx, refId, canonical, sectionRefs, status, label, placeholder, submitLabel, submitIcon, submitClass, onClose }: { ctx: JudgmentCtx;
   refId: string; canonical: OffenseCanonicalType;
   /** Die refIds DIESER Sektion — für die Vorgeschichte („frühere Strafen"). Fertig vom Aufrufer,
@@ -537,19 +879,54 @@ function JudgmentForm({ ctx, refId, canonical, sectionRefs, status, label, place
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [activeSug, setActiveSug] = useState<(PenaltySuggestion & { action: string }) | null>(null);
+  const [cfg, setCfg] = useState<ActionCfg>(() => initialActionCfg(null, ctx.sessionCategories));
+  const severity = ctx.severities[refId]?.severity;
+  const penaltySuggestions = status === "PUNISHED" && severity ? ctx.suggestions[severity] : [];
+
+  function pickSuggestion(s: PenaltySuggestion) {
+    if (s.action) {
+      // Aktions-Chip: genau eine Aktion, ein zweiter Klick wählt sie ab. Der Text bleibt unberührt.
+      const next = activeSug?.action === s.action ? null : { ...s, action: s.action };
+      setActiveSug(next);
+      setCfg(initialActionCfg(next, ctx.sessionCategories));
+      return;
+    }
+    // Text-Chip: Label anhängen, ohne Duplikat.
+    setText((prev) => {
+      const t = prev.trim();
+      if (!t) return s.label;
+      return t.split("; ").includes(s.label) ? t : `${t}; ${s.label}`;
+    });
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    let action: PenaltyActionInput | null = null;
+    if (status === "PUNISHED" && activeSug) {
+      action = buildPenaltyAction(activeSug, cfg);
+      if (!action) { setError(ctx.labels.strafbuchAktionStundenFehlt); return; }
+    }
+    // Straftext: Freitext, sonst das Label der gewählten Aktion.
+    const reason = text.trim() || (activeSug && status === "PUNISHED" ? activeSug.label : "");
+    if (status === "PUNISHED" && !reason) { setError(ctx.labels.strafbuchStrafeOderAktion); return; }
     setSaving(true);
     setError("");
     try {
       const res = await fetch("/api/admin/strafe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: ctx.userId, offenseType, refId, status, reason: text }),
+        body: JSON.stringify({ userId: ctx.userId, offenseType, refId, status, reason, action }),
       });
       setSaving(false);
       if (res.ok) {
+        // Das Urteil steht — ist nur die Aktion gescheitert, bleibt das Formular mit der Meldung offen.
+        const body: { actionError?: string | null } = await res.json().catch(() => ({}));
+        if (body.actionError) {
+          setError(`${ctx.labels.strafbuchAktionFehlgeschlagen}: ${ctx.apiError(body.actionError)}`);
+          router.refresh();
+          return;
+        }
         onClose();
         router.refresh();
       } else {
@@ -573,9 +950,31 @@ function JudgmentForm({ ctx, refId, canonical, sectionRefs, status, label, place
   return (
     <form onSubmit={submit} className="mt-2 bg-surface-raised rounded-xl border border-border p-3 flex flex-col gap-2">
       {priorLine && <p className={FACT_CLS}>{priorLine}</p>}
+      {penaltySuggestions.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs font-semibold text-foreground-faint">{ctx.labels.strafbuchVorschlaege}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {penaltySuggestions.map((s) => {
+              const isActive = !!s.action && activeSug?.action === s.action;
+              // Entzug nur möglich, wenn Guthaben vorhanden ist.
+              const disabled = s.action === "deny_orgasm" && ctx.verdienteOrgasmen < 1;
+              return (
+                <button key={s.label} type="button" disabled={disabled}
+                  onClick={() => pickSuggestion(s)}
+                  title={disabled ? ctx.labels.aktEntzugKeinGuthaben : undefined}
+                  className={`text-xs border rounded-lg px-2 py-1 transition text-left ${disabled ? "opacity-40 cursor-not-allowed border-border text-foreground-faint" : isActive ? "border-[var(--color-ok)] text-[var(--color-ok)] bg-ok-bg" : "text-foreground-muted border-border hover:bg-background-hover"}`}>
+                  {s.action ? "⚡ " : ""}{s.label}
+                </button>
+              );
+            })}
+          </div>
+          {activeSug && <PenaltyActionFields ctx={ctx} sug={activeSug} cfg={cfg} update={(patch) => setCfg((c) => ({ ...c, ...patch }))} />}
+        </div>
+      )}
       <div>
         <label className="block text-xs text-foreground-faint mb-1">{label}</label>
-        <textarea value={text} onChange={e => setText(e.target.value)} rows={2} required placeholder={placeholder}
+        {/* Nicht `required` beim Bestrafen: eine gewählte Aktion liefert den Straftext selbst. */}
+        <textarea value={text} onChange={e => setText(e.target.value)} rows={2} required={status === "DISMISSED" || !activeSug} placeholder={placeholder}
           className={`${fieldCls} resize-none`} />
       </div>
       {/* Was der Sub nach dem Absenden zu sehen bekommt (Texte: `penaltyMessage`, `offenseDismissedMessage`). */}
@@ -610,6 +1009,8 @@ function JudgmentForm({ ctx, refId, canonical, sectionRefs, status, label, place
  */
 function JudgedByTag({ labels, record }: { labels: Labels; record: StrafeRecordData }) {
   if (record.judgedBy === AI_AUTHOR) return <span className={FACT_CLS}>{labels.strafbuchUrteilKI}</span>;
+  // Fork: vom Schicksalsrad gezogene Strafe (`zufallService.ts`).
+  if (record.judgedBy === SCHICKSALSRAD_AUTHOR) return <span className={FACT_CLS}>{labels.strafbuchUrteilSchicksalsrad}</span>;
   if (!record.judgedByName) return null;
   return <span className={FACT_CLS}>{labels.strafbuchUrteilVon.replace("{name}", record.judgedByName)}</span>;
 }
@@ -640,20 +1041,141 @@ function PunishedBadge({ ctx, refId }: { ctx: JudgmentCtx; refId: string }) {
               {ctx.labels.strafbuchWiederOffen}
             </button>
           </>
+        ) : record.reportedDoneAtStr ? (
+          // Seine Meldung verlangt eine Entscheidung — bestätigen oder (Fork) mit Begründung ablehnen.
+          <CompletionReport ctx={ctx} record={record} reportedDoneAtStr={record.reportedDoneAtStr} />
         ) : (
           <>
-            {/* Seine Meldung steht VOR dem Knopf, der sie beantwortet. */}
-            {record.reportedDoneAtStr && (
-              <span className={FACT_CLS}>{ctx.labels.strafbuchGemeldet.replace("{date}", record.reportedDoneAtStr)}</span>
-            )}
             <button type="button" onClick={() => ctx.onMarkDone(refId, true)}
               className={CHIP_OK_CLS}>
               <CheckCircle size={11} /> {ctx.labels.strafbuchAlsErledigt}
             </button>
+            {/* Fork: die zuletzt abgelehnte Meldung bleibt als Hinweis stehen, bis er erneut meldet. */}
+            {record.ablehnungGrund && (
+              <span className={NOTE_CLS}>{ctx.labels.strafbuchAbgelehntBadge}: „{record.ablehnungGrund}"</span>
+            )}
           </>
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Fork: die Erledigt-Meldung des Trägers samt Nachweis-Foto und Notiz — und ihre Prüfung.
+ *
+ * Die Meldung selbst ist Upstreams `reportedDoneAt`; Foto, Notiz und Ablehnung sind die Fork-Extras
+ * darauf. „Bestätigen" ist dasselbe wie „Als erledigt" (der Service schliesst den Loop), „Ablehnen"
+ * verlangt einen Grund, den der Träger zu lesen bekommt, und lässt die Strafe offen.
+ *
+ * Auf Modul-Ebene und mit eigenem Zustand — Begründung bei {@link JudgmentCtx}: im Rumpf des Elters
+ * verlöre die halb getippte Begründung bei jedem Render von oben ihren Inhalt.
+ */
+function CompletionReport({ ctx, record, reportedDoneAtStr }: { ctx: JudgmentCtx; record: StrafeRecordData; reportedDoneAtStr: string }) {
+  const [rejecting, setRejecting] = useState(false);
+  const [grund, setGrund] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function reject() {
+    setSaving(true);
+    setError("");
+    const err = await ctx.onRejectReport(record.refId, grund);
+    setSaving(false);
+    if (err) setError(err);
+    else { setRejecting(false); setGrund(""); }
+  }
+
+  return (
+    <div className="w-full rounded-xl border border-[var(--color-inspect)] px-3 py-2.5 flex flex-col gap-2">
+      <div className="flex items-center gap-1.5">
+        <Clock size={12} className="text-[var(--color-inspect)] shrink-0" />
+        <span className="text-xs font-semibold text-[var(--color-inspect)]">
+          {ctx.labels.strafbuchGemeldet.replace("{date}", reportedDoneAtStr)}
+        </span>
+      </div>
+      {record.erledigungNotiz && <Quote>{record.erledigungNotiz}</Quote>}
+      {record.nachweisUrl && (
+        <ImageViewer src={record.nachweisUrl} alt={ctx.labels.strafbuchNachweis} width={96} height={96} className="rounded-lg" />
+      )}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => ctx.onMarkDone(record.refId, true)} className={CHIP_OK_CLS}>
+          <CheckCircle size={11} /> {ctx.labels.strafbuchBestaetigen}
+        </button>
+        <button type="button" onClick={() => setRejecting((v) => !v)}
+          className={`${CHIP_CLS} text-warn border-warn hover:bg-warn-bg`}>
+          <XCircle size={11} /> {ctx.labels.strafbuchAblehnen}
+        </button>
+      </div>
+      {rejecting && (
+        <div className="flex flex-col gap-2">
+          <textarea value={grund} onChange={(e) => setGrund(e.target.value)} rows={2}
+            placeholder={ctx.labels.strafbuchAblehnenPlaceholder}
+            className={`${fieldCls} resize-none`} />
+          <FormError message={error} variant="compact" />
+          <div className="flex gap-2 justify-end">
+            <button type="button" onClick={() => { setRejecting(false); setGrund(""); setError(""); }}
+              className="text-xs text-foreground-faint hover:text-foreground-muted transition px-3 py-1.5 rounded-lg border border-border">
+              {ctx.labels.strafbuchAbbrechen}
+            </button>
+            <button type="button" disabled={saving || !grund.trim()} onClick={() => void reject()}
+              className="text-xs font-semibold text-btn-primary-text bg-warn px-3 py-1.5 rounded-lg disabled:opacity-50 transition hover:opacity-90">
+              {saving ? "…" : ctx.labels.strafbuchAblehnen}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Fork: Schwere-Badge einer Zeile, samt Hinweis auf eine Wiederholungs-Eskalation. */
+function SeverityBadge({ labels, info }: { labels: Labels; info: SeverityInfo | undefined }) {
+  if (!info) return null;
+  const sevLabel: Record<OffenseSeverity, string> = { schwer: labels.schwereSchwer, mittel: labels.schwereMittel, leicht: labels.schwereLeicht };
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className={`${SEV_BADGE_CLS} ${SEV_STYLE[info.severity]}`}>{sevLabel[info.severity]}</span>
+      {info.escalated && (
+        <span className={`${SEV_BADGE_CLS} text-warn border-warn`}>↑ {labels.strafbuchHochgestuft}</span>
+      )}
+    </div>
+  );
+}
+
+/** Fork: Schwere-Übersicht & Straf-Vorschläge — aufklappbare Hilfestellung über dem Strafbuch. */
+function SeverityLegend({ labels, matrix }: { labels: Labels; matrix: SeverityMatrixRow[] }) {
+  const [open, setOpen] = useState(false);
+  const sevLabel: Record<OffenseSeverity, string> = { schwer: labels.schwereSchwer, mittel: labels.schwereMittel, leicht: labels.schwereLeicht };
+  return (
+    <Section
+      title={labels.strafbuchLegende}
+      action={
+        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-label={labels.strafbuchLegende}
+          className="text-foreground-faint hover:text-foreground-muted transition">
+          <ChevronDown size={16} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+      }
+    >
+      {open && (
+        <div className={`${blockInsetCls} py-3 flex flex-col gap-3`}>
+          {matrix.map((row) => (
+            <div key={row.severity} className="flex flex-col gap-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`${SEV_BADGE_CLS} ${SEV_STYLE[row.severity]}`}>{sevLabel[row.severity]}</span>
+                <span className={FACT_CLS}>{row.offenses.join(" · ")}</span>
+              </div>
+              <ul className="ml-1 flex flex-col gap-0.5">
+                {row.suggestions.map((s) => (
+                  <li key={s} className="text-xs text-foreground-muted">• {s}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          <p className={NOTE_CLS}>{labels.strafbuchLegendeHint}</p>
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -762,7 +1284,7 @@ function JudgmentSlot({ ctx, refId, canonical, sectionRefs, anlass }: {
   );
 }
 
-export default function StrafbuchClient({ userId, unerlaubteOeffnungen, zuSpaet, abgelehnt, autoEntfernt, cleaningLimitOffenses, unfulfilledTasks, nichtVerschlossen, verschlussVersaeumt, orgasmusVersaeumt, orgasmusFalscheArt, falschesGeraet, adminPasswort, unerlaubteOrgasmen, missedWeightReports, boxPhotoMissing, manuelleVergehen, strafeRecords, statements, labels }: Props) {
+export default function StrafbuchClient({ userId, unerlaubteOeffnungen, zuSpaet, abgelehnt, autoEntfernt, cleaningLimitOffenses, unfulfilledTasks, nichtVerschlossen, verschlussVersaeumt, orgasmusVersaeumt, orgasmusFalscheArt, falschesGeraet, adminPasswort, unerlaubteOrgasmen, missedWeightReports, boxPhotoMissing, manuelleVergehen, sessionVersaeumt, erektionen, pauseUeberzug, orgasmusUeberBudget, strafeRecords, statements, labels, severities, suggestions, matrix, sessionCategories, verdienteOrgasmen }: Props) {
   const router = useRouter();
   // Beide Routen dieser Seite (`/api/admin/offense`, `/api/admin/strafe`) liefern stabile
   // Fehler-CODES — übersetzt wird hier.
@@ -796,6 +1318,13 @@ export default function StrafbuchClient({ userId, unerlaubteOeffnungen, zuSpaet,
 
   function markDone(refId: string, done: boolean) {
     void runAction("/api/admin/strafe", { refId, done });
+  }
+
+  /** Fork: gemeldete Erledigung mit Begründung ablehnen — die Strafe bleibt offen. */
+  async function rejectReport(refId: string, grund: string): Promise<string | null> {
+    const res = await runAction("/api/admin/strafe", { refId, action: "reject", grund });
+    if (!res) return labels.networkError;
+    return res.ok ? null : apiError(await parseApiErrorCode(res));
   }
 
   /** Der Straf-Anlass einer Kontroll-Zeile: Code und Frist. Ohne den Code stünde bei zwei
@@ -959,7 +1488,7 @@ export default function StrafbuchClient({ userId, unerlaubteOeffnungen, zuSpaet,
       anlass: `${labels.strafbuchVerschlussFrist} ${a.endsAtStr}`,
       body: (judged) => (
         <>
-          {titleLine(judged, <>{labels.frist} {a.endsAtStr}</>,
+          {titleLine(judged, <>{labels.frist} {a.endsAtStr}{a.categoryName ? ` (${a.categoryName})` : ""}</>,
             a.fulfilledAtStr
               ? <>{labels.strafbuchVerschlussZuSpaet} {a.fulfilledAtStr}</>
               : labels.strafbuchVerschlussNieErfuellt,
@@ -1084,6 +1613,53 @@ export default function StrafbuchClient({ userId, unerlaubteOeffnungen, zuSpaet,
         </>
       ),
     }))),
+
+    // ── Fork-Arten ──
+    sec("missed_session", labels.strafbuchVersaeumteSession, sessionVersaeumt.map((m) => ({
+      refId: m.id,
+      anlass: `${labels.frist} ${m.endetAtStr}`,
+      body: (judged) => (
+        <>
+          {titleLine(judged, <>{labels.frist} {m.endetAtStr}{m.categoryName ? ` (${m.categoryName})` : ""}</>, labels.strafbuchVersaeumteSession)}
+          {m.nachricht && <span className={NOTE_CLS}>{labels.instructionLabel}: {m.nachricht}</span>}
+        </>
+      ),
+    }))),
+
+    sec("erektion", labels.strafbuchErektion, erektionen.map((v) => ({
+      refId: v.entryId,
+      anlass: `${labels.strafbuchErektionDate} ${v.startTimeStr}`,
+      body: (judged) => (
+        <>
+          {titleLine(judged, <>{labels.strafbuchErektionDate} {v.startTimeStr}</>, v.grundLabel ?? labels.strafbuchErektion)}
+          {v.note && <span className={NOTE_CLS}>„{v.note}"</span>}
+        </>
+      ),
+    }))),
+
+    sec("pause_overage", labels.strafbuchPauseUeberzug, pauseUeberzug.map((v) => ({
+      refId: v.entryId,
+      anlass: `${v.context} ${v.startTimeStr}`,
+      body: (judged) => (
+        <>
+          {titleLine(judged, <>{v.context} — {v.startTimeStr}</>, v.dauerStr)}
+          {v.note && <span className={NOTE_CLS}>„{v.note}"</span>}
+        </>
+      ),
+    }))),
+
+    sec("orgasm_over_budget", labels.strafbuchOrgasmusUeberBudget, orgasmusUeberBudget.map((v) => ({
+      refId: v.entryId,
+      anlass: `${labels.strafbuchOrgasmusAm} ${v.startTimeStr}`,
+      body: (judged) => (
+        <>
+          {titleLine(judged,
+            <>{labels.strafbuchOrgasmusAm} {v.startTimeStr}{v.orgasmusArt ? ` (${v.orgasmusArt})` : ""}</>,
+            <>{labels.strafbuchOrgasmusUeberBudget} {v.used}/{v.limit}</>,
+          )}
+        </>
+      ),
+    }))),
   ];
 
   // Das Bündel für die Urteils-Bauteile (siehe {@link JudgmentCtx} — sie stehen bewusst auf
@@ -1092,7 +1668,8 @@ export default function StrafbuchClient({ userId, unerlaubteOeffnungen, zuSpaet,
   const judgmentCtx: JudgmentCtx = {
     userId, labels, statements, strafeRecords, punishedIds, dismissedIds,
     openJudgment, setOpenJudgment, apiError,
-    onUndo: setUndoRef, onMarkDone: markDone,
+    onUndo: setUndoRef, onMarkDone: markDone, onRejectReport: rejectReport,
+    severities, suggestions, sessionCategories, verdienteOrgasmen,
   };
 
   // Fehlt oben eine Art, bricht der Build hier und nennt sie beim Namen — Begründung an der
@@ -1100,8 +1677,18 @@ export default function StrafbuchClient({ userId, unerlaubteOeffnungen, zuSpaet,
   const _everyOffenseHasASection: AssertCoversAllOffenses<(typeof sections)[number]["canonical"]> = true;
 
   const openRowsOf = (s: (typeof sections)[number]) => s.rows.filter(r => !closedIds.has(r.refId));
-  const hasAnyOpen = sections.some(s => openRowsOf(s).length > 0);
-  const hasAny = sections.some(s => s.rows.length > 0);
+
+  // Fork: direkt verhängte Strafen ohne erkanntes Vergehen (Keyholderin/KI im Chat, Schicksalsrad —
+  // `offenseType: "AI_KEYHOLDER"`) und Urteile, deren Vergehen nicht mehr abgeleitet wird. Ohne
+  // eigene Zeile wären sie hier unsichtbar — eine gemeldete Erledigung liesse sich nie prüfen, obwohl
+  // der Träger sie sieht.
+  const sectionRefIds = new Set(sections.flatMap((s) => s.rows.map((r) => r.refId)));
+  const standalone = strafeRecords.filter((r) => !sectionRefIds.has(r.refId));
+  const openStandalone = standalone.filter((r) => !closedIds.has(r.refId));
+  const displayStandalone = showAll ? standalone : openStandalone;
+
+  const hasAnyOpen = sections.some(s => openRowsOf(s).length > 0) || openStandalone.length > 0;
+  const hasAny = sections.some(s => s.rows.length > 0) || standalone.length > 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -1123,6 +1710,8 @@ export default function StrafbuchClient({ userId, unerlaubteOeffnungen, zuSpaet,
           <Button variant="primary" icon={<Plus size={16} />}>{labels.recordOffense}</Button>
         </Link>
       </div>
+
+      <SeverityLegend labels={labels} matrix={matrix} />
 
       {/* Der Leer-Zustand ist die gemeinsame Figur der App und kein eigener Kasten mehr — dieselbe
           Begründung wie bei `OffenseSection`. `CheckCircle` für „alles beurteilt", `ClipboardList`
@@ -1146,6 +1735,7 @@ export default function StrafbuchClient({ userId, unerlaubteOeffnungen, zuSpaet,
               const judged = closedIds.has(r.refId);
               return (
                 <div key={r.refId} className={`${blockInsetCls} py-3 flex flex-col gap-0.5 ${judged ? "opacity-50" : ""}`}>
+                  <SeverityBadge labels={labels} info={severities[r.refId]} />
                   {r.body(judged)}
                   <JudgmentSlot ctx={judgmentCtx} refId={r.refId} canonical={s.canonical} sectionRefs={sectionRefs} anlass={`${s.title}: ${r.anlass}`} />
                 </div>
@@ -1154,6 +1744,25 @@ export default function StrafbuchClient({ userId, unerlaubteOeffnungen, zuSpaet,
           </OffenseSection>
         );
       })}
+
+      {displayStandalone.length > 0 && (
+        <OffenseSection labels={labels} title={labels.strafbuchKeyholderStrafe} openCount={openStandalone.length} totalCount={standalone.length}>
+          {displayStandalone.map((r) => {
+            const judged = closedIds.has(r.refId);
+            return (
+              <div key={r.refId} className={`${blockInsetCls} py-3 flex flex-col gap-0.5 ${judged ? "opacity-50" : ""}`}>
+                <p className={`text-sm font-semibold text-foreground ${judged ? "line-through" : ""}`}>
+                  {r.reason ?? labels.strafbuchKeyholderStrafe}
+                </p>
+                <p className={FACT_CLS}>{labels.strafbuchKeyholderStrafeHint} · {r.judgedAtStr}</p>
+                {r.status === "PUNISHED"
+                  ? <PunishedBadge ctx={judgmentCtx} refId={r.refId} />
+                  : <DismissedBadge ctx={judgmentCtx} refId={r.refId} />}
+              </div>
+            );
+          })}
+        </OffenseSection>
+      )}
 
       {hasPunished && (
         <button type="button" onClick={() => setShowAll(v => !v)}

@@ -3,7 +3,7 @@
 <!-- GENERIERT — nicht von Hand ändern. Quelle: prisma/schema.prisma +
      src/lib/funktionsmodellRegistry.ts · neu erzeugen: `npm run funktionsmodell` -->
 
-Jedes Feld, das Verhalten steuert: 157 Stellschrauben über 41 Modelle.
+Jedes Feld, das Verhalten steuert: 183 Stellschrauben über 41 Modelle.
 Typ und Default stammen aus dem Schema, die Bedeutung aus der Registry — beides wird bei jedem
 Testlauf gegeneinander geprüft, ein neues Feld ohne Eintrag lässt `npm test` fehlschlagen.
 
@@ -24,6 +24,9 @@ Steckbrief: [15-eintraege.md](15-eintraege.md)
 | `Entry.boltConfirmedAt` | DateTime? | — | je Eintrag | Wann der Riegel diesen Verschluss vollzogen hat. `null` = der Aufruf steht noch aus, und dann ist die Zeile für JEDE Ableitung unsichtbar (Verschluss-Zustand, Sessions, Statistik, Strafbuch). Ohne aktiven Riegel-Schalter sofort gesetzt. | System | Box, Sperrzeit, Sessions/Statistik, Strafbuch | `lockPending.ts` |
 | `Entry.openAwaitsBolt` | Boolean | `false` | je Eintrag | Nur LockMeBox: die Öffnung ist erst der Aufruf, die Box zu öffnen. `true` = für JEDE Ableitung unsichtbar, der Träger bleibt verschlossen, bis die Box „Riegel offen" meldet; dann wird sie vollzogen und das Feld gelöscht. | System | Box, Sperrzeit, Sessions/Statistik, Strafbuch | `lockPending.ts` |
 | `Entry.oeffnenGrund` | String? | — | je Eintrag | Grund einer Öffnung. `REINIGUNG` ist der eine Wert, an dem die gesamte Reinigungsmechanik hängt — er entscheidet, ob die Sperrzeit fällt. | Sub, Keyholder (UI) | Reinigung, Sperrzeit, Strafbuch, Sessions/Statistik | `queries.ts:isAllowedCleaningOpen` |
+| `Entry.erektionGemeldet` | Boolean | `false` | je Eintrag | Beim Öffnen (Reinigung/Toilette) gemeldet: es lag eine Erektion vor. Erscheint im Strafbuch, ohne automatisches Urteil. | Sub | Strafbuch | — |
+| `Entry.falschesGeraet` | Boolean | `false` | je Eintrag | Beim Verschluss: ein anderes Gerät als das von der Anforderung vorgegebene. Erscheint im Strafbuch, ohne automatisches Urteil. | Sub, System | Strafbuch, Sperrzeit | — |
+| `Entry.sessionGoalAchieved` | Boolean? | — | je Eintrag | Beim Session-Ende: Ziel der Session erreicht? Entscheidet mit über die Erfüllung einer Session-Anforderung. | Sub | Sessions/Statistik | — |
 | `Entry.deviceId` | String? | — | je Eintrag | Welches Gerät der Eintrag betrifft. Bei einem Konflikt mit dem Bild gewinnt das Bild, nicht diese Deklaration. | Sub, Keyholder (UI) | Geräte, Sessions/Statistik, Kontrollen | — |
 
 ## Sperrzeit & Verschluss
@@ -39,6 +42,10 @@ Steckbrief: [10-sperrzeit.md](10-sperrzeit.md)
 | `VerschlussAnforderung.lockIndefinite` | Boolean | `false` | je Direktive | Die Anforderung bringt eine UNBEFRISTETE Sperrzeit mit — sie hält, bis die Keyholderin sie aufhebt. Alternative zu `minDurationHours` und `lockEndsAt`. | Keyholder (UI), Keyholder (MCP) | Sperrzeit | `entryFulfilment.ts` |
 | `VerschlussAnforderung.deviceId` | String? | — | je Direktive | Verlangt ein bestimmtes Gerät. Nur hieraus entsteht das Vergehen „falsches Gerät“ — der Bild-Abgleich allein tut es nie. | Keyholder (UI), Keyholder (MCP) | Sperrzeit, Geräte, Strafbuch | — |
 | `VerschlussAnforderung.cleaningAllowed` | Boolean | `false` | je Direktive | Erlaubt DIESE Sperrzeit eine Reinigungsöffnung (und damit einen Gerätewechsel)? Es müssen ALLE gleichzeitig aktiven Sperrzeiten erlauben, nicht nur die neueste. | Keyholder (UI), Keyholder (MCP) | Sperrzeit, Reinigung, Box, Geräte | `queries.ts:foldActiveLockPeriods` |
+| `VerschlussAnforderung.deviceCategoryId` | String? | — | je Direktive | Für welche Geräte-Kategorie die Anforderung gilt. `null` = KG. | Keyholder (UI), Keyholder (MCP) | Sperrzeit, Geräte | — |
+| `VerschlussAnforderung.airlockCode` | String? | — | je Direktive | Vorgegebenes Airlock-Lock aus dem Pool des Subs; der Verschluss muss genau dieses Lock per NFC nachweisen. | Keyholder (UI) | Sperrzeit, Einträge | — |
+| `VerschlussAnforderung.fotoPflicht` | Boolean? | — | je Direktive | Foto-Pflicht beim Verschluss für genau diese Anforderung. `null` = Standard der Kategorie. | Keyholder (UI), Keyholder (MCP) | Einträge | — |
+| `VerschlussAnforderung.toiletteErlaubt` | Boolean | `false` | je Direktive | Ob eine Toiletten-Öffnung die Sperrzeit NICHT bricht; gilt für genau diese Sperrzeit und wird bei einer Anforderung mit Mindestdauer vererbt. | Keyholder (UI), Keyholder (MCP) | Sperrzeit, Reinigung | — |
 | `VerschlussAnforderung.wirksamAb` | DateTime? | — | je Direktive | Terminierte Auslösung. Bis dahin existiert die Direktive für den Sub nicht: keine Anzeige, keine Meldung, keine laufende Frist. | Keyholder (UI), Keyholder (MCP) | Sperrzeit, Benachrichtigungen | — |
 
 ## Reinigung
@@ -51,6 +58,14 @@ Steckbrief: [20-reinigung.md](20-reinigung.md)
 | `User.cleaningMaxMinutes` | Int | `15` | dauerhaft | Höchstdauer EINER Pause. Darüber hinaus zählt die Pause als Tragezeit-Unterbrechung und wird zum erkannten Vergehen. | Keyholder (UI), Keyholder (MCP) | Reinigung, Strafbuch, Sessions/Statistik | `cleaningRules.ts:cleaningRulesAt` |
 | `User.cleaningMaxPerDay` | Int | `0` | dauerhaft | ANZAHL Öffnungen pro Kalendertag des Subs (kein Minutenbudget). 0 = unbegrenzt. Wird nur erkannt, nie durchgesetzt. | Keyholder (UI), Keyholder (MCP) | Reinigung, Strafbuch | `cleaningService.ts:maxPausesPerDaySentinel` |
 | `User.cleaningWindows` | String? | — | dauerhaft | Tages-Zeitfenster (JSON-Liste). Binden NUR während einer Sperrzeit, die die Reinigung erlaubt. Leere Liste = nicht zeitgebunden, kein Verbot. | Keyholder (UI), Keyholder (MCP) | Reinigung, Box | `queries.ts:cleaningWindowBindingStatus` |
+| `User.toiletteErlaubt` | Boolean | `false` | dauerhaft | Ob Toiletten-Öffnungen erlaubt sind — eine erlaubte Toiletten-Pause bricht die Tragezeit nicht. Wie bei der Reinigung muss eine aktive Sperrzeit es zusätzlich erlauben. | Keyholder (UI) | Reinigung, Sperrzeit, Strafbuch | — |
+| `User.toiletteMaxMinuten` | Int | `15` | dauerhaft | Höchstdauer EINER Toiletten-Pause; darüber wird sie zum erkannten Vergehen. | Keyholder (UI) | Reinigung, Strafbuch, Sessions/Statistik | — |
+| `User.toiletteMaxProTag` | Int | `0` | dauerhaft | Anzahl Toiletten-Öffnungen pro Kalendertag. 0 = unbegrenzt. | Keyholder (UI) | Reinigung, Strafbuch | — |
+| `User.plugReinigungErlaubt` | Boolean | `false` | dauerhaft | Ob Reinigungspausen des Plugs erlaubt sind — getrennt vom KG. | Keyholder (UI) | Reinigung, Strafbuch, Geräte | — |
+| `User.plugReinigungMaxMinuten` | Int | `15` | dauerhaft | Höchstdauer EINER Plug-Reinigungspause. | Keyholder (UI) | Reinigung, Strafbuch, Sessions/Statistik | — |
+| `User.plugReinigungMaxProTag` | Int | `0` | dauerhaft | Anzahl Plug-Reinigungen pro Kalendertag. 0 = unbegrenzt. | Keyholder (UI) | Reinigung, Strafbuch | — |
+| `User.plugReinigungsFenster` | String? | — | dauerhaft | Tages-Zeitfenster der Plug-Reinigung (JSON-Liste), analog `cleaningWindows`. Leer = nicht zeitgebunden. | Keyholder (UI) | Reinigung | — |
+| `User.plugToiletteMaxMinuten` | Int | `15` | dauerhaft | Höchstdauer einer Plug-Toiletten-Pause. Die Pause selbst ist immer erlaubt und unbegrenzt oft. | Keyholder (UI) | Reinigung, Strafbuch, Sessions/Statistik | — |
 
 ## Kontrollen
 
@@ -86,6 +101,7 @@ Steckbrief: [30-kontrollen.md](30-kontrollen.md)
 | `KontrollAnforderung.kommentar` | String? | — | je Direktive | Begleittext an den Sub. | Keyholder (UI), Keyholder (MCP) | Nachrichten | — |
 | `KontrollAnforderung.deadline` | DateTime | (keiner) | je Direktive | Erfüllungsfrist. Nach Ablauf verschwindet die Kontrolle nicht, sie wird überfällig — und ist der Startpunkt der Eskalation. | Keyholder (UI), Keyholder (MCP) | Kontrollen, Strafbuch | `inspectionEscalationService.ts` |
 | `KontrollAnforderung.wirksamAb` | DateTime? | — | je Direktive | Terminierte Zustellung; bis dahin für den Sub unsichtbar und ohne laufende Frist. Auch der Weg, auf dem der Tagesplan vorab angelegt wird. | Keyholder (UI), Keyholder (MCP), System | Kontrollen, Auto-Kontrollen | — |
+| `KontrollAnforderung.requireCode` | Boolean | `true` | je Direktive | Ob die Kontrolle einen frischen handgeschriebenen Code im Foto verlangt. `false` = nur Foto (ggf. mit Siegel). | Keyholder (UI), Keyholder (MCP) | Kontrollen | — |
 | `Device.requireInspectionCode` | Boolean | `true` | dauerhaft | Verlangt eine Kontrolle mit DIESEM Gerät den handschriftlichen Code im Foto? Aus: die Erfüllung läuft über die eine offene Anforderung statt über den Code-Vergleich. | Keyholder (UI), Keyholder (MCP) | Kontrollen | `kontrolleService.ts` |
 
 ## Orgasmus-Direktive
@@ -94,12 +110,16 @@ Steckbrief: [35-orgasmus.md](35-orgasmus.md)
 
 | Feld | Typ | Default | Gilt | Wirkung | Schreibt | Wirkt auf | Anker |
 |---|---|---|---|---|---|---|---|
+| `User.orgasmBudget` | Int? | — | dauerhaft | Höchstzahl zählbarer Orgasmen je Zeitraum — echte Orgasmen ausserhalb einer erfüllten Anweisung. `null` = kein Budget. | Keyholder (UI) | Orgasmus, Strafbuch | — |
+| `User.orgasmBudgetPeriode` | String | `"WOCHE"` | dauerhaft | Zeitraum des Budgets: WOCHE oder MONAT. | Keyholder (UI) | Orgasmus, Strafbuch | — |
 | `OrgasmusAnforderung.art` | String | (keiner) | je Direktive | ANWEISUNG = Pflicht (ungenutzt ist ein Vergehen), GELEGENHEIT = Erlaubnis (ungenutzt folgenlos). Der ganze Unterschied der Direktive. | Keyholder (UI), Keyholder (MCP) | Orgasmus, Strafbuch | — |
 | `OrgasmusAnforderung.message` | String? | — | je Direktive | Begleittext an den Sub. | Keyholder (UI), Keyholder (MCP) | Nachrichten | — |
 | `OrgasmusAnforderung.beginsAt` | DateTime | (keiner) | je Direktive | Beginn des Fensters. Es ist immer nur EINE Direktive aktiv. | Keyholder (UI), Keyholder (MCP) | Orgasmus | — |
 | `OrgasmusAnforderung.endsAt` | DateTime | (keiner) | je Direktive | Ende des Fensters. Danach ist eine ANWEISUNG versäumt. | Keyholder (UI), Keyholder (MCP) | Orgasmus, Strafbuch | — |
 | `OrgasmusAnforderung.requiredType` | String? | — | je Direktive | Verlangt eine bestimmte Orgasmus-Art; leer = beliebig. Nur ein passender Eintrag erfüllt. | Keyholder (UI), Keyholder (MCP) | Orgasmus, Einträge | — |
 | `OrgasmusAnforderung.openingAllowed` | Boolean | `false` | je Direktive | Erlaubt das Öffnen im Fenster, ohne dass es als unautorisiert zählt — der einzige Weg, eine Sperrzeit gezielt zu durchbrechen. | Keyholder (UI), Keyholder (MCP) | Orgasmus, Sperrzeit, Strafbuch | — |
+| `OrgasmusAnforderung.istStrafe` | Boolean | `false` | je Direktive | Als Strafe angeordnet — Nicht-Erfüllung eskaliert strenger. | Keyholder (UI), Keyholder (MCP) | Orgasmus, Strafbuch | — |
+| `OrgasmusAnforderung.fotoPflicht` | Boolean | `false` | je Direktive | Foto-Nachweis beim Erfassen des Orgasmus erforderlich. | Keyholder (UI), Keyholder (MCP) | Orgasmus, Einträge | — |
 | `OrgasmusAnforderung.wirksamAb` | DateTime? | — | je Direktive | Terminierte Auslösung. Vorher gilt das Fenster nicht, erlaubt kein Öffnen und erfüllt sich nicht. | Keyholder (UI), Keyholder (MCP) | Orgasmus | `delayedTrigger.ts` |
 
 ## Aufgaben
@@ -171,10 +191,16 @@ Steckbrief: [55-geraete.md](55-geraete.md)
 | `DeviceCategory.trackingEnabled` | Boolean | `true` | dauerhaft | Aus = reine Inventar-Kategorie: keine Trage-Sessions, keine Statistik. Abwesenheit in den Auswertungen ist dann keine Nichtnutzung. Bei der eingebauten Kategorie unveränderlich. | Keyholder (UI), Keyholder (MCP) | Sessions/Statistik, Geräte, Einträge | `deviceCategoryService.ts:resolveCategoryRuleChanges` |
 | `DeviceCategory.requirePhoto` | Boolean | `false` | dauerhaft | Ein Trage-Beginn dieser Kategorie verlangt ein Bild. Bei der eingebauten Kategorie unveränderlich. | Keyholder (UI), Keyholder (MCP) | Einträge, Geräte | `deviceCategoryService.ts:resolveCategoryRuleChanges` |
 | `DeviceCategory.allowVorgaben` | Boolean | `true` | dauerhaft | Aus = die Kategorie lässt sich in keinem Trainingsziel verwenden — deshalb Keyholder-Feld: der Träger könnte sonst das Ziel aus der Hand nehmen. Bei der eingebauten Kategorie unveränderlich. | Keyholder (UI), Keyholder (MCP) | Trainingsziele | `deviceCategoryService.ts:resolveCategoryRuleChanges` |
+| `DeviceCategory.isSessionCategory` | Boolean | `false` | dauerhaft | Session-Kategorie: statt Tragezeit (Beginn/Ende) zeitlich begrenzte Sessions. Nicht für die eingebaute KG-Kategorie. | Sub, Keyholder (UI) | Geräte, Einträge, Sessions/Statistik | — |
+| `DeviceCategory.maxSessionMinutes` | Int | `30` | dauerhaft | Höchstdauer einer Session dieser Kategorie. | Sub, Keyholder (UI) | Sessions/Statistik | — |
+| `DeviceCategory.requiresVideo` | Boolean | `false` | dauerhaft | Das Session-Ende dieser Kategorie braucht einen Video-Nachweis. | Sub, Keyholder (UI) | Einträge | — |
+| `DeviceCategory.orgasmusZiel` | String | `"KEINE"` | dauerhaft | Standard-Orgasmus-Ziel einer Session: KEINE, ERFORDERLICH oder VERBOTEN. Eine Session-Anforderung kann es überschreiben. | Sub, Keyholder (UI) | Sessions/Statistik, Orgasmus | — |
+| `DeviceCategory.region` | String | `"other"` | dauerhaft | Körperregion: zwei aktive Geräte derselben Region (ausser `other`) schliessen sich aus. | Sub, Keyholder (UI) | Geräte, Einträge | — |
 | `DeviceCategory.sortOrder` | Int | `0` | dauerhaft | Reihenfolge in Listen und Auswahlfeldern. | Sub, Keyholder (UI), Keyholder (MCP) | Oberfläche | — |
 | `Device.categoryId` | String? | — | dauerhaft | Zuordnung zur Kategorie — entscheidet, welche Kategorie-Regeln (Tracking, Pflichtfoto, Trainingsziele) für dieses Gerät gelten. | Sub, Keyholder (UI), Keyholder (MCP) | Geräte, Kontrollen, Trainingsziele, Sessions/Statistik | `deviceCategoryService.ts:resolveOwnedCategory` |
 | `Device.name` | String | (keiner) | dauerhaft | Anzeigename. Geht zusätzlich in die Geräte-Erkennung ein, zusammen mit den Bildern und den drei optischen Feldern. | Sub, Keyholder (UI), Keyholder (MCP) | Geräte, Oberfläche | — |
 | `Device.description` | String? | — | dauerhaft | Freitext — und eines der drei optischen Felder, die in die Geräte-Erkennung eingehen. Prosa über das Tragegefühl verwässert sie hier; die gehört in die Sitz-Notizen. | Sub, Keyholder (UI), Keyholder (MCP) | Geräte, Oberfläche | `deviceReferenceService.ts:visualTraitsOf` |
+| `Device.sortOrder` | Int | `0` | dauerhaft | Reihenfolge der Geräte in Listen und Auswahlfeldern (auch die Grössenfolge für „nächstgrösserer Plug"). | Sub, Keyholder (UI) | Oberfläche, Geräte | — |
 | `Device.archivedAt` | DateTime? | — | dauerhaft | Soft-Delete: gesetzt = archiviert, aus Auswahllisten raus, Historie bleibt. | Sub, Keyholder (UI), Keyholder (MCP) | Geräte, Sessions/Statistik | — |
 | `Device.securityLevel` | String? | — | dauerhaft | SECURING oder TRUST_ONLY — Einordnung für die Keyholder-Entscheidung. Wird nirgends durchgesetzt. | Keyholder (MCP) | MCP | `mcp/devices.ts:set_device_meta` |
 | `Device.lookalikeClusterId` | String? | — | dauerhaft · **rückwirkend** | Gleiche Optik = gleicher Cluster. Ein Bild-Konflikt INNERHALB eines Clusters ist nie ein Vergehen. | Keyholder (MCP) | Geräte, Sessions/Statistik, Strafbuch | `mcp/devices.ts:set_device_meta` |
@@ -308,7 +334,10 @@ eigentliche Vollständigkeitsbeweis: ein Feld, das weder oben noch hier steht, g
 | `User.createdAt` | Identität | Anlage-Zeitpunkt. |
 | `User.autoInspectionPlannedFor` | Laufzeitzustand | Merker des Planers: bis wann der Tagesplan gewürfelt ist. Wird vom Poller gesetzt, nicht von Hand. |
 | `User.telegramChatId` | Datensatz | Verknüpfter Telegram-Chat als Ziel des dritten Benachrichtigungs-Kanals. Kein Schalter, sondern eine Bindung: gesetzt vom Verknüpfungs-Webhook (der Nutzer drückt im Chat Start), gelöscht beim Entkoppeln. `null` = nicht verknüpft, dann wird für ihn nie über Telegram zugestellt. |
+| `User.orgasmBudgetSetAt` | Nachweis | Wann das Budget zuletzt gesetzt wurde — ab da wird gezählt. |
 | `User.noticeSeenVersion` | Laufzeitzustand | Veraltet: Quittung des einmaligen Umstellungs-Hinweises auf v6, der entfernt wurde. Wird nirgends mehr gelesen oder geschrieben; die Spalte bleibt, bis eine Migration sie entfernt. |
+| `User.verdienteOrgasmen` | Laufzeitzustand | Belohnungs-Guthaben (nie negativ). Ein Kontostand, keine Einstellung: Gutschrift über erreichte Trainingsziele, Abbuchung beim Gewähren eines Belohnungs-Fensters; jede Buchung steht in `BelohnungEvent`. |
+| `User.denialRecordDays` | Laufzeitzustand | Zuletzt gemeldeter Verzichts-Rekord in Tagen — nur die Drossel des Meilenstein-Pushs. |
 | `User.weightReminderMark` | Laufzeitzustand | Für welches Wiege-Fenster zuletzt erinnert wurde (`<Tag>#<Startzeit>`). Kein Schalter, sondern die Merkfähigkeit des Minuten-Pollers: sie verhindert die Wiederholung und erlaubt zugleich das Nachholen nach einem Neustart. |
 | `Entry.id` | Identität | Primärschlüssel. |
 | `Entry.clientRequestId` | Laufzeitzustand | Merkfähigkeit gegen die doppelte Zustellung: erkennt einen wiederholten Anlege-Versuch als denselben, statt einen zweiten Eintrag zu schreiben. Kein Teil dessen, was der Eintrag festhält — leer, wo der Versuch nicht wiederholbar ist. |
@@ -334,6 +363,10 @@ eigentliche Vollständigkeitsbeweis: ein Feld, das weder oben noch hier steht, g
 | `Entry.deviceCheck` | Laufzeitzustand | Geräte-Abgleich des Kontroll-Fotos. Beratend: 'wrong' ist KEIN Vergehen, das entsteht nur aus einer Anforderung. |
 | `Entry.deviceCheckNote` | Laufzeitzustand | Das erkannte Gerät, zum Prüfzeitpunkt eingefroren. |
 | `Entry.deviceCheckExpected` | Laufzeitzustand | Das erwartete Gerät, zum Prüfzeitpunkt eingefroren. |
+| `Entry.videoUrl` | Datensatz | Video-Nachweis des Session-Endes (Pflicht, wenn Kategorie oder Anforderung ihn verlangen). |
+| `Entry.pauseDevice` | Datensatz | Bei Pausen-Einträgen: welches Gerät pausiert (CAGE oder PLUG). |
+| `Entry.airlockCode` | Datensatz | Airlock-NFC beim Verschluss: die gescannte 5-stellige Lock-Nummer. |
+| `Entry.airlockUid` | Datensatz | Airlock-NFC beim Verschluss: die vom Airlock-Dienst bestätigte Tag-UID. |
 | `Entry.createdAt` | Datensatz | Anlage-Zeitpunkt. |
 | `Entry.source` | Nachweis | `user` oder `system`. `system` trägt heute nur der Öffnen-Eintrag, den die Kontroll-Eskalation selbst bucht. |
 | `Entry.capturedOffline` | Nachweis | Offline erfasst: ohne Netz gestellt, von der Warteschlange nachgereicht. Dann trägt startTime die Client-Erfassungszeit, die auch für Fristen/Vergehen zählt — die bewusst gelockerte Vertrauensregel, gegatet aufs Flag. |
@@ -377,6 +410,7 @@ eigentliche Vollständigkeitsbeweis: ein Feld, das weder oben noch hier steht, g
 | `KontrollAnforderung.withdrawnAt` | Laufzeitzustand | Gesetzt beim Zurückziehen. |
 | `KontrollAnforderung.benachrichtigtAt` | Laufzeitzustand | Wann die Zustellung rausging. |
 | `KontrollAnforderung.auto` | Laufzeitzustand | Kennzeichnet die vom Tagesplan erzeugten Zeilen. |
+| `KontrollAnforderung.deviceKind` | Datensatz | Fork-Altfeld (CAGE/PLUG, Spalte `device`) aus der Zeit vor `categoryId`/`deviceId` — nur noch für Bestands-Zeilen gelesen. |
 | `KontrollAnforderung.entryId` | Laufzeitzustand | Der erfüllende Prüf-Eintrag. |
 | `KontrollAnforderung.benachrichtigtReminderAt` | Laufzeitzustand | Stempel der Stufe 1 — zugleich der Uhr-Anker, ab dem Stufe 2 zählt. |
 | `KontrollAnforderung.autoMarkedRemovedAt` | Laufzeitzustand | Stempel der Stufe 2. |
@@ -387,6 +421,7 @@ eigentliche Vollständigkeitsbeweis: ein Feld, das weder oben noch hier steht, g
 | `KontrollAnforderung.jokerPreviousDeadline` | Laufzeitzustand | Die Frist vor dem Joker-Einsatz, für die Anzeige bei der Keyholderin — gesetzt heisst zugleich, dass der Joker dieser Kontrolle verbraucht ist. |
 | `OrgasmusAnforderung.id` | Identität | Primärschlüssel. |
 | `OrgasmusAnforderung.userId` | Identität | Eigentümer der Zeile. |
+| `OrgasmusAnforderung.istBelohnung` | Datensatz | Als Belohnungs-Fenster gewährt — 1 Guthaben ist dafür vorgemerkt und wird bei einem Rückzug im laufenden Fenster erstattet. |
 | `OrgasmusAnforderung.createdAt` | Datensatz | Anlage-Zeitpunkt. |
 | `OrgasmusAnforderung.fulfilledAt` | Laufzeitzustand | Gesetzt beim passenden Orgasmus-Eintrag im Fenster. |
 | `OrgasmusAnforderung.entryId` | Laufzeitzustand | Der erfüllende Eintrag. |
@@ -437,6 +472,10 @@ eigentliche Vollständigkeitsbeweis: ein Feld, das weder oben noch hier steht, g
 | `StrafeRecord.judgedByName` | Nachweis | Der Name des Urteilenden. `null` bei der KI (ihre Kennung steht im Kürzel), bei der automatischen Ahndung (dahinter steht niemand) und im Altbestand. |
 | `StrafeRecord.erledigtAt` | Laufzeitzustand | Nur bei PUNISHED: leer = Strafe offen, gesetzt = erledigt. |
 | `StrafeRecord.reportedDoneAt` | Laufzeitzustand | Der Träger meldet die Strafe als erledigt. Schliesst nichts — `erledigtAt` setzt weiterhin nur die Keyholderin; neues Urteil und „Wieder offen“ leeren es. |
+| `StrafeRecord.gemeldetAt` | Laufzeitzustand | Der Sub hat die Strafe als erledigt gemeldet; wartet auf Bestätigung oder Ablehnung. |
+| `StrafeRecord.nachweisUrl` | Datensatz | Optionales Nachweis-Foto zur Meldung. |
+| `StrafeRecord.erledigungNotiz` | Datensatz | Optionale Notiz des Subs zur Meldung. |
+| `StrafeRecord.ablehnungGrund` | Datensatz | Grund einer abgelehnten Meldung; die Meldung selbst wird dabei geleert. |
 | `StrafeRecord.createdAt` | Datensatz | Anlage-Zeitpunkt. |
 | `StrafeRecord.taskId` | Datensatz | Die Aufgabe, die DIESE Strafe ist. Eine erfüllte Aufgabe schliesst das Urteil von selbst ab. |
 | `ManualOffense.id` | Identität | Primärschlüssel. |

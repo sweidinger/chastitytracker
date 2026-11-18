@@ -199,17 +199,42 @@ export function usePhotoUpload({
     if (enableSealDetection) setSealState("idle");
     if (enableScaleDetection) { setScaleState("idle"); setScaleKg(null); }
     if (enableDeviceDetection) { setDeviceDetectionState("idle"); setDeviceSuggestion(null); }
-    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
-    const blobUrl = URL.createObjectURL(file);
+    // Read lastModified BEFORE any async yield (iOS Safari strips EXIF from uploads).
+    const fileLastModified = file.lastModified ? new Date(file.lastModified).toISOString() : null;
+
+    // Eagerly buffer file bytes before the first async yield.
+    // On iOS Safari, the File's backing data can be reclaimed after the file input is
+    // cleared (PhotoCapture does `e.target.value = ""` synchronously after calling onFile,
+    // which fires right as this function first suspends). Using a plain ArrayBuffer keeps
+    // the bytes alive in the JS heap regardless of the input element's state.
+    // This fixes selfie-camera uploads which iOS appears to mark reclaimable faster.
+    let safeFile: File = file;
+    try {
+      const bytes = await file.arrayBuffer();
+      safeFile = new File([bytes], file.name, { type: file.type, lastModified: file.lastModified });
+    } catch { /* keep original file — arrayBuffer() only fails on a truly dead file */ }
+
+    // Clear previous blob URL. On iOS, keeping a large decoded HEIC in the img element
+    // while the canvas starts on a new one can cause the WebContent process to OOM-crash.
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
+    }
+    setImagePreview("");
+    setImageUrl("");
+    imageUrlRef.current = "";
+
+    const blobUrl = URL.createObjectURL(safeFile);
     blobUrlRef.current = blobUrl;
     setImagePreview(blobUrl);
 
-    // Read lastModified BEFORE compression (iOS Safari strips EXIF)
+    // Read lastModified BEFORE compression (iOS Safari strips EXIF). Gelesen aus `safeFile` — dem
+    // gepufferten Abzug (s.o.), nicht aus dem womöglich schon freigegebenen Input-File.
     const [clientExifTime, compressed] = await Promise.all([
       preferExifTime
-        ? readClientExifTime(file)
-        : Promise.resolve(file.lastModified ? new Date(file.lastModified).toISOString() : null),
-      compressImage(file).catch(() => file),
+        ? readClientExifTime(safeFile)
+        : Promise.resolve(fileLastModified),
+      compressImage(safeFile).catch(() => safeFile),
     ]);
 
     function abortUpload() {
@@ -231,7 +256,7 @@ export function usePhotoUpload({
     // beim Flush — hier wird nichts gestartet.
     async function captureOffline(): Promise<void> {
       try {
-        const exifTime = await readClientExifTime(file);
+        const exifTime = await readClientExifTime(safeFile);
         const id = await putBlob({ blob: compressed, filename: compressed.name, clientExifTime: exifTime });
         const token = offlineBlobToken(id);
         setImageUrl(token);
@@ -285,7 +310,10 @@ export function usePhotoUpload({
     }
     setUploading(false);
 
-    await Promise.all([
+    // Fire-and-forget (Fork): die Erkennungen sind reine Vorschläge und blockieren nichts. Ein
+    // `await` hielte handleFile nach setUploading(false) am Leben — ersetzt der Nutzer das Foto
+    // sofort, liefe ein zweites handleFile parallel zum ersten.
+    void Promise.all([
       enableSealDetection ? runSealDetection(result.url, 0) : Promise.resolve(),
       enableDeviceDetection ? runDeviceDetection(result.url) : Promise.resolve(),
       enableScaleDetection ? runScaleDetection(result.url, 0) : Promise.resolve(),

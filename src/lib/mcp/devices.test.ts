@@ -20,7 +20,7 @@ const deviceRow = (id: string, name: string) => ({
   purchasePrice: null, currency: null, categoryId: "c1", requireInspectionCode: true,
   securityLevel: null, lookalikeClusterId: null,
   pullOffRisk: false, material: null, bauform: null, healthFlags: null, retentionNotes: null,
-  version: 1, category: { name: "KG", isBuiltIn: true, trackingEnabled: true }, _count: { referenceImages: 0 },
+  version: 1, category: { name: "KG", slug: "kg", trackingEnabled: true }, _count: { referenceImages: 0 },
 });
 
 const categoryRow = (id: string, name: string, over: Record<string, unknown> = {}) => ({

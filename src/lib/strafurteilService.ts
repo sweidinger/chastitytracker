@@ -6,6 +6,8 @@ import { recordSystemMessage, DISMISSAL_BODY_KEY, OFFENSE_REF_TYPE, type Message
 import { serviceFail, type ServiceResult, type ServiceFailure } from "@/lib/serviceResult";
 import { checkTask, writeTask, taskAssignmentNotice, type CreateTaskParams } from "@/lib/taskService";
 import { formatDateTime } from "@/lib/utils";
+import { executePenaltyAction, type PenaltyAction } from "@/lib/penaltyActions";
+import { bestaetigeErledigung, lehneErledigungAb } from "@/lib/strafErledigung";
 import { markLastAction } from "@/lib/appMeta";
 import { offenseWasAnnounced } from "@/lib/offenseAnnounce";
 import { STORED_TYPE, type OffenseCanonicalType, type StoredOffenseType } from "@/lib/offenseTypes";
@@ -26,6 +28,82 @@ import { AI_AUTHOR } from "@/lib/constants";
  *  auch aus Client-Komponenten (Strafbuch-Seite) erreichbar sein muss. Hier re-exportiert, damit die
  *  bestehenden Importeure unverändert bleiben. */
 export { STORED_TYPE, type OffenseCanonicalType, type StoredOffenseType } from "@/lib/offenseTypes";
+
+/** Schwere-Stufe eines Vergehens. Phase 1: Basis-Schwere (Wiederholungs-Eskalation folgt in Phase 2). */
+export type OffenseSeverity = "leicht" | "mittel" | "schwer";
+
+/** Basis-Schwere je Vergehenstyp (vereinbarte Kategorisierung). */
+export const OFFENSE_SEVERITY: Record<OffenseCanonicalType, OffenseSeverity> = {
+  unauthorized_opening: "schwer",
+  wrong_device: "schwer",
+  rejected_control: "schwer",
+  auto_removed_control: "schwer",  // vermutete Entfernung: Kontrolle ignoriert, System hat automatisch geöffnet
+  cleaning_limit: "mittel",
+  cleaning_not_relocked: "mittel",
+  late_lock: "mittel",
+  missed_session: "mittel",
+  missed_orgasm: "mittel",
+  late_control: "mittel",
+  pause_overage: "leicht",
+  erektion: "leicht",
+  orgasm_over_budget: "mittel",
+  // Upstream-Arten (seit dem Merge) — Einstufung analog zu den bestehenden.
+  wrong_orgasm_type: "mittel",
+  unfulfilled_task: "mittel",
+  admin_password_change: "schwer",
+  unauthorized_orgasm: "mittel",
+  missed_weight_report: "leicht",
+  box_photo_missing: "mittel",
+  manual_offense: "mittel",
+};
+
+/** Sortier-Rang: schwer zuerst. */
+export const SEVERITY_RANK: Record<OffenseSeverity, number> = { schwer: 0, mittel: 1, leicht: 2 };
+
+/** Ein anklickbarer Straf-Vorschlag: Text + optionale Aktion, die beim Bestrafen ausgeführt wird. */
+export interface PenaltySuggestion {
+  label: string;
+  /** Aktion, die beim „Strafe verhängen" mit ausgeführt wird (fehlt = reiner Text). */
+  action?: PenaltyAction["type"];
+  /** Numerisches Pflichtfeld der Aktion (z.B. Stunden der Verlängerung, Fenster/Frist). */
+  param?: { field: "hours" | "windowHours"; label: string; default: number };
+}
+
+/** Anklickbare Straf-Vorschläge je Stufe — Chip = Text + (optional) Aktion. Orientierung, NICHT bindend.
+ *  Leitlinie: ruinierter Orgasmus (Pflicht) & "Session anfordern" = Strafe; ein normaler Orgasmus
+ *  (Gelegenheit/Erlaubnis, Masturbation) = Belohnung und wird NIE als Strafe vergeben. */
+export const SEVERITY_PENALTY_SUGGESTIONS: Record<OffenseSeverity, PenaltySuggestion[]> = {
+  leicht: [
+    { label: "Ermahnung / freundliche Verwarnung" },
+    { label: "Kurze Reflexion (1–2 Sätze, was nächstes Mal besser läuft)" },
+    { label: "Sperrzeit verlängern (nur bei Wiederholung)", action: "extend_lock", param: { field: "hours", label: "Stunden Verlängerung", default: 1 } },
+  ],
+  mittel: [
+    { label: "Extra-Kontrolle anfordern", action: "extra_control" },
+    { label: "Sperrzeit verlängern", action: "extend_lock", param: { field: "hours", label: "Stunden Verlängerung", default: 3 } },
+    { label: "Ruinierter Orgasmus (Pflicht)", action: "ruined_orgasm", param: { field: "windowHours", label: "Fenster (Stunden)", default: 24 } },
+    { label: "Nächste Orgasmus-Gelegenheit verschieben", action: "delay_orgasm", param: { field: "hours", label: "Stunden verschieben", default: 3 } },
+    { label: "Nächstgrößeren Analplug anfordern", action: "bigger_plug" },
+  ],
+  schwer: [
+    { label: "Sperrzeit verlängern", action: "extend_lock", param: { field: "hours", label: "Stunden Verlängerung", default: 5 } },
+    { label: "Ruinierter Orgasmus (Pflicht)", action: "ruined_orgasm", param: { field: "windowHours", label: "Fenster (Stunden)", default: 24 } },
+    { label: "Orgasmus-Entzug: Belohnungs-Guthaben −1", action: "deny_orgasm" },
+    { label: "Pflicht-Session anfordern", action: "mandatory_session", param: { field: "windowHours", label: "Frist (Stunden)", default: 24 } },
+  ],
+};
+
+/** Kompakter Leitlinien-Text zur Schwere + Strafmaß — geteilt vom AI-Kontext und der MCP-Doku. */
+export const SEVERITY_GUIDANCE_TEXT = [
+  "",
+  "--- Schwere & Strafmaß (Orientierung, nicht bindend) ---",
+  "Vergehen sind in drei Stufen kategorisiert; wähle das Strafmaß passend zur Stufe:",
+  `- SCHWER (unerlaubte Öffnung, falsches Gerät, abgelehnte Kontrolle): ${SEVERITY_PENALTY_SUGGESTIONS.schwer.map((s) => s.label).join(" · ")}`,
+  `- MITTEL (versäumte Verschluss-Anforderung, versäumte Session, verpasste Orgasmus-Anweisung, zu spät erfüllte Kontrolle): ${SEVERITY_PENALTY_SUGGESTIONS.mittel.map((s) => s.label).join(" · ")}`,
+  `- LEICHT (Pause zu lang, Erektion): ${SEVERITY_PENALTY_SUGGESTIONS.leicht.map((s) => s.label).join(" · ")}`,
+  "Wiederholung: dasselbe Vergehen ≥5× in 7 Tagen (bzw. eine ignorierte Straf-Anweisung ≥2×) hebt die Schwere automatisch an — im Ledger als `escalated`/`severity` erkennbar. Bemiss die Strafe an der effektiven (hochgestuften) Schwere.",
+  "Leitlinie: ein ruinierter Orgasmus (Pflicht) und eine angeordnete Session sind STRAFEN; ein normaler Orgasmus (Gelegenheit/Erlaubnis, Masturbation) ist eine BELOHNUNG und wird NIE als Strafe vergeben.",
+].join("\n");
 
 export interface DetectedOffense {
   canonicalType: OffenseCanonicalType;
@@ -58,14 +136,66 @@ export function collectDetectedOffenses(sb: StrafbuchData): DetectedOffense[] {
   );
 }
 
+/** Effektive Schwere eines Vergehens inkl. Wiederholungs-Eskalation. */
+export interface EffectiveSeverity {
+  severity: OffenseSeverity;
+  base: OffenseSeverity;
+  escalated: boolean;
+}
+
+const ESCALATION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/** ≥5× dasselbe Vergehen / 7 Tage → eine Stufe hoch. */
+const REPEAT_THRESHOLD = 5;
+/** Ignorierte Straf-Anweisung (ruinierter Orgasmus als Pflicht) ≥2× / 7 Tage → schwer. */
+const PENALTY_REPEAT_THRESHOLD = 2;
+
+function nextSeverity(s: OffenseSeverity): OffenseSeverity {
+  return s === "leicht" ? "mittel" : "schwer";
+}
+
+/** Berechnet je erkanntem Vergehen (refId) die EFFEKTIVE Schwere. Zählfenster: die letzten 7 Tage
+ *  ab `now`. Regeln: dasselbe Vergehen ≥5× → +1 Stufe; ignorierte Straf-Anweisung ≥2× → schwer. */
+export function computeSeverities(sb: StrafbuchData, now: Date = new Date()): Map<string, EffectiveSeverity> {
+  const offenses = collectDetectedOffenses(sb);
+  const windowStart = now.getTime() - ESCALATION_WINDOW_MS;
+  // Ignorierte Straf-ANWEISUNGEN (als Strafe angeordnete Orgasmus-Anweisungen ODER Pflicht-Sessions).
+  const penaltyRefIds = new Set<string>([
+    ...sb.missedOrgasmInstructions.filter((m) => m.istStrafe).map((m) => m.id),
+    ...sb.missedSessions.filter((m) => m.istStrafe).map((m) => m.id),
+  ]);
+  const inWindow = (o: DetectedOffense) => (o.at ? o.at.getTime() : 0) >= windowStart;
+
+  const countByType = new Map<OffenseCanonicalType, number>();
+  let penaltyDirectiveCount = 0;
+  for (const o of offenses) {
+    if (!inWindow(o)) continue;
+    countByType.set(o.canonicalType, (countByType.get(o.canonicalType) ?? 0) + 1);
+    if (penaltyRefIds.has(o.refId)) penaltyDirectiveCount++;
+  }
+
+  const result = new Map<string, EffectiveSeverity>();
+  for (const o of offenses) {
+    const base = OFFENSE_SEVERITY[o.canonicalType];
+    let eff = base;
+    if ((countByType.get(o.canonicalType) ?? 0) >= REPEAT_THRESHOLD) eff = nextSeverity(eff);
+    // Ignorierte Straf-Anweisung (Orgasmus/Session) ≥2× / 7 Tage → schwer.
+    if (penaltyRefIds.has(o.refId) && penaltyDirectiveCount >= PENALTY_REPEAT_THRESHOLD) eff = "schwer";
+    result.set(o.refId, { severity: eff, base, escalated: eff !== base });
+  }
+  return result;
+}
+
 export interface JudgeOffenseParams {
   userId: string;
   refId: string;
   /** `complete`/`uncomplete` sind die beiden Richtungen desselben Schalters am bestehenden Urteil —
    *  „Als erledigt" und „Wieder offen" im Strafbuch. Getrennt und nicht als `done: boolean`, weil
-   *  die übrigen Werte schon Aktionen sind und ein Bool daneben zwei Grammatiken ergäbe. */
-  action: "dismiss" | "punish" | "complete" | "uncomplete" | "reopen";
-  /** Freitext: Strafe (bei punish, erforderlich) bzw. optionaler Grund (bei dismiss). */
+   *  die übrigen Werte schon Aktionen sind und ein Bool daneben zwei Grammatiken ergäbe.
+   *  `reject_completion` (Fork): eine vom Träger gemeldete Erledigung ablehnen — die Strafe bleibt
+   *  offen, der Träger erfährt den Grund (`strafErledigung.ts`). */
+  action: "dismiss" | "punish" | "complete" | "uncomplete" | "reopen" | "reject_completion";
+  /** Freitext: Strafe (bei punish, erforderlich), Grund (bei dismiss, optional) bzw.
+   *  Begründung der Ablehnung (bei reject_completion, erforderlich — Fork). */
   text?: string;
   /**
    * WELCHES der Vergehen an dieser ref gemeint ist — die BEHAUPTUNG des Aufrufers, gegen die
@@ -107,6 +237,8 @@ export interface JudgeOffenseParams {
    * nicht eine Reihenfolge.
    */
   allowRevision?: boolean;
+  /** Fork (Phase 3): optionale Straf-Aktion, die bei action="punish" direkt ausgeführt wird. */
+  penaltyAction?: PenaltyAction | null;
 }
 
 /**
@@ -152,6 +284,9 @@ export function judgmentAuthorColumns(actor: MessageActor): { judgedBy: string; 
 export interface JudgeOffenseResult {
   status: "punished" | "dismissed" | "open";
   done: boolean;
+  /** Ergebnis der ausgeführten Straf-Aktion (falls eine mitgegeben wurde). */
+  actionMessage?: string | null;
+  actionError?: string | null;
 }
 
 /** Betreff + Text der „Strafe verhängt"-Benachrichtigung. Erreichbar nur über {@link notifyJudgment}
@@ -404,7 +539,8 @@ async function writeJudgment(
     ...judgmentAuthorColumns(p.actor),
     erledigtAt: null, bestraftDatum: p.now, taskId: p.taskId,
     // Eine Erledigt-Meldung gilt dem Urteil, auf das sie antwortete — ein neues fängt ohne sie an.
-    reportedDoneAt: null,
+    // Samt der Fork-Extras dieser Meldung (Nachweis, Notiz, Ablehnungsgrund, Altfeld `gemeldetAt`).
+    reportedDoneAt: null, gemeldetAt: null, nachweisUrl: null, erledigungNotiz: null, ablehnungGrund: null,
   };
   const create = { userId: p.userId, offenseType: p.offense.offenseType, refId: p.offense.refId, ...data };
   return p.allowRevision
@@ -430,6 +566,8 @@ function judgmentConflict(e: unknown): ServiceFailure | null {
  * - punish: markiert PUNISHED, text = Strafe (erforderlich), erledigtAt = null (offen).
  * - complete: setzt erledigtAt auf einer bestehenden Strafe (Loop schliessen) — idempotent.
  * - uncomplete: nimmt erledigtAt wieder weg (Loop erneut öffnen).
+ * - reject_completion (Fork): lehnt die Erledigt-Meldung des Trägers mit Begründung ab — die Strafe
+ *   bleibt offen, er kann erneut melden.
  * - reopen: entfernt das Urteil (revidieren) samt seiner Strafaufgabe und der Verwerfungs-Meldung.
  *
  * `actor` ist WER urteilt (Benutzername der Sitzung bzw. {@link AI_AUTHOR} über den MCP, siehe
@@ -475,16 +613,32 @@ export async function judgeOffense(
     if (!rec || rec.userId !== p.userId) return serviceFail(404, "JUDGMENT_NOT_FOUND");
     if (rec.status !== "PUNISHED") return serviceFail(400, "PENALTY_NOT_PUNISHED");
     const done = p.action === "complete";
-    // `rec.erledigtAt ?? now` und nicht `now`: der Zeitpunkt sagt, WANN die Strafe abgeleistet war,
-    // nicht wann zuletzt jemand auf den Knopf gedrückt hat. Ein zweiter Klick auf „Als erledigt"
-    // (Doppelklick, zweiter Tab, zweiter Keyholder) darf ihn deshalb nicht nach vorne schieben.
-    await prisma.strafeRecord.update({
-      where: { refId: p.refId },
-      // „Wieder offen" nimmt auch die Erledigt-Meldung des Trägers zurück: die Keyholderin sagt damit,
-      // dass die Strafe NICHT erledigt ist — die alte Meldung stünde sonst als Behauptung daneben.
-      data: done ? { erledigtAt: rec.erledigtAt ?? now } : { erledigtAt: null, reportedDoneAt: null },
-    });
+    if (done) {
+      // Bereits erledigt: nichts zu tun — der Zeitpunkt sagt, WANN die Strafe abgeleistet war, nicht
+      // wann zuletzt jemand auf den Knopf gedrückt hat (Doppelklick, zweiter Tab, zweiter Keyholder).
+      // Sonst bestätigt der Fork-Erledigungs-Loop (`strafErledigung.ts`): setzt `erledigtAt`, leert
+      // einen alten Ablehnungsgrund und meldet dem Träger, dass seine Erledigung abgehakt ist.
+      if (!rec.erledigtAt) {
+        const res = await bestaetigeErledigung(p.userId, p.refId);
+        if (!res.ok) return res;
+      }
+    } else {
+      await prisma.strafeRecord.update({
+        where: { refId: p.refId },
+        // „Wieder offen" nimmt auch die Erledigt-Meldung des Trägers zurück: die Keyholderin sagt damit,
+        // dass die Strafe NICHT erledigt ist — die alte Meldung stünde sonst als Behauptung daneben.
+        // `gemeldetAt` ist das Fork-Altfeld derselben Meldung.
+        data: { erledigtAt: null, reportedDoneAt: null, gemeldetAt: null },
+      });
+    }
     return { ok: true, data: { status: "punished", done } };
+  }
+
+  // Gemeldete Erledigung ablehnen → Strafe ist wieder offen, der Sub erfährt den Grund.
+  if (p.action === "reject_completion") {
+    const res = await lehneErledigungAb(p.userId, p.refId, p.text ?? "");
+    if (!res.ok) return res;
+    return { ok: true, data: { status: "punished", done: false } };
   }
 
   const text = p.text?.trim() || null;
@@ -520,5 +674,18 @@ export async function judgeOffense(
   await notifyJudgment({ userId: p.userId, refId: offense.refId, recordId: record.id, status, reason: text }, actor);
   markLastAction();
 
-  return { ok: true, data: { status: status === "PUNISHED" ? "punished" : "dismissed", done: false } };
+  // Straf-Aktion (Phase 3) ausführen — nur bei verhängter Strafe. Fehler brechen das Urteil NICHT ab.
+  let actionMessage: string | null = null;
+  let actionError: string | null = null;
+  if (status === "PUNISHED" && p.penaltyAction) {
+    const ar = await executePenaltyAction(p.userId, p.penaltyAction, actor);
+    if (ar.ok) actionMessage = ar.data.message;
+    else actionError = ar.error;
+  }
+
+  // Die Aktions-Felder nur, wenn eine Aktion verlangt war — ohne bleibt die Antwort die von Upstream.
+  return {
+    ok: true,
+    data: { status: status === "PUNISHED" ? "punished" : "dismissed", done: false, ...(p.penaltyAction ? { actionMessage, actionError } : {}) },
+  };
 }

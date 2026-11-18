@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import BlockHeading from "@/app/components/BlockHeading";
 import Link from "next/link";
-import { Settings, LogOut, ScrollText } from "lucide-react";
+import { Settings, LogOut, ScrollText, Nfc, Bot } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useSignOut } from "@/app/hooks/useSignOut";
 import { LockClosedIcon } from "@/app/components/lockIcons";
@@ -13,14 +13,20 @@ interface Props {
   settingsHref: string;
   theme: "user" | "admin";
   version?: string;
+  /** Globale Admins sehen die instanzweiten KI-Backend- und Airlock-Einstellungen. (Die
+   *  Benutzerverwaltung ist seit v6.2.4 ein Symbol-Knopf in `AdminHeader`, siehe unten.) */
+  isGlobalAdmin?: boolean;
+  /** Show the "Meine Airlock-Schlösser" entry — nur wenn dem User Locks zugewiesen sind (Sub-Bereich). */
+  showMyAirlock?: boolean;
 }
 
 // Die Benutzerverwaltung stand hier einmal als eigener Eintrag, gehalten von `isGlobalAdmin`. Sie
 // hängt seit v6.2.4 als Symbol-Knopf in `AdminHeader` — und weil `Header.tsx` (grüner Kopf)
 // `isGlobalAdmin` nie durchreichte, erschien der Eintrag ohnehin AUSSCHLIESSLICH in derselben
 // Kopfzeile, gut vierzig Pixel neben dem neuen Knopf. Zwei Türen in einer Leiste sind keine bessere
-// Auffindbarkeit, sondern zweimal dasselbe.
-export default function AvatarMenu({ username, settingsHref, theme, version }: Props) {
+// Auffindbarkeit, sondern zweimal dasselbe. `isGlobalAdmin` bleibt für die selteneren
+// Instanz-Einstellungen (KI-Backend, Airlock), die keinen eigenen Knopf in der Kopfzeile haben.
+export default function AvatarMenu({ username, settingsHref, theme, version, isGlobalAdmin, showMyAirlock }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const t = useTranslations("nav");
@@ -66,6 +72,24 @@ export default function AvatarMenu({ username, settingsHref, theme, version }: P
               <Settings size={16} strokeWidth={1.75} />
               {t("settings")}
             </Link>
+            {isGlobalAdmin && (
+              <Link href="/admin/ai-backend" onClick={() => setOpen(false)} className={itemNormal}>
+                <Bot size={16} strokeWidth={1.75} />
+                {t("aiBackend")}
+              </Link>
+            )}
+            {isGlobalAdmin && (
+              <Link href="/admin/airlock" onClick={() => setOpen(false)} className={itemNormal}>
+                <Nfc size={16} strokeWidth={1.75} />
+                {t("airlock")}
+              </Link>
+            )}
+            {theme === "user" && showMyAirlock && (
+              <Link href="/dashboard/airlock" onClick={() => setOpen(false)} className={itemNormal}>
+                <Nfc size={16} strokeWidth={1.75} />
+                {t("myAirlock")}
+              </Link>
+            )}
             {theme === "user" && (
               <>
                 <Link href="/dashboard/geraete" onClick={() => setOpen(false)} className={itemNormal}>

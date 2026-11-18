@@ -78,6 +78,8 @@ export interface SessionEventData {
    *  Pause selbst bleibt eine Pause — so rechnet das Session-Modell —, aber die Zeile darf nicht
    *  aussehen wie eine erlaubte Reinigung. Fehlt der Wert, ist es unbekannt (Sub-Sicht). */
   brokeLockPeriod?: boolean;
+  /** Fork: überschreibt das Reinigungs-Pill-Label (z.B. „Toilette" bei einer Plug-Toilettenpause). */
+  reinigungPillLabel?: string | null;
   timeCorrected: boolean | undefined;
   timeCorrectedSystemStr: string | null | undefined;
   /** VERSCHLUSS + KONTROLLE: the device worn (null = none selected). */
@@ -232,7 +234,7 @@ export default function SessionEventRow({ ev, icon }: { ev: SessionEventData; ic
     // einmal „vorbei".
     const cleaningPill = (
       <>
-        <Badge size="sm" icon={<ShowerHead size={11} />} label={t("sessionReinigung")} />
+        <Badge size="sm" icon={<ShowerHead size={11} />} label={ev.reinigungPillLabel ?? t("sessionReinigung")} />
         {ev.brokeLockPeriod && <Badge size="sm" variant="warn" label={t("sessionCleaningBrokeLock")} />}
       </>
     );

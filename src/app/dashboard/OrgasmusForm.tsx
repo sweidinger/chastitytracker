@@ -11,15 +11,21 @@ import { useApiError } from "@/app/hooks/useApiError";
 import type { OrgasmusOption } from "@/lib/reasonsService";
 
 interface Props {
-  initial?: { id: string; startTime: string; note?: string | null; orgasmusArt?: string | null };
+  initial?: { id: string; startTime: string; note?: string | null; orgasmusArt?: string | null; imageUrl?: string | null };
   artOptions: OrgasmusOption[];
   maxTime?: string;
   tz: string;
   nowDefault: string;
   redirectTo?: string;
+  /** Offene Anforderung verlangt einen Foto-Nachweis. */
+  fotoPflicht?: boolean;
+  mobileDesktopMode?: boolean;
+  /** Festgesetzte Art (aus einer Anforderung) — dann ist das Art-Feld fix. */
+  lockedArt?: string;
 }
 
-export default function OrgasmusForm({ initial, artOptions, maxTime, tz, nowDefault, redirectTo }: Props) {
+export default function OrgasmusForm({ initial, artOptions, maxTime, tz, nowDefault, redirectTo, fotoPflicht, mobileDesktopMode, lockedArt }: Props) {
+  const tCommon = useTranslations("common");
   const apiError = useApiError();
   const tDash = useTranslations("dashboard");
   const router = useRouter();
@@ -45,6 +51,9 @@ export default function OrgasmusForm({ initial, artOptions, maxTime, tz, nowDefa
       tz={tz}
       nowDefault={nowDefault}
       isEdit={!!initial}
+      fotoPflicht={fotoPflicht}
+      mobileDesktopMode={mobileDesktopMode}
+      lockedArt={lockedArt}
       submitFn={submitFn}
       onSuccess={() => router.push(target)}
       onCancel={() => router.push(target)}

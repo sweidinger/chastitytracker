@@ -19,6 +19,7 @@ import { deadlineFromDispatch, dueForDispatchWhere } from "@/lib/delayedTrigger"
 import { dispatchDueTasks, processDueTasks, materializeDueSeries } from "@/lib/taskService";
 import { remindDueProofs } from "@/lib/taskProofReminder";
 import { NOT_PAUSED_WHERE, USER_NOT_PAUSED_WHERE } from "@/lib/healthHold";
+import { enforceExpiredCagePauses } from "@/lib/pauseOverstayService";
 
 // Verschickt fällige, zeitversetzte Kontroll-Anforderungen (wirksamAb erreicht, noch nicht
 // benachrichtigt). Ein Container pro Instanz → ein Poller je Prozess genügt; der Zustand liegt
@@ -156,6 +157,9 @@ async function processDue(): Promise<void> {
 
     // Kontroll-Eskalation (Mahnung, dann ggf. automatisch als abgelegt markieren) im selben Tick.
     await processInspectionEscalation(now);
+
+    // Ueberzogene CAGE-Pausen automatisch oeffnen (Strafbuch-Vermerk + AI-Benachrichtigung) im selben Tick.
+    await enforceExpiredCagePauses(now).catch((e) => console.error("[pauseOverstay]", e));
 
     // Zeitversetzte VerschlussAnforderungen (ANFORDERUNG/SPERRZEIT) im selben Tick — kein zweiter Timer.
     await processDueVerschlussAnforderungen(now);
@@ -359,6 +363,7 @@ async function processDueVerschlussAnforderungen(now: Date): Promise<void> {
         endsAtDate: va.endsAt,
         lockSpec: art === "ANFORDERUNG" ? va : null,
         requestId: va.id,
+        isPlugCategory: !!va.deviceCategoryId,
         // Wie bei der Kontrolle: genannt wird, wer die Direktive angeordnet hat, nicht der Bote.
         actor: va.createdBy,
       });
@@ -424,6 +429,7 @@ export async function processDueOrgasmusAnforderungen(now: Date): Promise<void> 
         endsAtDate,
         requiredType: oa.requiredType,
         openingAllowed: oa.openingAllowed,
+        fotoPflicht: oa.fotoPflicht,
         directiveId: oa.id,
         // Wie bei Kontrolle und Verschluss: genannt wird, wer die Anweisung angeordnet hat, nicht der Bote.
         actor: oa.createdBy,

@@ -81,7 +81,7 @@ const PLUG_SESSION = { categoryId: "cat-plug", categoryName: "Plug", deviceId: "
 beforeEach(() => {
   vi.clearAllMocks();
   userMock.mockResolvedValue({ id: "u1", email: "sub@example.com", username: "sub", locale: "de" });
-  categoryMock.mockResolvedValue({ userId: "u1", name: "Plug", isBuiltIn: false });
+  categoryMock.mockResolvedValue({ userId: "u1", name: "Plug", slug: "plug" });
   deviceMock.mockResolvedValue({ requireInspectionCode: false }); // kein Code → keine Zufallszahl im Test
   lockMock.mockResolvedValue(LOCKED);
   wearMock.mockResolvedValue(PLUG_SESSION);
@@ -114,7 +114,7 @@ describe("requestKontrolle — das Ziel muss laufen", () => {
   it("gepinntes Gerät, das gerade NICHT getragen wird → INSPECTION_DEVICE_NOT_ACTIVE", async () => {
     deviceMock.mockResolvedValue({
       userId: "u1", name: "anderer Plug", archivedAt: null,
-      category: { id: "cat-plug", name: "Plug", isBuiltIn: false },
+      category: { id: "cat-plug", name: "Plug", slug: "plug" },
     });
     const r = await requestKontrolle({ userId: "u1", deviceId: "plug-2" }, "herrin");
     expect(!r.ok && r.error).toBe("INSPECTION_DEVICE_NOT_ACTIVE");

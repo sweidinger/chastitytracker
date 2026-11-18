@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 import { toolSurfaceFingerprint } from "@/lib/mcp/toolSurface";
 // CleaningPauseAllowance wird NUR lokal gebraucht — der Typ gehört utils.ts (wo buildPairs ihn
 // definiert); MCP-Konsumenten importieren ihn von dort direkt, nicht über dieses Modul.
@@ -200,16 +201,18 @@ export async function loadTrackingData(userId: string): Promise<{ entries: Track
  *
  *  Aus IHRER Tabelle, nicht aus den Geräten erraten: die eingebaute KG-Kategorie existiert auch dann,
  *  wenn (noch) kein KG-Gerät angelegt ist — und genau solche Alt-Verschlüsse ohne Gerät sind es, die
- *  als „ohne Gerät" gebucht sind und trotzdem als KG auszuweisen sind. `isBuiltIn` IST die
- *  KG-Kennung (es gibt genau eine eingebaute), nicht der Name — der ist frei umbenennbar. */
+ *  als „ohne Gerät" gebucht sind und trotzdem als KG auszuweisen sind. Der Slug `kg` IST die
+ *  KG-Kennung (nicht `isBuiltIn` — im Fork ist auch die Plug-Kategorie eingebaut), nicht der Name —
+ *  der ist frei umbenennbar. */
 export async function loadCategoryNames(userId: string): Promise<{ nameById: Map<string, string>; kgName: string | null }> {
   const categories = await prisma.deviceCategory.findMany({
     where: { userId },
-    select: { id: true, name: true, isBuiltIn: true },
+    select: { id: true, name: true, slug: true },
   });
   return {
     nameById: new Map(categories.map((c) => [c.id, c.name])),
-    kgName: categories.find((c) => c.isBuiltIn)?.name ?? null,
+    // Über den KG-Slug: im Fork ist auch die Plug-Kategorie eingebaut.
+    kgName: categories.find((c) => c.slug === KG_BUILTIN_SLUG)?.name ?? null,
   };
 }
 

@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import useToast from "@/app/hooks/useToast";
 import useOfflineQueue from "@/app/hooks/useOfflineQueue";
 import OeffnenFormCore from "@/app/entries/OeffnenFormCore";
-import type { OeffnenPayload, CleaningConfig, LockPeriodState, SubmitResult } from "@/app/entries/types";
+import type { OeffnenPayload, CleaningConfig, ToiletteConfig, LockPeriodState, SubmitResult } from "@/app/entries/types";
 import type { BoxHold } from "@/lib/boxOpenOutlook";
 import { entryRequest, parseApiErrorCode } from "@/lib/apiClient";
 import { useApiError } from "@/app/hooks/useApiError";
@@ -21,6 +21,8 @@ interface Props {
   nowDefault: string;
   lockPeriod?: LockPeriodState;
   cleaning?: CleaningConfig;
+  /** Fork: Toiletten-Freigabe (Max-Dauer, Tageslimit). */
+  toilette?: ToiletteConfig;
   boxHold?: BoxHold | null;
   hasBox?: boolean;
   redirectTo?: string;
@@ -31,7 +33,7 @@ interface Props {
   codeRevealHref?: string;
 }
 
-export default function OeffnenForm({ initial, grundOptions, maxTime, tz, nowDefault, lockPeriod, cleaning, boxHold, hasBox, redirectTo, taskWarnings, codeRevealHref }: Props) {
+export default function OeffnenForm({ initial, grundOptions, maxTime, tz, nowDefault, lockPeriod, cleaning, toilette, boxHold, hasBox, redirectTo, taskWarnings, codeRevealHref }: Props) {
   const apiError = useApiError();
   const tDash = useTranslations("dashboard");
   const router = useRouter();
@@ -65,6 +67,7 @@ export default function OeffnenForm({ initial, grundOptions, maxTime, tz, nowDef
       nowDefault={nowDefault}
       lockPeriod={lockPeriod}
       cleaning={cleaning}
+      toilette={toilette}
       boxHold={boxHold}
       hasBox={hasBox}
       taskWarnings={taskWarnings}

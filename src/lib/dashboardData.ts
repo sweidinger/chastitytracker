@@ -22,6 +22,7 @@ import { belongsOnDashboard, getEvaluatedTaskHistory, loadTaskProofViews } from 
 import { toTaskCard } from "@/lib/taskView";
 import { buildWearSessionRows } from "@/lib/wearSessionRows";
 import { isKgVorgabe } from "@/lib/vorgaben";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 import {
   CATEGORY_LIST_ORDER, subVisibleKontrolleWhere, keyholderVisibleKontrolleWhere, KONTROLLE_TARGET_INCLUDE,
   getActiveVorgabe, getActiveLockPeriod, getKeyholderLockPeriod, getActiveWearSessions,
@@ -522,7 +523,7 @@ export const vorgabenCached = cache((userId: string) =>
   prisma.trainingVorgabe.findMany({
     where: { userId, deletedAt: null },
     orderBy: { gueltigAb: "desc" },
-    include: { category: { select: { id: true, name: true, color: true, icon: true, isBuiltIn: true } } },
+    include: { category: { select: { id: true, name: true, color: true, icon: true, isBuiltIn: true, slug: true } } },
   }),
 );
 
@@ -553,8 +554,10 @@ export const devicesCached = cache((userId: string) =>
 /** Die Nicht-KG-Kategorien — hier ALLE, auch die ohne Tracking: die Statistik zeigt Vergangenes. */
 export const statsCategoriesCached = cache((userId: string) =>
   prisma.deviceCategory.findMany({
-    where: { userId, isBuiltIn: false },
-    // Dieselbe Reihenfolge wie überall sonst; `isBuiltIn` ist hier ohne Wirkung (alle false).
+    // Über den KG-Slug statt `isBuiltIn: false`: die Fork-Plug-Kategorie ist eingebaut, gehört aber
+    // in die Kategorie-Statistik.
+    where: { userId, slug: { not: KG_BUILTIN_SLUG } },
+    // Dieselbe Reihenfolge wie überall sonst.
     orderBy: [...CATEGORY_LIST_ORDER],
     select: { id: true, name: true, color: true, icon: true },
   }),

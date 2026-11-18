@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import type { PrismaTx } from "@/lib/queries";
 import { escHtml, optionalNoticeBoxHtml, dashboardEmailHtml } from "@/lib/mail";
 import { formatDateTime } from "@/lib/utils";
 import { ORGASMUS_ANFORDERUNG_ARTEN, toLocale, EMAIL_BUTTON_COLORS, APP_NAME } from "@/lib/constants";
@@ -84,6 +85,12 @@ export interface CreateOrgasmusAnforderungParams {
    *  ({@link computeDelayedTrigger}). Ohne beide löst die Anweisung sofort aus. */
   delayMinutes?: number | null;
   wirksamAbAt?: string | Date | null;
+  /** Als Strafe angeordnet (z.B. ruinierter Orgasmus als Pflicht) — strengere Eskalation bei Nicht-Erfüllung. */
+  istStrafe?: boolean;
+  /** Als Belohnungs-Fenster gewährt — kollidiert nicht mit einer offenen Anweisung/Gelegenheit (getrennter Withdraw-Scope). */
+  istBelohnung?: boolean;
+  /** Foto-Nachweis beim Erfassen des Orgasmus erforderlich. false = ein Foto ist freiwillig möglich. */
+  fotoPflicht?: boolean;
 }
 
 /**
@@ -101,7 +108,7 @@ export async function createOrgasmusAnforderung(
   params: CreateOrgasmusAnforderungParams,
   actor: MessageActor,
 ): Promise<ServiceResult<{ id: string; scheduledFor: string | null }>> {
-  const { userId, art, message, beginsAt, endsAt, requiredType, openingAllowed } = params;
+  const { userId, art, message, beginsAt, endsAt, requiredType, openingAllowed, istStrafe, istBelohnung, fotoPflicht } = params;
 
   if (!userId) return serviceFail(400, "USER_ID_REQUIRED");
   const now = new Date();
@@ -128,14 +135,19 @@ export async function createOrgasmusAnforderung(
   // neue Anweisung sofort wirksam, meldet sie sich selbst; dann bleibt es wie bisher bei einer
   // Nachricht.
   let replacedVisible = false;
+  //
+  // Getrennter Scope (Fork): Belohnungs-Fenster (istBelohnung) und normale Anweisungen/Gelegenheiten
+  // verdrängen sich NICHT gegenseitig — eine offene Strafe bleibt bestehen, wenn eine Belohnung
+  // gewährt wird (und umgekehrt). Das Matching in /api/entries trennt sie über requiredType.
+  const belohnung = Boolean(istBelohnung);
   const anforderung = await prisma.$transaction(async (tx) => {
     const offen = await tx.orgasmusAnforderung.findMany({
-      where: { userId, fulfilledAt: null, withdrawnAt: null },
+      where: { userId, fulfilledAt: null, withdrawnAt: null, istBelohnung: belohnung },
       select: { wirksamAb: true, benachrichtigtAt: true },
     });
     replacedVisible = offen.some((o) => !isHiddenFromSub(o));
     await tx.orgasmusAnforderung.updateMany({
-      where: { userId, fulfilledAt: null, withdrawnAt: null },
+      where: { userId, fulfilledAt: null, withdrawnAt: null, istBelohnung: belohnung },
       data: { withdrawnAt: new Date() },
     });
     return tx.orgasmusAnforderung.create({
@@ -150,6 +162,9 @@ export async function createOrgasmusAnforderung(
         createdBy: actor ?? null,
         wirksamAb,
         benachrichtigtAt,
+        istStrafe: Boolean(istStrafe),
+        istBelohnung: belohnung,
+        fotoPflicht: Boolean(fotoPflicht),
       },
     });
   });
@@ -159,6 +174,7 @@ export async function createOrgasmusAnforderung(
   if (!wirksamAb) {
     await sendOrgasmusAnforderungNotifications({
       user, art, message, beginsAtDate, endsAtDate, requiredType, openingAllowed: Boolean(openingAllowed),
+      fotoPflicht: Boolean(fotoPflicht),
       directiveId: anforderung.id, actor,
     });
   } else if (replacedVisible) {
@@ -188,7 +204,12 @@ export function orgasmusWithdrawNotice(actor: MessageActor, refId?: string): Not
  *
  *  Gibt die stornierten Zeilen mit zurück, aus derselben Transaktion — der Aufrufer benennt sie in
  *  seiner Antwort (`withdrawnItems`) und muss sie nicht mit einer eigenen, potentiell abweichenden
- *  Abfrage nachschlagen. Gleiche Begründung wie bei `withdrawVerschlussAnforderung`. */
+ *  Abfrage nachschlagen. Gleiche Begründung wie bei `withdrawVerschlussAnforderung`.
+ *
+ *  Fork: aktive Belohnungs-Fenster (noch nicht abgelaufen), die durch DIESEN Rückzug fallen, bekommen
+ *  ihr beim Gewähren abgebuchtes Guthaben erstattet — in derselben Transaktion. Bewusster Rückzug ≠
+ *  Ablauf (VERFALLEN behält netto -1); abgelaufene Fenster bleiben dem VERFALLEN-Pfad
+ *  (`getBelohnungState`) überlassen. */
 export async function withdrawOrgasmusAnforderung(
   userId: string,
   actor: MessageActor,
@@ -199,16 +220,19 @@ export async function withdrawOrgasmusAnforderung(
    *  `mcpWithdraw` tat genau das und meldete jede als „ausgelöst". */
   rows: { id: string; endsAt: Date; message: string | null; wirksamAb: Date | null; benachrichtigtAt: Date | null }[];
 }>> {
+  const now = new Date();
   const rows = await prisma.$transaction(async (tx) => {
     const open = await tx.orgasmusAnforderung.findMany({
       where: { userId, fulfilledAt: null, withdrawnAt: null },
-      select: { id: true, endsAt: true, message: true, wirksamAb: true, benachrichtigtAt: true },
+      select: { id: true, endsAt: true, message: true, wirksamAb: true, benachrichtigtAt: true, istBelohnung: true },
     });
     if (open.length > 0) {
       await tx.orgasmusAnforderung.updateMany({
         where: { id: { in: open.map((o) => o.id) } },
-        data: { withdrawnAt: new Date() },
+        data: { withdrawnAt: now },
       });
+      const refund = open.filter((o) => o.istBelohnung && o.endsAt >= now).length;
+      if (refund > 0) await refundReward(tx, userId, refund);
     }
     return open;
   });
@@ -220,11 +244,24 @@ export async function withdrawOrgasmusAnforderung(
   return { ok: true, data: { count: rows.length, rows } };
 }
 
+/** Erstattet `n` Belohnungs-Guthaben (User +n) und schreibt je ein ERSTATTET-Ereignis mit korrektem
+ *  Zwischenstand. Bewusst hier mit `tx` statt via belohnung.ts, um den Import-Zyklus
+ *  belohnung <-> orgasmusAnforderungService zu vermeiden (`logBelohnungEvent` haengt an belohnung). */
+async function refundReward(tx: PrismaTx, userId: string, n: number): Promise<void> {
+  const u = await tx.user.update({ where: { id: userId }, data: { verdienteOrgasmen: { increment: n } }, select: { verdienteOrgasmen: true } });
+  let bal = u.verdienteOrgasmen - n;
+  for (let i = 0; i < n; i++) {
+    bal += 1;
+    await tx.belohnungEvent.create({ data: { userId, type: "ERSTATTET", delta: 1, balanceAfter: bal, detail: "Belohnungs-Fenster zurueckgezogen — Guthaben erstattet" } });
+  }
+}
+
 /** Withdraws a single OrgasmusAnforderung by id (not yet fulfilled/withdrawn). Used by the admin
  *  PATCH route — targets exactly one directive instead of all open ones. The route already looks
  *  up the row's `userId` for the auth guard, so it's passed in here to avoid a second fetch of the
  *  same row (`updateMany` scoped by id + open-status does the existence/open check via `count`; der `findFirst`
- *  davor holt NUR den Auslöse-Stand für die Melde-Entscheidung). Die Rückfrage im Keyholder-Bereich
+ *  davor holt NUR den Auslöse-Stand für die Melde-Entscheidung — und, Fork, ob ein noch laufendes
+ *  Belohnungs-Fenster Guthaben zurückbekommt). Die Rückfrage im Keyholder-Bereich
  *  (`withdrawOrgasmConfirm`, `withdrawNotifiesSub`) beschreibt genau diese Regel. */
 export async function withdrawOrgasmusAnforderungById(id: string, userId: string, actor: MessageActor): Promise<ServiceResult<{ count: number }>> {
   // Der Auslöse-Stand wird MITGELESEN, statt nur zu zählen: eine terminierte, noch nicht ausgelöste
@@ -232,14 +269,27 @@ export async function withdrawOrgasmusAnforderungById(id: string, userId: string
   // `updateMany` ist er nicht mehr zu erfahren, ohne die Zeile ein zweites Mal zu laden. Die
   // Existenz-/Offen-Prüfung bleibt trotzdem am `updateMany` unten: zwischen Lesen und Schreiben kann
   // ein zweiter Rückzug dazwischenkommen, und nur der Schreibvorgang selbst entscheidet das.
+  const now = new Date();
   const row = await prisma.orgasmusAnforderung.findFirst({
     where: { id, fulfilledAt: null, withdrawnAt: null },
-    select: { wirksamAb: true, benachrichtigtAt: true },
+    select: { wirksamAb: true, benachrichtigtAt: true, istBelohnung: true, endsAt: true },
   });
-  const res = await prisma.orgasmusAnforderung.updateMany({
+  const withdraw = (db: PrismaTx | typeof prisma) => db.orgasmusAnforderung.updateMany({
     where: { id, fulfilledAt: null, withdrawnAt: null },
-    data: { withdrawnAt: new Date() },
+    data: { withdrawnAt: now },
   });
+  // Fork: ein noch laufendes Belohnungs-Fenster bekommt sein Guthaben zurück — dann (und nur dann)
+  // laufen Rückzug und Erstattung in EINER Transaktion, und erstattet wird nur, wenn DIESER
+  // Schreibvorgang die Zeile tatsächlich zurückgezogen hat. Sonst bleibt es beim schlichten
+  // `updateMany` wie im Upstream.
+  const refunds = !!row?.istBelohnung && row.endsAt >= now;
+  const res = refunds
+    ? await prisma.$transaction(async (tx) => {
+        const r = await withdraw(tx);
+        if (r.count > 0) await refundReward(tx, userId, 1);
+        return r;
+      })
+    : await withdraw(prisma);
   if (res.count === 0) {
     return serviceFail(400, "ORGASM_NOT_OPEN");
   }
@@ -266,8 +316,10 @@ export async function sendOrgasmusAnforderungNotifications(opts: {
   directiveId: string;
   /** WER die Anweisung gestellt hat — der Absender ihrer Meldung. */
   actor: MessageActor;
+  /** Fork: Foto-Nachweis beim Erfassen erforderlich — steht dann in Mail und Push. */
+  fotoPflicht?: boolean;
 }) {
-  const { user, art, message, beginsAtDate, endsAtDate, requiredType, openingAllowed, directiveId, actor } = opts;
+  const { user, art, message, beginsAtDate, endsAtDate, requiredType, openingAllowed, fotoPflicht, directiveId, actor } = opts;
   const istAnweisung = art === "ANWEISUNG";
 
   // Nachricht des Keyholders bleibt an der Direktive; der Posteingang verlinkt sie nur.
@@ -296,6 +348,7 @@ export async function sendOrgasmusAnforderungNotifications(opts: {
     const messageHtml = optionalNoticeBoxHtml(t("orgasmNoticeLabel"), message);
     const artHtml = artLabel ? `<p><strong>${t("orgasmArtLabel")}</strong> ${escHtml(artLabel)}</p>` : "";
     const oeffnenHtml = openingAllowed ? `<p><strong>${t("orgasmOpenAllowedLabel")}</strong> ${t("orgasmOpenAllowedText")}</p>` : "";
+    const fotoHtml = fotoPflicht ? `<p><strong>${t("orgasmPhotoLabel")}</strong> ${t("orgasmPhotoText")}</p>` : "";
     return {
       subject: betreff,
       html: dashboardEmailHtml(
@@ -305,7 +358,8 @@ export async function sendOrgasmusAnforderungNotifications(opts: {
           ${messageHtml}
           <p><strong>${t("orgasmWindowLabel")}</strong> ${windowStr}</p>
           ${artHtml}
-          ${oeffnenHtml}`,
+          ${oeffnenHtml}
+          ${fotoHtml}`,
         t("dashboardButton"),
         { buttonColor: EMAIL_BUTTON_COLORS.orgasm },
       ),
@@ -314,6 +368,7 @@ export async function sendOrgasmusAnforderungNotifications(opts: {
 
   const pushParts: string[] = [`${t("orgasmWindowLabel")} ${windowStr}`];
   if (artLabel) pushParts.push(artLabel);
+  if (fotoPflicht) pushParts.push(t("orgasmPhotoText"));
   if (message?.trim()) pushParts.push(message.trim());
   const pushBody = pushParts.join(" · ");
   await deliverToChannels(user, channels, { mail: buildMail, title: betreff, body: pushBody, url: "/dashboard", badge });

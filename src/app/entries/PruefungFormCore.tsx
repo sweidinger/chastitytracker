@@ -24,6 +24,7 @@ import Card from "@/app/components/Card";
 import Badge from "@/app/components/Badge";
 import Spinner from "@/app/components/Spinner";
 import InspectionCodePushButton from "@/app/components/InspectionCodePushButton";
+import AirlockScanField, { type AirlockProof } from "@/app/components/AirlockScanField";
 import type { PruefungPayload, SubmitResult } from "./types";
 import { useApiError } from "@/app/hooks/useApiError";
 import { formatVerifyReason, type VerifyReason } from "@/lib/verifyReason";
@@ -101,6 +102,8 @@ interface Props {
    * darauf sperrte den Träger aus seiner eigenen Kontrolle aus.
    */
   boxPhotoRequired?: boolean;
+  /** Airlock-NFC: der aktive Verschluss wurde per Airlock erfasst → NFC-Scan statt Handschrift-Code. */
+  airlockControl?: boolean;
   isEdit?: boolean;
   /** Reicht dieses Formular über die Offline-Warteschlange nach? Dann darf das Foto (samt Box-Foto)
    *  offline zwischengespeichert werden. NUR der Träger-Pfad setzt es; der Keyholder-Pfad sendet
@@ -116,7 +119,7 @@ interface Props {
 export default function PruefungFormCore({
   initial, minTime, tz, nowDefault, initialCode, initialKommentar, sealRequired, codeRequired = true, mobileDesktopMode,
   targetDeviceId = null, targetLabel = null, codePushControlId = null, selfCodePush = false, categoryId = null,
-  boxConfirm = false, boxPhotoRequired = false, isEdit = false, offlineCapture = false, submitFn, onSuccess, onCancel, submitVariant = "semantic", submitLabel,
+  boxConfirm = false, boxPhotoRequired = false, airlockControl = false, isEdit = false, offlineCapture = false, submitFn, onSuccess, onCancel, submitVariant = "semantic", submitLabel,
 }: Props) {
   const t = useTranslations("inspectionForm");
   const tc = useTranslations("common");
@@ -124,11 +127,14 @@ export default function PruefungFormCore({
   // derselbe Nachweis, er darf nicht je Formular anders heissen.
   const tLock = useTranslations("lockForm");
   const apiError = useApiError();
+  const tAir = useTranslations("airlockScan");
   const dl = toDateLocale(useLocale());
 
   const [startTime, setStartTime] = useState(toDatetimeLocal(initial?.startTime, tz) || nowDefault);
   const [note, setNote] = useState(initial?.note ?? "");
   const [kontrollCode, setKontrollCode] = useState(initial?.kontrollCode ?? initialCode ?? "");
+  // Airlock-NFC: bei einer Airlock-Kontrolle ersetzt der Tag-Scan die Code-/Foto-Verifikation.
+  const [airlockProof, setAirlockProof] = useState<AirlockProof | null>(null);
   const [verifyStatus, setVerifyStatus] = useState<"pending" | "match" | "mismatch" | "sealMismatch" | "error" | "policy" | null>(null);
   const [verifyReason, setVerifyReason] = useState<{ code: VerifyReason; detected?: string } | null>(null);
   const [aiMatch, setAiMatch] = useState<boolean | null>(null);
@@ -232,6 +238,8 @@ export default function PruefungFormCore({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!imageUrl) { setError(t("photoRequired")); return; }
+    // Airlock-Kontrolle (Fork): der Tag-Scan ist Pflicht (der Server erzwingt ihn ebenfalls).
+    if (airlockControl && !airlockProof) { setError(tAir("scanRequiredError")); return; }
     // Box-Foto fehlt. Zwei Antworten darauf, und der Unterschied ist die Anforderung dahinter:
     // verlangt sie den Nachweis, wird abgesagt statt gefragt — mit DEMSELBEN Satz, den die Route
     // schickte (`BOX_PHOTO_REQUIRED`), damit Vorab-Sperre und Server-Absage nicht auseinanderlaufen.
@@ -266,6 +274,8 @@ export default function PruefungFormCore({
       // jedem Öffnen des Formulars wieder null ist.
       imageRotation: rotation,
       ...(boxConfirm && boxPhoto.imageUrl ? { boxImageUrl: boxPhoto.imageUrl, boxImageRotation: boxPhoto.rotation } : {}),
+      // Airlock-NFC: den gescannten Tag mitschicken (ersetzt serverseitig die Code-Prüfung).
+      ...(airlockProof ? { airlock: airlockProof } : {}),
     });
   }
 
@@ -327,7 +337,7 @@ export default function PruefungFormCore({
         </Card>
       )}
 
-      {hasPrefilledCode && (
+      {!airlockControl && hasPrefilledCode && (
         <Card padding="compact">
           {/* `flex-wrap`, weil die Keyholderin die Codelänge bestimmt: bei acht Ziffern
               (`INSPECTION_CODE_LENGTH.max`) misst die Zeile auf 390 px rund 342 px gegen 334 px
@@ -363,6 +373,10 @@ export default function PruefungFormCore({
       )}
 
       <RequiredHint />
+
+      {airlockControl && (
+        <AirlockScanField mode="kontrolle" value={airlockProof} onChange={setAirlockProof} />
+      )}
 
       <DateTimePicker
         label={tc("dateTime")}
@@ -409,11 +423,12 @@ export default function PruefungFormCore({
         </Card>
       )}
 
-      {!codeRequired && (
+      {!airlockControl && !codeRequired && (
         <p className="text-neben text-foreground-muted">{t("noCodeNeeded")}</p>
       )}
 
-      {!hasPrefilledCode && codeRequired && (
+      {/* Airlock-Kontrolle (Fork): der NFC-Scan ersetzt den Handschrift-Code — kein Eingabefeld. */}
+      {!airlockControl && !hasPrefilledCode && codeRequired && (
         <div className="flex flex-col gap-2">
           <Input
             label={t("controlCode")}

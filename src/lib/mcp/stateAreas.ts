@@ -59,8 +59,14 @@ export const STATE_TABLES: readonly StateTable[] = [
   { table: "Entry", area: "entries", owner: BY_USER },
 
   { table: "VerschlussAnforderung", area: "lockRequests", owner: BY_USER },
+  // Fork: Session-Anforderungen (Plug/Sessions) sind Anweisungen derselben Art wie das Einschliessen.
+  { table: "SessionAnforderung", area: "lockRequests", owner: BY_USER },
   { table: "KontrollAnforderung", area: "inspections", owner: BY_USER },
   { table: "OrgasmusAnforderung", area: "orgasm", owner: BY_USER },
+  // Fork: Belohnungs-Guthaben (`get_overview` → Belohnung, `grant_reward`/`credit_reward`) — jede
+  // Buchung und jede automatische Gutschrift verschiebt, was die KI gewähren darf.
+  { table: "BelohnungEvent", area: "orgasm", owner: BY_USER },
+  { table: "OrgasmusBelohnungGutschrift", area: "orgasm", owner: BY_USER },
 
   { table: "Task", area: "tasks", owner: BY_USER },
   { table: "TaskSeries", area: "tasks", owner: BY_USER },
@@ -68,6 +74,8 @@ export const STATE_TABLES: readonly StateTable[] = [
   { table: "TaskRequirement", area: "tasks", owner: { parent: "Task", foreignKey: "taskId" } },
   { table: "TaskSeriesProof", area: "tasks", owner: { parent: "TaskSeries", foreignKey: "seriesId" } },
   { table: "TaskSeriesRequirement", area: "tasks", owner: { parent: "TaskSeries", foreignKey: "seriesId" } },
+  // Fork: Aufgaben der KI-Keyholderin an den Sub (Medium ansehen, Antwort schreiben) — offen/erledigt.
+  { table: "KeyholderTask", area: "tasks", owner: BY_USER },
 
   { table: "StrafeRecord", area: "offenses", owner: BY_USER },
   { table: "ManualOffense", area: "offenses", owner: BY_USER },
@@ -97,16 +105,20 @@ export const STATE_TABLES: readonly StateTable[] = [
   { table: "RecurringContext", area: "context", owner: BY_USER },
   { table: "Appointment", area: "context", owner: BY_USER },
   { table: "HealthHold", area: "context", owner: BY_USER },
+  // Fork: Tagesform des Subs (Erregung/Körper/Headspace) — steht in `get_overview`.
+  { table: "Tagesform", area: "context", owner: BY_USER },
 
   {
     table: "User", area: "settings", owner: { self: true },
     // Konto, Anzeige und Benachrichtigungs-Wege des Menschen — keine Regeln, die für den Sub gelten.
     // Dazu zwei Buchhaltungs-Spalten des Pollers (`autoInspectionPlannedFor`, `weightReminderMark`),
-    // die er ohne Zutun eines Menschen umschreibt.
+    // die er ohne Zutun eines Menschen umschreibt; im Fork dazu `denialRecordDays` (zuletzt gemeldeter
+    // Verzichts-Rekord — nur die Melde-Sperre des Rekord-Pushs).
     ignoreColumns: [
       "passwordHash", "email", "role", "createdAt", "startPage", "notifyMail", "notifyPush",
       "notifyTelegram", "hideOwnTracker", "locale", "telegramChatId", "dashboardLayout",
       "emailBounceCount", "emailLastBounceAt", "emailBlockedAt", "quickSettings", "noticeSeenVersion", "photoAnalysisNoticeSeen", "autoInspectionPlannedFor", "weightReminderMark",
+      "denialRecordDays",
     ],
   },
   { table: "CleaningRuleChange", area: "settings", owner: BY_USER },
@@ -131,6 +143,15 @@ export const STATE_IGNORED_TABLES: Readonly<Record<string, string>> = {
   OAuthRefreshToken: "Konto",
   JournalEntry: "privates Tagebuch — ein Zähler verriete, DASS geschrieben wurde, auch bei Einträgen „nur für mich\"",
   JournalSettings: "Tagebuch-Einstellungen des Subs — gehören so wenig in die Keyholder-Sicht wie die Einträge",
+  // Fork — die eingebaute KI-Keyholderin hat ihren eigenen Kanal; ihr Innenleben ist kein Zustand des Subs.
+  AiKeyholderConfig: "Konfiguration und Laune der eingebauten KI-Keyholderin — ihr Lauf schreibt sie ständig um",
+  AiKeyholderMessage: "Chat-Verlauf mit der eingebauten KI-Keyholderin — eigener Kanal, kein Zustand",
+  GeneratedMedia: "Medien-Warteschlange der KI-Keyholderin — ein zugestelltes Medium zählt als KeyholderTask",
+  MoodEvent: "Laune-Protokoll der KI-Keyholderin",
+  // Fork — Zufalls-Pools: die angewandte Folge einer Ziehung (Sperrzeit, Strafe, Anweisung, Aufgabe)
+  // zählt in ihrem eigenen Bereich; Pool und Ziehungs-Protokoll liest kein MCP-Werkzeug.
+  ZufallsPool: "Konfiguration der Zufalls-Pools — kein MCP-Werkzeug liest sie",
+  ZufallsZiehung: "Protokoll der Ziehungen — die angewandte Folge zählt in ihrem eigenen Bereich",
 };
 
 /** Markiert in einer Migration den Abschnitt, den {@link buildStateTriggerSql} erzeugt hat. */

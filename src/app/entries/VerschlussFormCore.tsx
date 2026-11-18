@@ -25,6 +25,8 @@ import ConfirmDialog from "@/app/components/ConfirmDialog";
 import Select from "@/app/components/Select";
 import Card from "@/app/components/Card";
 import Toggle from "@/app/components/Toggle";
+import AirlockScanField, { type AirlockProof } from "@/app/components/AirlockScanField";
+import { parseNdef } from "@/lib/airlock/uid";
 import type { DeviceOption } from "@/lib/queries";
 import type { VerschlussPayload, SubmitResult } from "./types";
 import { LockClosedIcon } from "@/app/components/lockIcons";
@@ -54,6 +56,12 @@ interface Props {
   /** Riegel-Schalter der Keyholderin (docs/riegel-konzept.md): das Speichern ist dann der AUFRUF an
    *  die Box, und die Startzeit setzt der Riegel — deshalb entfällt die Zeit-Eingabe. */
   boltGated?: boolean;
+  /** Airlock-NFC: dem Sub zugewiesene Locks (Pool). Bei genau einem ist es das erwartete Lock; bei
+   *  mehreren wählt der Sub eines aus. */
+  airlockAssignedCodes?: string[];
+  /** Airlock-NFC: von der Anforderung vorgegebenes Lock — der Sub MUSS genau dieses scannen (Pflicht).
+   *  null = keine Vorgabe. */
+  anforderungAirlockCode?: string | null;
   isEdit?: boolean;
   submitFn: (payload: VerschlussPayload) => Promise<SubmitResult>;
   onSuccess?: () => void;
@@ -64,7 +72,7 @@ interface Props {
 
 export default function VerschlussFormCore({
   initial, minTime, tz, nowDefault, mobileDesktopMode, devices = [], anforderungDeviceId, bildersafe = false,
-  boxConfirm = false, boxName, boltGated = false,
+  boxConfirm = false, boxName, boltGated = false, airlockAssignedCodes = [], anforderungAirlockCode = null,
   isEdit = false, submitFn, onSuccess, onCancel, submitVariant = "semantic", submitLabel,
 }: Props) {
   const t = useTranslations("common");
@@ -77,6 +85,21 @@ export default function VerschlussFormCore({
   // reist mit) und darf das Speichern nicht blockieren. Default an = der Normalfall, und die Box
   // folgt dem Eintrag wie bisher; wer den Schlüssel behält, schaltet bewusst ab.
   const [keyInBox, setKeyInBox] = useState(true);
+
+  // Airlock-NFC: Tag-Nachweis. Bei einer Vorgabe (anforderungAirlockCode) ist das Lock fix und der Scan
+  // Pflicht; bei genau einem zugewiesenen Lock ist es das erwartete; bei mehreren wählt der Sub eines.
+  const [airlockProof, setAirlockProof] = useState<AirlockProof | null>(null);
+  const airlockMandated = !!anforderungAirlockCode;
+  const [airlockPick, setAirlockPick] = useState<string>(
+    anforderungAirlockCode ?? (airlockAssignedCodes.length === 1 ? airlockAssignedCodes[0] : "")
+  );
+  const expectedAirlockCode = anforderungAirlockCode ?? (airlockPick || null);
+  const showAirlock = airlockMandated || airlockAssignedCodes.length > 0;
+  // Client-Vorabprüfung (der Server verifiziert autoritativ per Weg A): passt der gescannte Code zum
+  // erwarteten Lock? Der Code steckt im NDEF-Text (AL1|code|token).
+  const scannedAirlockCode = airlockProof ? (parseNdef(airlockProof.ndefText)?.code ?? null) : null;
+  const airlockMismatch = !!(expectedAirlockCode && scannedAirlockCode && scannedAirlockCode !== expectedAirlockCode);
+  const airlockBlocksSubmit = airlockMismatch || (airlockMandated && !airlockProof);
 
   // Device defaulting: anforderung > single-device auto-pick > initial > empty
   const defaultDeviceId = anforderungDeviceId
@@ -162,6 +185,8 @@ export default function VerschlussFormCore({
       kontrollCode: sealNumber.trim() || null,
       deviceId: deviceId || null,
       ...(bildersafe ? { codeImageUrl: codeUrl || null, codeReadable: codeCheck.readable } : {}),
+      // Airlock-NFC: den gescannten Tag mitschicken; der Server verifiziert ihn (Weg A).
+      ...(airlockProof ? { airlock: airlockProof } : {}),
     });
   }
 
@@ -179,7 +204,7 @@ export default function VerschlussFormCore({
           semantic={submitVariant === "semantic" ? "lock" : undefined}
           fullWidth
           loading={saving || uploading || codePhoto.uploading}
-          disabled={bildersafe && (!codeUrl || codeCheck.blocksSubmit)}
+          disabled={(bildersafe && (!codeUrl || codeCheck.blocksSubmit)) || airlockBlocksSubmit}
           icon={submitVariant === "primary" ? <LockClosedIcon size={16} /> : undefined}
         >
           {submitLabel ?? defaultLabel}
@@ -187,6 +212,36 @@ export default function VerschlussFormCore({
       }
     >
       <RequiredHint />
+
+      {showAirlock && (
+        <div className="flex flex-col gap-2">
+          {/* Vorgabe der Keyholderin: fixes Lock. Ohne Vorgabe, aber mit mehreren zugewiesenen Locks
+              wählt der Sub, welches er verschliesst. Bei genau einem Lock ist nichts zu wählen. */}
+          {!airlockMandated && airlockAssignedCodes.length > 1 && (
+            <Select
+              label={tForm("airlockPickLabel")}
+              options={[
+                { value: "", label: tForm("airlockPickPlaceholder") },
+                ...airlockAssignedCodes.map((c) => ({ value: c, label: `#${c}` })),
+              ]}
+              value={airlockPick}
+              onChange={(e) => { setAirlockPick(e.target.value); setAirlockProof(null); }}
+            />
+          )}
+          <AirlockScanField
+            mode="verschluss"
+            assignedCode={expectedAirlockCode}
+            value={airlockProof}
+            onChange={setAirlockProof}
+          />
+          {airlockMismatch && (
+            <p className="text-neben text-warn font-medium">{tForm("airlockMismatch", { code: expectedAirlockCode ?? "" })}</p>
+          )}
+          {airlockMandated && !airlockProof && (
+            <p className="text-neben text-foreground-faint">{tForm("airlockMandateHint", { code: anforderungAirlockCode ?? "" })}</p>
+          )}
+        </div>
+      )}
 
       {showDeviceSelector && (
         <div className="flex flex-col gap-2">
@@ -199,11 +254,16 @@ export default function VerschlussFormCore({
           )}
           <Select
             label={tForm("selectDevice")}
-            options={[
-              { value: "", label: tForm("noDevice") },
-              ...devices.map((d) => ({ value: d.id, label: d.name })),
-            ]}
+            // Bei einer Anforderung mit vorgegebenem Gerät ist das Feld auf genau dieses Gerät begrenzt
+            // und gesperrt — der Sub kann es nicht ändern.
+            options={anforderungDeviceId
+              ? [{ value: anforderungDeviceId, label: devices.find((d) => d.id === anforderungDeviceId)?.name ?? "?" }]
+              : [
+                  { value: "", label: tForm("noDevice") },
+                  ...devices.map((d) => ({ value: d.id, label: d.name })),
+                ]}
             value={deviceId}
+            disabled={!!anforderungDeviceId}
             onChange={(e) => { setDeviceId(e.target.value); setDeviceManuallySet(true); }}
             hint={devices.length >= 2 && !anforderungDeviceId ? tForm("selectDeviceHint") : undefined}
           />

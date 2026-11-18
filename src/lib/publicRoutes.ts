@@ -18,6 +18,7 @@ export type PublicGuard =
   | "token" // einmaliges Token (Passwort-Reset, Portal-JWT)
   | "bearer-token" // OAuth-Bearer (withMcpAuth)
   | "box-secret" // geteiltes Geheimnis der LockMeBox-Brücke
+  | "cron-secret" // Fork: Bearer `AI_KEYHOLDER_CRON_SECRET` des externen Cron-Jobs, sonst Admin-Session
   | "webhook-secret" // Secret-Header des Absenders
   | "oauth" // OAuth-Protokoll-Endpunkt, schützt sich über Client/Code/Token
   | "public-info"; // enthält nichts Schützenswertes
@@ -42,6 +43,14 @@ export const PUBLIC_ROUTES: readonly PublicRoute[] = [
   { match: "exact", path: "/api/sse", guard: "bearer-token", reason: "Alter MCP-Transportname; mcp-handler 2 antwortet 405, die Ausnahme bleibt wie bei /api/mcp" },
   { match: "exact", path: "/api/message", guard: "bearer-token", reason: "Alter MCP-Transportname; mcp-handler 2 antwortet 405, die Ausnahme bleibt wie bei /api/mcp" },
   { match: "prefix", path: "/api/integration/", guard: "box-secret", reason: "LockMeBox-Brücke: Shared-Secret (requireBoxSync), keine Session" },
+  // Fork-Cron-Routen (KI-Keyholderin, Belohnungen): ein externer Cron ruft sie ohne Session; jede prüft
+  // selbst Bearer `AI_KEYHOLDER_CRON_SECRET` und fällt sonst auf eine Admin-Session zurück. Die
+  // session-basierten ai-keyholder-Routen (chat, tasks) stehen bewusst NICHT hier.
+  { match: "exact", path: "/api/ai-keyholder/run", guard: "cron-secret", reason: "Autonomer KI-Keyholder-Lauf (Cron); Bearer-Secret oder Admin-Session" },
+  { match: "exact", path: "/api/ai-keyholder/media-poll", guard: "cron-secret", reason: "Abfrage fertiger KI-Medien-Jobs (Cron); Bearer-Secret oder Admin-Session" },
+  { match: "exact", path: "/api/ai-keyholder/generate-media", guard: "cron-secret", reason: "KI-Medien-Erzeugung anstossen (Cron/Admin); Bearer-Secret oder Session" },
+  { match: "exact", path: "/api/ai-keyholder/generate-avatar", guard: "cron-secret", reason: "KI-Avatar-Erzeugung (Cron/Admin); Bearer-Secret oder Admin-Session" },
+  { match: "exact", path: "/api/rewards/reconcile", guard: "cron-secret", reason: "Belohnungs-Abgleich erreichter Ziele (Cron); Bearer-Secret oder Admin-Session" },
   { match: "exact", path: "/api/telegram/webhook", guard: "webhook-secret", reason: "Telegram ruft an; gesichert über den secret_token-Header" },
   { match: "prefix", path: "/api/oauth/", guard: "oauth", reason: "OAuth-Endpunkte: Clients rufen sie direkt auf, geschützt über Client/Code/Token und Rate-Limit" },
   { match: "prefix", path: "/.well-known/", guard: "public-info", reason: "Metadaten für OAuth-Discovery und App-Passkeys (Apple, Android), ohne Nutzdaten" },

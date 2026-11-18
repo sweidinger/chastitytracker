@@ -10,6 +10,7 @@ import EmptyState from "@/app/components/EmptyState";
 import EntryRow from "@/app/components/EntryRow";
 import DayGroups from "@/app/components/DayGroups";
 import ListPagerLinks from "@/app/components/ListPagerLinks";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 
 const PAGE_SIZE = 20;
 
@@ -47,7 +48,7 @@ export default async function EintraegePage({
       skip: page * PAGE_SIZE,
       take: PAGE_SIZE,
       include: {
-        device: { select: { category: { select: { name: true, color: true, icon: true, isBuiltIn: true } } } },
+        device: { select: { category: { select: { name: true, color: true, icon: true, slug: true } } } },
         // Ohne die Anforderung hiesse jede Kontrolle „Selbstkontrolle", auch die angeforderte.
         kontrollAnforderung: { select: INSPECTION_PILL_SELECT },
       },
@@ -86,7 +87,7 @@ export default async function EintraegePage({
                   timeOnly
                   entry={{
                     ...e,
-                    category: e.device?.category && !e.device.category.isBuiltIn
+                    category: e.device?.category && e.device.category.slug !== KG_BUILTIN_SLUG // KG über den Slug (Plug ist auch eingebaut)
                       ? { name: e.device.category.name, color: e.device.category.color, icon: e.device.category.icon }
                       : null,
                   }}

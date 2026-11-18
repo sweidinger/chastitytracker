@@ -113,7 +113,9 @@ describe("assertEntryTimeOk", () => {
 describe("Vollständigkeit gegenüber VALID_TYPES", () => {
   it("jede gültige Eintragsart ist hier bewusst eingeordnet", () => {
     const paired = ["VERSCHLUSS", "OEFFNEN", "WEAR_BEGIN", "WEAR_END"];
-    const unpaired = ["PRUEFUNG", "ORGASMUS"];
+    // Fork-Arten: Pausen und Session-Kategorien bilden KEINE Paar-Familie der Korrektur — ihre
+    // Zeitlogik lebt in pauseService/sessionService (aktive Pause/Session), nicht im Nachbarn-Check.
+    const unpaired = ["PRUEFUNG", "ORGASMUS", "PAUSE_BEGIN", "PAUSE_END", "SESSION_BEGIN", "SESSION_END"];
     expect([...VALID_TYPES].sort()).toEqual([...paired, ...unpaired].sort());
     for (const t of paired) expect(entryPairTypes(t)).not.toBeNull();
     for (const t of unpaired) expect(entryPairTypes(t)).toBeNull();

@@ -4,9 +4,34 @@ import { requireApi, deviceCategoriesGate } from "@/lib/authGuards";
 import { entryManageAccess } from "@/lib/keyholder";
 import { validateCategoryInput } from "@/lib/categoryConstants";
 import { errorResponse } from "@/lib/serviceResult";
+import { clamp } from "@/lib/utils";
+import type { NumberRange } from "@/lib/constants";
 import { resolveCategoryRuleChanges, currentCategoryRules, categoryUsage, categoryDeleteBlock } from "@/lib/deviceCategoryService";
 
 type Params = { params: Promise<{ id: string }> };
+
+/** Fork: Session-Kategorien (zeitlich begrenzte Sessions statt Tragezeit) und Körperregion. Liest die
+ *  gültigen, MITGESCHICKTEN Fork-Felder aus dem Body — Ungültiges fällt still weg wie bisher. */
+const ORGASMUS_ZIELE: readonly string[] = ["KEINE", "ERFORDERLICH", "VERBOTEN"];
+const CATEGORY_REGIONS: readonly string[] = ["genital", "anal", "other"];
+const MAX_SESSION_MINUTES_RANGE = { min: 1, max: 120, fallback: 30 } as const satisfies NumberRange;
+
+function forkCategoryFields(body: Record<string, unknown>) {
+  const data: { maxSessionMinutes?: number; requiresVideo?: boolean; orgasmusZiel?: string; region?: string } = {};
+  if (typeof body.maxSessionMinutes === "number") data.maxSessionMinutes = clamp(body.maxSessionMinutes, MAX_SESSION_MINUTES_RANGE);
+  if (typeof body.requiresVideo === "boolean") data.requiresVideo = body.requiresVideo;
+  if (typeof body.orgasmusZiel === "string" && ORGASMUS_ZIELE.includes(body.orgasmusZiel)) data.orgasmusZiel = body.orgasmusZiel;
+  if (typeof body.region === "string" && CATEGORY_REGIONS.includes(body.region)) data.region = body.region;
+  return data;
+}
+
+/** Eine Session-Kategorie misst keine Tragezeit: `trackingEnabled`/`requirePhoto` stehen fest auf
+ *  false. Das ist eine Regel-Änderung und läuft deshalb durch dieselbe Schranke wie die Schalter
+ *  selbst (nur Keyholder/Admin) — sonst liesse sich die Zeiterfassung über den Umweg
+ *  „Session-Kategorie" abschalten. */
+function withSessionRules(body: Record<string, unknown>, isSession: boolean): Record<string, unknown> {
+  return isSession ? { ...body, trackingEnabled: false, requirePhoto: false } : body;
+}
 
 /** Access check: returns the category if the session user may manage it — owner, global admin, or
  *  keyholder of the owner (same rule as entries/devices, see entryManageAccess).
@@ -48,10 +73,16 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (icon !== undefined) data.icon = icon;
   if (sortOrder !== undefined && typeof sortOrder === "number") data.sortOrder = sortOrder;
 
+  // Fork: Session-Kategorie (nicht bei der eingebauten). Setzt der Patch sie AN, stehen die
+  // Tragezeit-Regeln fest auf false — geprüft wie jede andere Regel-Änderung (withSessionRules).
+  const sessionFlag = !category.isBuiltIn && typeof body.isSessionCategory === "boolean" ? body.isSessionCategory : undefined;
+  if (sessionFlag !== undefined) data.isSessionCategory = sessionFlag;
+  Object.assign(data, forkCategoryFields(body));
+
   // Die drei Regeln gehören dem Keyholder — die Entscheidung darüber steht im Service, damit
   // Anlegen und Ändern dieselbe treffen (und sie ohne Prisma prüfbar bleibt).
   const rules = resolveCategoryRuleChanges(
-    body,
+    withSessionRules(body, sessionFlag === true),
     currentCategoryRules(category),
     { isBuiltIn: category.isBuiltIn, elevated: category.elevated },
   );

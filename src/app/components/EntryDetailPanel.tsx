@@ -3,6 +3,7 @@
 import { formatDateTime, APP_TZ } from "@/lib/utils";
 import { GRUND_I18N_KEYS } from "@/lib/constants";
 import { useTranslations } from "next-intl";
+import ShowToKeyholderButton from "./ShowToKeyholderButton";
 import DetailField from "@/app/components/DetailField";
 import Badge from "@/app/components/Badge";
 import { CapturedOfflineDetail } from "@/app/components/CapturedOffline";
@@ -27,11 +28,13 @@ interface Props {
   /** Offline erfasst: der Träger hat den Eintrag ohne Netz gestellt. */
   capturedOffline?: boolean;
   note?: string | null;
+  /** Wenn gesetzt (nur Sub-Dashboard): zeigt „Der Keyholderin zeigen" an. */
+  entryId?: string;
 }
 
 export default function EntryDetailPanel({
   startTime, locale, tz = APP_TZ, imageExifTime, oeffnenGrund, orgasmusArt,
-  openingLabel, orgasmusLabel, kontrollCode, inspectionPill, capturedOffline, note,
+  openingLabel, orgasmusLabel, kontrollCode, inspectionPill, capturedOffline, note, entryId,
 }: Props) {
   const tc = useTranslations("common");
   const tOpen = useTranslations("openForm");
@@ -94,6 +97,12 @@ export default function EntryDetailPanel({
         <DetailField label={tc("note")}>
           <p className="text-sm text-foreground-muted italic">„{note}"</p>
         </DetailField>
+      )}
+
+      {entryId && (
+        <div className="pt-1">
+          <ShowToKeyholderButton entryId={entryId} />
+        </div>
       )}
     </div>
   );

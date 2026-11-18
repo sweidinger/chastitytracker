@@ -4,7 +4,7 @@ import { prepareEmailInput } from "@/lib/loginIdentity";
 import { requireAdminApi } from "@/lib/authGuards";
 import bcrypt from "bcryptjs";
 import { passwordErrorCode } from "@/lib/constants";
-import { ensureKgCategory } from "@/lib/deviceCategories";
+import { ensureKgCategory, ensurePlugCategory } from "@/lib/deviceCategories";
 import { isUniqueConstraintOn } from "@/lib/prismaErrors";
 import { latestKgTimesByUser } from "@/lib/queries";
 
@@ -71,6 +71,7 @@ export async function POST(req: NextRequest) {
     throw err;
   }
   await ensureKgCategory(user.id);
+  await ensurePlugCategory(user.id);
 
   return NextResponse.json({ id: user.id, username: user.username, role: user.role }, { status: 201 });
 }

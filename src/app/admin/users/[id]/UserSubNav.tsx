@@ -10,9 +10,11 @@ interface Props {
   showJournal?: boolean;
   /** Wie viel an einem Reiter auf die Entscheidung der Keyholderin wartet (0 = nichts, kein Zähler). */
   counts?: { strafbuch: number; tasks: number };
+  /** Fork: KI-Keyholderin- und Airlock-Reiter nur für Global-Admins. */
+  isGlobalAdmin?: boolean;
 }
 
-export default function UserSubNav({ userId, showJournal = false, counts }: Props) {
+export default function UserSubNav({ userId, showJournal = false, counts, isGlobalAdmin = false }: Props) {
   const t = useTranslations("adminNav");
   const pathname = usePathname();
   const router = useRouter();
@@ -30,6 +32,10 @@ export default function UserSubNav({ userId, showJournal = false, counts }: Prop
     { href: `${base}/strafbuch`, label: t("strafbuch_tab"), exact: false, count: counts?.strafbuch },
     { href: `${base}/geraete`, label: t("devices_tab"), exact: false },
     { href: `${base}/einstellungen`, label: t("user_settings_tab"), exact: false },
+    // AI-Keyholder-Konfiguration ist auf Global-Admins beschränkt
+    ...(isGlobalAdmin ? [{ href: `${base}/ai-keyholder`, label: t("ai_keyholder_tab"), exact: false }] : []),
+    // Airlock-Zuweisung ebenfalls nur für Global-Admins (Verbindung liegt zentral unter /admin/airlock)
+    ...(isGlobalAdmin ? [{ href: `${base}/airlock`, label: t("airlock_tab"), exact: false }] : []),
   ];
 
   const active = tabs.find((tab) =>

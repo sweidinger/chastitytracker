@@ -22,7 +22,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   // `clearAllMocks` behält gesetzte Rückgaben — jede Quelle ausdrücklich zurück auf „nichts".
   db.upload.findUnique.mockReset().mockResolvedValue(null);
-  for (const model of ["entry", "device", "deviceReferenceImage", "taskProof", "weightEntry"]) db[model].findMany.mockResolvedValue([]);
+  for (const model of ["entry", "device", "deviceReferenceImage", "taskProof", "weightEntry", "strafeRecord"]) db[model].findMany.mockResolvedValue([]);
   vi.mocked(isKeyholderOf).mockResolvedValue(false);
   vi.mocked(isCodePhotoRevealed).mockResolvedValue(false);
 });

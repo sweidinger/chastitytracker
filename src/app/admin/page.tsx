@@ -46,6 +46,8 @@ import { actionIcon } from "@/app/entries/actionSign";
 const SCHEDULED_KINDS = {
   inspection: { labelKey: "scheduledInspection", apiPath: "/api/admin/kontrollen", colorToken: "inspect" },
   lock_request: { labelKey: "scheduledLockRequest", apiPath: "/api/admin/verschluss-anforderung", colorToken: "sperrzeit" },
+  // Fork: Trage-Anforderung einer Nicht-KG-Kategorie (Plug) — dieselbe Tabelle, eigene Beschriftung.
+  plug_request: { labelKey: "scheduledPlugRequest", apiPath: "/api/admin/verschluss-anforderung", colorToken: "sperrzeit" },
   lock_period: { labelKey: "scheduledLockPeriod", apiPath: "/api/admin/verschluss-anforderung", colorToken: "sperrzeit" },
   orgasm: { labelKey: "scheduledOrgasm", apiPath: "/api/admin/orgasmus-anforderung", colorToken: "orgasm" },
 } as const;
@@ -111,6 +113,7 @@ export default async function AdminPage() {
     // Dringendste zuerst (LOCK_REQUEST_ORDER): bei mehreren offenen zeigt die Kachel unten die
     // erste nicht-terminierte — das muss die mit der frühsten Frist sein, nicht eine beliebige.
     prisma.verschlussAnforderung.findMany({
+      // Volle Zeile (kein select): wir brauchen deviceCategoryId (KG/Plug-Split) + message für die Banner.
       where: openLockRequestWhere({ userIds }),
       orderBy: LOCK_REQUEST_ORDER,
     }),
@@ -224,9 +227,12 @@ export default async function AdminPage() {
     const offeneOrgasmusAnforderung = userOrgasmusAnf.find(o => !isScheduled(o.wirksamAb)) ?? null;
 
     const offeneKontrolle = userKontrollen.find(k => !isScheduled(k.wirksamAb)) ?? null;
-    // ALLE bereits ausgelösten Anforderungen (mehrere dürfen koexistieren), dringendste zuerst
-    // (userAnforderungen ist per LOCK_REQUEST_ORDER sortiert). Terminierte stehen separat in `scheduled`.
-    const offeneVerschlussAnforderungen = userAnforderungen.filter(v => !isScheduled(v.wirksamAb));
+    // deviceCategoryId=null -> KG Verschluss; non-null -> Plug oder andere nicht-KG Kategorie.
+    // KG: mehrere ANFORDERUNGen dürfen koexistieren (Upstream v4.52.0), dringendste zuerst
+    // (userAnforderungen ist per LOCK_REQUEST_ORDER sortiert). Plug bleibt regionen-exklusiv →
+    // einzeln (Fork-Modell). Terminierte stehen separat in `scheduled`.
+    const offeneKgAnforderungen = userAnforderungen.filter(v => v.deviceCategoryId == null && !isScheduled(v.wirksamAb));
+    const offenePlugAnforderung = userAnforderungen.find(v => v.deviceCategoryId != null && !isScheduled(v.wirksamAb)) ?? null;
     // Mehrere aktive Sperrzeiten können koexistieren — die Liste zeigt dieselbe EFFEKTIVE, gegen die
     // der Sub verschlossen ist (spätestes Ende, Reinigung nur wenn alle sie erlauben). Die erste Zeile
     // zu nehmen hiesse: ein anderes Ende anzeigen, als die Box durchsetzt.
@@ -234,7 +240,7 @@ export default async function AdminPage() {
 
     const scheduled = [
       ...userKontrollen.filter(k => isScheduled(k.wirksamAb)).map(k => ({ id: k.id, kind: "inspection" as const, wirksamAb: k.wirksamAb!, message: k.kommentar })),
-      ...userAnforderungen.filter(v => isScheduled(v.wirksamAb)).map(v => ({ id: v.id, kind: "lock_request" as const, wirksamAb: v.wirksamAb!, message: v.message })),
+      ...userAnforderungen.filter(v => isScheduled(v.wirksamAb)).map(v => ({ id: v.id, kind: v.deviceCategoryId ? "plug_request" as const : "lock_request" as const, wirksamAb: v.wirksamAb!, message: v.message })),
       ...userLockPeriods.filter(s => isScheduled(s.wirksamAb)).map(s => ({ id: s.id, kind: "lock_period" as const, wirksamAb: s.wirksamAb!, message: s.message, endsAt: s.endsAt })),
       ...userOrgasmusAnf.filter(o => isScheduled(o.wirksamAb)).map(o => ({ id: o.id, kind: "orgasm" as const, wirksamAb: o.wirksamAb!, message: o.message })),
     ].sort((a, b) => a.wirksamAb.getTime() - b.wirksamAb.getTime());
@@ -252,12 +258,16 @@ export default async function AdminPage() {
             autoMarkAt: offeneKontrolle.deadline < now ? predictAutoMarkAt(offeneKontrolle, user) : null,
           }
         : null,
-      hasOffeneAnforderung: offeneVerschlussAnforderungen.length > 0,
+      // Alarm bei offener KG- ODER Plug-Anforderung (beide sind offene Einschliess-Direktiven).
+      hasOffeneAnforderung: offeneKgAnforderungen.length > 0 || !!offenePlugAnforderung,
       hasActiveLockPeriod: !!activeLockPeriod,
       boltOpen: boltOpenByUser.has(userId),
-      offeneAnforderungen: offeneVerschlussAnforderungen.map(a => ({
+      offeneAnforderungen: offeneKgAnforderungen.map(a => ({
         id: a.id, endsAt: a.endsAt, overdue: !!a.endsAt && a.endsAt < now,
       })),
+      offenePlugAnforderung: offenePlugAnforderung
+        ? { id: offenePlugAnforderung.id, endsAt: offenePlugAnforderung.endsAt, overdue: !!offenePlugAnforderung.endsAt && offenePlugAnforderung.endsAt < now }
+        : null,
       activeLockPeriod: activeLockPeriod
         // Ohne `message`: der kompakte Banner hat keinen Textslot, das Feld wurde nur mitgeschleppt.
         ? { id: activeLockPeriod.id, endsAt: activeLockPeriod.endsAt, cleaningAllowed: activeLockPeriod.cleaningAllowed, hiddenFromSub: isHiddenFromSub(activeLockPeriod) }
@@ -531,6 +541,22 @@ export default async function AdminPage() {
                             }
                           />
                         ))}
+                        {/* Fork: offene Plug-/Trage-Anforderung (regionen-exklusiv, höchstens eine). */}
+                        {u.stats.offenePlugAnforderung && (
+                          <LockRequestBanner
+                            variant="compact"
+                            colorScheme="request"
+                            label={u.stats.offenePlugAnforderung.overdue ? t("plugWearOverdue") : t("plugWearRequested")}
+                            untilLabel={t("until")}
+                            overdue={u.stats.offenePlugAnforderung.overdue}
+                            endsAt={u.stats.offenePlugAnforderung.endsAt}
+                            locale={dl}
+                            tz={rowTz}
+                            viewerTz={viewerTz}
+                            subTimePrefix={subLabel}
+                            withdrawAction={<WithdrawButton id={u.stats.offenePlugAnforderung.id} apiPath="/api/admin/verschluss-anforderung" title={t("withdrawLockTitle")} colorToken="sperrzeit" />}
+                          />
+                        )}
                         {u.stats.activeLockPeriod && (
                           <LockRequestBanner
                             variant="compact"

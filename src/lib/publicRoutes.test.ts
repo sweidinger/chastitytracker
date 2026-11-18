@@ -8,6 +8,9 @@ const legacyIsAuthRoute = (pathname: string) =>
   || pathname === "/api/mcp" || pathname === "/api/sse" || pathname === "/api/message"
   || pathname.startsWith("/api/integration/")
   || pathname === "/api/telegram/webhook"
+  // Fork-Cron-Routen (Bearer AI_KEYHOLDER_CRON_SECRET), wie sie der Fork-Proxy inline trug
+  || pathname === "/api/ai-keyholder/run" || pathname === "/api/ai-keyholder/media-poll" || pathname === "/api/ai-keyholder/generate-media" || pathname === "/api/ai-keyholder/generate-avatar"
+  || pathname === "/api/rewards/reconcile"
   || pathname.startsWith("/api/oauth/") || pathname.startsWith("/.well-known/") || pathname.startsWith("/oauth/");
 
 const PROBES = [
@@ -16,6 +19,8 @@ const PROBES = [
   "/api/portal-login", "/api/mcp", "/api/mcp/x", "/api/sse", "/api/message", "/api/integration", "/api/integration/box/status",
   "/api/telegram/webhook", "/api/telegram", "/api/oauth", "/api/oauth/token", "/oauth", "/oauth/authorize",
   "/.well-known/oauth-protected-resource", "/.well-known", "/api/uploads/a.jpg", "/api/admin/users", "/api/push/subscribe",
+  "/api/ai-keyholder/run", "/api/ai-keyholder/run/x", "/api/ai-keyholder/chat", "/api/ai-keyholder/tasks", "/api/ai-keyholder/media-poll",
+  "/api/ai-keyholder/generate-media", "/api/ai-keyholder/generate-avatar", "/api/rewards/reconcile", "/api/rewards",
 ];
 
 describe("publicRoutes", () => {

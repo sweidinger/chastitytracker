@@ -58,7 +58,6 @@ export async function buildCategoryWearGoals(
         userId,
         deletedAt: null, // B-04: ein soft-gelöschtes Ziel zählt nicht mehr in die Adhärenz
         categoryId: { not: null },
-        category: { isBuiltIn: false },
       },
       orderBy: { gueltigAb: "desc" },
       select: { categoryId: true, gueltigAb: true, gueltigBis: true, validUntilManual: true, minProTagH: true, minProWocheH: true, minProMonatH: true, minProJahrH: true, minProTagWochentage: true },

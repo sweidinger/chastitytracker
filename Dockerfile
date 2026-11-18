@@ -42,7 +42,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN apk add --no-cache openssl su-exec tesseract-ocr tesseract-ocr-data-eng
 
 # Prisma CLI + Client für Migrationen zur Laufzeit
+# node_modules von deps (npm ci), .prisma vom builder (prisma generate bringt Query-Engine-Binary mit)
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/prisma ./prisma
 
 # Standalone Next.js Output

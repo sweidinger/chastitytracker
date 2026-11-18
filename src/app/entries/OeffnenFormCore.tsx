@@ -21,7 +21,7 @@ import Button from "@/app/components/Button";
 import EntryFormShell from "@/app/components/EntryFormShell";
 import Card from "@/app/components/Card";
 import RiskConfirmSheet from "@/app/components/RiskConfirmSheet";
-import type { OeffnenPayload, CleaningConfig, LockPeriodState, SubmitResult } from "./types";
+import type { OeffnenPayload, CleaningConfig, ToiletteConfig, LockPeriodState, SubmitResult } from "./types";
 import type { BoxHold } from "@/lib/boxOpenOutlook";
 import { LockClosedIcon, LockOpenIcon } from "@/app/components/lockIcons";
 
@@ -35,6 +35,8 @@ interface Props {
   nowDefault: string;
   lockPeriod?: LockPeriodState;
   cleaning?: CleaningConfig;
+  /** Fork: Toiletten-Freigabe (kein Server-Sammelurteil wie bei der Reinigung). */
+  toilette?: ToiletteConfig;
   /** Serverseitig gefälltes Urteil: hält die Box? null = der Riegel folgt (oder es gibt keine Box). */
   boxHold?: BoxHold | null;
   /** Hat der Sub überhaupt eine Box? `boxHold` taugt dafür nicht: es ist auch `null`, wenn eine Box
@@ -52,7 +54,7 @@ interface Props {
 }
 
 export default function OeffnenFormCore({
-  initial, grundOptions, maxTime, tz, nowDefault, lockPeriod, cleaning, boxHold, hasBox = false,
+  initial, grundOptions, maxTime, tz, nowDefault, lockPeriod, cleaning, toilette, boxHold, hasBox = false,
   isEdit = false, submitFn, onSuccess, onCancel, submitVariant = "semantic", submitLabel, defaultGrund,
   taskWarnings = [],
 }: Props) {
@@ -82,8 +84,21 @@ export default function OeffnenFormCore({
   // Das Urteil kommt fertig vom Server (`cleaningBlockReason`) — dieselbe Regel, die über den
   // Sperrzeit-Bruch entscheidet. Hier nachzurechnen (User-Flag, Sperr-Flag, Fenster) hiesse, sie ein
   // viertes Mal zu formulieren; genau so ist die Fenster-Prüfung anderswo verlorengegangen.
-  const isPermittedCleaningOpening = grund === "REINIGUNG" && cleaningBlock === null;
-  const openingBlockedByLockPeriod = hasActiveLockPeriod && !isPermittedCleaningOpening;
+  // KG: `cleaningBlock === null` ist das fertige Server-Urteil. Plug (Fork): dort gibt es kein
+  // solches Urteil, deshalb entscheidet zusätzlich das mitgelieferte `erlaubt`-Flag. Fehlt es
+  // (KG-Pfad), bleibt es beim Server-Urteil allein.
+  const isPermittedCleaningOpening =
+    grund === "REINIGUNG" && cleaningBlock === null && (cleaning?.erlaubt ?? true);
+  // Fork: die Toilette hat kein Server-Sammelurteil und wird weiterhin hier verrechnet.
+  const lockPeriodToiletteErlaubt = lockPeriod?.toiletteErlaubt ?? false;
+  const toiletteErlaubt = toilette?.erlaubt ?? false;
+  const toiletteMaxMinutes = toilette?.maxMinutes ?? 15;
+  const isPermittedToiletteOpening = grund === "TOILETTE" && toiletteErlaubt && lockPeriodToiletteErlaubt;
+  const openingBlockedByLockPeriod = hasActiveLockPeriod && !isPermittedCleaningOpening && !isPermittedToiletteOpening;
+  /** Der Toiletten-Hinweistext (Sheet + Inline-Karte teilen ihn). */
+  const toiletteHintText = toiletteErlaubt
+    ? t("toiletteHint", { minutes: toiletteMaxMinutes })
+    : t("toiletteHintNoConfig");
 
   /** Warum steht bei Grund „Reinigung" kein „max. X Minuten" da? Der Server nennt den Grund. */
   const cleaningHintKey =
@@ -175,7 +190,7 @@ export default function OeffnenFormCore({
       <RiskConfirmSheet
         open={showWarning}
         onClose={() => setShowWarning(false)}
-        title={grund === "REINIGUNG" ? t("modalTitleReinigung") : t("modalTitle")}
+        title={grund === "REINIGUNG" ? t("modalTitleReinigung") : grund === "TOILETTE" ? t("modalTitleToilette") : t("modalTitle")}
         stayLabel={t("modalStay")}
         // Mit Box trägt der Knopf nur ein — er öffnet nichts. Ohne Box ist der Eintrag die ganze
         // Wahrheit, dort bleibt „Trotzdem öffnen" richtig.
@@ -184,7 +199,11 @@ export default function OeffnenFormCore({
         proceeding={saving}
       >
         <p className="text-fliess text-foreground-muted">
-          {grund !== "REINIGUNG" ? t("modalSubtext") : cleaningHintText}
+          {grund === "REINIGUNG"
+            ? cleaningHintText
+            : grund === "TOILETTE"
+              ? toiletteHintText
+              : t("modalSubtext")}
         </p>
         {/* Der Eintrag dokumentiert die Öffnung — er vollzieht sie nicht. Bei einem VERBOTENEN
             Öffnen sendet der Server bewusst kein Box-Kommando (sonst vollstreckte das
@@ -274,6 +293,12 @@ export default function OeffnenFormCore({
                 </p>
               </div>
             </div>
+          </Card>
+        )}
+
+        {grund === "TOILETTE" && (
+          <Card variant="semantic" semantic="inspect" padding="compact">
+            <p className="text-neben text-inspect-text">{toiletteHintText}</p>
           </Card>
         )}
 

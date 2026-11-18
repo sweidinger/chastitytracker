@@ -37,6 +37,9 @@ function judgment(p: Partial<Judgment> & { refId: string }): Judgment {
     judgedByName: null,
     erledigtAt: null,
     taskId: null,
+    nachweisUrl: null,
+    erledigungNotiz: null,
+    ablehnungGrund: null,
     ...p,
   };
 }

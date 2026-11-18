@@ -76,6 +76,8 @@ export default async function AdminHeader({ username, actor, hideOwnTracker }: P
             settingsHref="/admin/settings"
             theme="admin"
             version={pkg.version}
+            // Fork: KI-Backend und Airlock-Verwaltung — nur globale Admins.
+            isGlobalAdmin={isGlobalAdmin}
           />
         </div>
       </div>

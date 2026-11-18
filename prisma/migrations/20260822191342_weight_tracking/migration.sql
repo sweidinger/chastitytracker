@@ -75,9 +75,23 @@ CREATE TABLE "new_User" (
     "targetMaxKg" REAL,
     "targetMinKeyholderKg" REAL,
     "targetMaxKeyholderKg" REAL,
-    "weighingWindows" TEXT
+    "weighingWindows" TEXT,
+    -- Fork-Spalten (sweidinger): beim Tabellen-Neuaufbau mitnehmen, sonst gehen sie verloren
+    "toiletteErlaubt" BOOLEAN NOT NULL DEFAULT false,
+    "toiletteMaxMinuten" INTEGER NOT NULL DEFAULT 15,
+    "toiletteMaxProTag" INTEGER NOT NULL DEFAULT 0,
+    "plugReinigungErlaubt" BOOLEAN NOT NULL DEFAULT false,
+    "plugReinigungMaxMinuten" INTEGER NOT NULL DEFAULT 15,
+    "plugReinigungMaxProTag" INTEGER NOT NULL DEFAULT 0,
+    "plugReinigungsFenster" TEXT,
+    "plugToiletteMaxMinuten" INTEGER NOT NULL DEFAULT 15,
+    "orgasmBudget" INTEGER,
+    "orgasmBudgetPeriode" TEXT NOT NULL DEFAULT 'WOCHE',
+    "orgasmBudgetSetAt" DATETIME,
+    "verdienteOrgasmen" INTEGER NOT NULL DEFAULT 0,
+    "denialRecordDays" INTEGER NOT NULL DEFAULT 0
 );
-INSERT INTO "new_User" ("autoInspectionPlannedFor", "autoKontrolleAktiv", "autoKontrolleFensterBis", "autoKontrolleFensterVon", "autoKontrolleFristBis", "autoKontrolleFristVon", "autoKontrolleNurBeiSperre", "autoKontrollePerDayMax", "autoKontrollePerDayMin", "autoKontrolleRuheBis", "autoKontrolleRuheVon", "createdAt", "dashboardLayout", "email", "hideOwnTracker", "id", "inspectionAutoMarkDelayMinutes", "inspectionAutoMarkEnabled", "inspectionReminderDelayMinutes", "inspectionReminderEnabled", "locale", "mcpKeyholderInstructions", "mobileDesktopUpload", "oeffnenGruendeConfig", "orgasmusArtenConfig", "passwordHash", "reinigungErlaubt", "reinigungMaxMinuten", "reinigungMaxProTag", "reinigungsFenster", "role", "startPage", "timezone", "username") SELECT "autoInspectionPlannedFor", "autoKontrolleAktiv", "autoKontrolleFensterBis", "autoKontrolleFensterVon", "autoKontrolleFristBis", "autoKontrolleFristVon", "autoKontrolleNurBeiSperre", "autoKontrollePerDayMax", "autoKontrollePerDayMin", "autoKontrolleRuheBis", "autoKontrolleRuheVon", "createdAt", "dashboardLayout", "email", "hideOwnTracker", "id", "inspectionAutoMarkDelayMinutes", "inspectionAutoMarkEnabled", "inspectionReminderDelayMinutes", "inspectionReminderEnabled", "locale", "mcpKeyholderInstructions", "mobileDesktopUpload", "oeffnenGruendeConfig", "orgasmusArtenConfig", "passwordHash", "reinigungErlaubt", "reinigungMaxMinuten", "reinigungMaxProTag", "reinigungsFenster", "role", "startPage", "timezone", "username" FROM "User";
+INSERT INTO "new_User" ("autoInspectionPlannedFor", "autoKontrolleAktiv", "autoKontrolleFensterBis", "autoKontrolleFensterVon", "autoKontrolleFristBis", "autoKontrolleFristVon", "autoKontrolleNurBeiSperre", "autoKontrollePerDayMax", "autoKontrollePerDayMin", "autoKontrolleRuheBis", "autoKontrolleRuheVon", "createdAt", "dashboardLayout", "email", "hideOwnTracker", "id", "inspectionAutoMarkDelayMinutes", "inspectionAutoMarkEnabled", "inspectionReminderDelayMinutes", "inspectionReminderEnabled", "locale", "mcpKeyholderInstructions", "mobileDesktopUpload", "oeffnenGruendeConfig", "orgasmusArtenConfig", "passwordHash", "reinigungErlaubt", "reinigungMaxMinuten", "reinigungMaxProTag", "reinigungsFenster", "role", "startPage", "timezone", "username", "toiletteErlaubt", "toiletteMaxMinuten", "toiletteMaxProTag", "plugReinigungErlaubt", "plugReinigungMaxMinuten", "plugReinigungMaxProTag", "plugReinigungsFenster", "plugToiletteMaxMinuten", "orgasmBudget", "orgasmBudgetPeriode", "orgasmBudgetSetAt", "verdienteOrgasmen", "denialRecordDays") SELECT "autoInspectionPlannedFor", "autoKontrolleAktiv", "autoKontrolleFensterBis", "autoKontrolleFensterVon", "autoKontrolleFristBis", "autoKontrolleFristVon", "autoKontrolleNurBeiSperre", "autoKontrollePerDayMax", "autoKontrollePerDayMin", "autoKontrolleRuheBis", "autoKontrolleRuheVon", "createdAt", "dashboardLayout", "email", "hideOwnTracker", "id", "inspectionAutoMarkDelayMinutes", "inspectionAutoMarkEnabled", "inspectionReminderDelayMinutes", "inspectionReminderEnabled", "locale", "mcpKeyholderInstructions", "mobileDesktopUpload", "oeffnenGruendeConfig", "orgasmusArtenConfig", "passwordHash", "reinigungErlaubt", "reinigungMaxMinuten", "reinigungMaxProTag", "reinigungsFenster", "role", "startPage", "timezone", "username", "toiletteErlaubt", "toiletteMaxMinuten", "toiletteMaxProTag", "plugReinigungErlaubt", "plugReinigungMaxMinuten", "plugReinigungMaxProTag", "plugReinigungsFenster", "plugToiletteMaxMinuten", "orgasmBudget", "orgasmBudgetPeriode", "orgasmBudgetSetAt", "verdienteOrgasmen", "denialRecordDays" FROM "User";
 DROP TABLE "User";
 ALTER TABLE "new_User" RENAME TO "User";
 CREATE UNIQUE INDEX "User_username_key" ON "User"("username");

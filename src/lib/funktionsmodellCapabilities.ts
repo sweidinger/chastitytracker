@@ -73,6 +73,15 @@ export const FM_MCP_EXEMPT: Record<string, string> = {
   "weight-record": "Absicht: über `log_weight` (Fähigkeit `weight-mcp-write`) abgedeckt — der Katalog führt die MCP-Seite des Gewichts als eigene Zeile.",
   "weight-delete": "Absicht: eine Messung ist eine BEOBACHTUNG, keine Einstellung. Korrigieren kann die KI sie über `log_weight` (ein Wert je Tag, der neue ersetzt den alten) — eine Beobachtung ganz zu entfernen, samt Foto, bleibt beim Menschen. Der Unterschied ist nicht die Gefahr, sondern die Art der Handlung: die KI ändert, was gilt; was NIE gegolten haben soll, entscheidet die Keyholderin.",
 
+  // ── Absicht (Fork): Betrieb und Innenleben der eingebauten KI-Keyholderin ──────────────────
+  "ai-keyholder-config": "Absicht: Persona, Intensität, Zeitplan und Gedächtnis der EINGEBAUTEN KI-Keyholderin — eine externe KI über den MCP soll nicht die andere umkonfigurieren oder ihr Gedächtnis löschen.",
+  "ai-backend-config": "Absicht: LLM-/Medien-Verbindung samt API-Schlüsseln der ganzen Instanz — Betreiber-Entscheidung wie `photo-analysis`.",
+  "ai-personas": "Absicht: Persona-Vorlagen sind Instanz-Konfiguration der eingebauten KI-Keyholderin, kein Werkzeug der Keyholderin.",
+  "ai-keyholder-media": "Absicht: die Medien-Erzeugung ist Betrieb der eingebauten KI-Keyholderin (Warteschlange, Avatar), keine Handlung am Träger.",
+  "airlock-config": "Absicht: Verbindung und API-Schlüssel zum Airlock-Dienst sind Betreiber-Sache; die Zuweisung eines physischen Locks setzt voraus, dass ein Mensch es in der Hand hat.",
+  // ── OFFEN (Fork) ───────────────────────────────────────────────────────────────────────────
+  "random-pools": "OFFEN: Zufalls-Pools anlegen und ziehen gibt es nur in der Oberfläche — ein MCP-Werkzeug fehlt noch.",
+
   // ── OFFEN: echte Lücken, noch nicht geschlossen ────────────────────────────────────────────
 };
 
@@ -867,5 +876,107 @@ export const FM_CAPABILITIES: FmCapability[] = [
     what: "Wählt, ob und bei welchem Anbieter eingereichte Fotos automatisch geprüft werden (Anthropic, OpenAI, Gemini, Mistral, beliebiger kompatibler Dienst, eigener Server), samt eigenem API-Schlüssel und Modellen; testet die Einstellung an einem Beispielfoto.",
     actors: ["admin"], surfaces: ["admin-ui"], routes: ["/api/admin/photo-analysis", "/api/admin/photo-analysis/test"],
     note: "Überschreibt die `.env`. Der Schlüssel liegt verschlüsselt in `AppMeta` und wird nie ausgeliefert. Bei externem Anbieter bekommen alle Nutzer einen Hinweis.",
+  }),
+
+  // ── Fork (sweidinger) ──────────────────────────────────────────────────────────────────────
+  c({
+    id: "session-request", mechanic: "Sessions/Statistik", title: "Session anfordern",
+    what: "Fordert eine zeitlich begrenzte Session mit einem Gerät einer Session-Kategorie an — mit Frist, Mindestdauer, Video-Pflicht und Orgasmus-Ziel; zurückziehen oder von Hand als erfüllt markieren.",
+    actors: ["admin", "mcp"], surfaces: ["admin-ui", "mcp"],
+    routes: ["/api/admin/session-anforderung", "/api/admin/session-anforderung/[id]"], tools: ["request_session"],
+    note: "Erfüllt wird sie durch das SESSION_END des Trägers; als Strafe angeordnet eskaliert sie strenger.",
+  }),
+  c({
+    id: "upload-video", mechanic: "Einträge", title: "Video hochladen",
+    what: "Nimmt den Video-Nachweis einer Session entgegen (Container-Prüfung über die Magic Bytes) und trägt den Besitz ein wie beim Foto.",
+    actors: ["sub"], surfaces: ["sub-ui"], routes: ["/api/upload-video"],
+  }),
+  c({
+    id: "reward-grant", mechanic: "Orgasmus", title: "Belohnungs-Fenster gewähren",
+    what: "Löst ein verdientes Guthaben ein: öffnet eine Orgasmus-Gelegenheit der Art „Belohnung\" und merkt dafür 1 Guthaben vor.",
+    actors: ["admin", "mcp"], surfaces: ["admin-ui", "mcp"], routes: ["/api/admin/belohnung"], tools: ["grant_reward"],
+    note: "Nur bei Guthaben ≥ 1 und ohne bereits laufendes Fenster. Ein zurückgezogenes, noch laufendes Fenster erstattet das Guthaben.",
+  }),
+  c({
+    id: "reward-credit", mechanic: "Orgasmus", title: "Belohnung gutschreiben",
+    what: "Schreibt für ein erreichtes Trainingsziel +1 Guthaben gut — einmal je Ziel und Zeitraum.",
+    actors: ["admin", "mcp"], surfaces: ["admin-ui", "mcp"], routes: ["/api/admin/belohnung/gutschrift"], tools: ["credit_reward"],
+    note: "Normalerweise unnötig: die Gutschrift läuft automatisch (`reward-reconcile`); dies ist der manuelle Nachtrag.",
+  }),
+  c({
+    id: "reward-reconcile", mechanic: "Orgasmus", title: "Belohnungen automatisch gutschreiben",
+    what: "Schreibt erreichte Trainingsziele aller Träger als Belohnungs-Guthaben gut, unabhängig davon, ob jemand hinschaut.",
+    actors: ["system"], surfaces: ["automatik"], routes: ["/api/rewards/reconcile"],
+  }),
+  c({
+    id: "penalty-report-proof", mechanic: "Strafbuch", title: "Strafe mit Nachweis als erledigt melden",
+    what: "Der Träger sieht seine verhängten Strafen und meldet eine als erledigt — optional mit Nachweis-Foto und Notiz; die Keyholderin bestätigt oder lehnt mit Grund ab.",
+    actors: ["sub"], surfaces: ["sub-ui"], routes: ["/api/strafen"],
+    note: "Fork-Variante neben `penalty-report-done` (gemeldetAt/nachweisUrl statt nur reportedDoneAt).",
+  }),
+  c({
+    id: "health-hold-self", mechanic: "MCP", title: "Gesundheits-Stopp selbst auslösen",
+    what: "Der Träger setzt den Gesundheits-Halt für sich selbst und hebt ihn wieder auf — jederzeit, ohne Keyholderin.",
+    actors: ["sub"], surfaces: ["sub-ui"], routes: ["/api/health-hold"],
+  }),
+  c({
+    id: "tagesform", mechanic: "MCP", title: "Tagesform erfassen",
+    what: "Erregung, Körpergefühl und Headspace des Tages samt Notiz — Kontext für die Keyholderin (`get_overview`).",
+    actors: ["sub"], surfaces: ["sub-ui"], routes: ["/api/tagesform"],
+  }),
+  c({
+    id: "random-pools", mechanic: "Zufall", title: "Zufalls-Pools pflegen und ziehen",
+    what: "Gewichtete Pools möglicher Folgen (Sperrzeit verlängern, Strafe, Anweisung, Aufgabe) je Träger anlegen; der Träger oder die Keyholderin zieht, das Ergebnis wird sofort angewandt.",
+    actors: ["sub", "admin"], surfaces: ["sub-ui", "admin-ui"], routes: ["/api/admin/zufall", "/api/zufall"],
+    note: "Die Wahrscheinlichkeiten bleiben dem Träger verborgen — er sieht nur das gezogene Ergebnis. Die Folge zählt in ihrem eigenen Bereich.",
+  }),
+  c({
+    id: "airlock-verify", mechanic: "Geräte", title: "Airlock-NFC prüfen",
+    what: "Liest UID und NDEF eines Airlock-Tags und lässt die Echtheit beim Airlock-Dienst prüfen; beim Verschluss zusätzlich, ob es das vorgegebene bzw. zugewiesene Lock ist.",
+    actors: ["sub"], surfaces: ["sub-ui", "extern"], routes: ["/api/airlock/verify"],
+    note: "Der Tracker hält keine Krypto und keine Registry (Weg A, docs/AIRLOCK_NFC.md).",
+  }),
+  c({
+    id: "airlock-config", mechanic: "Geräte", title: "Airlock einrichten und Locks zuweisen",
+    what: "Verbindung zum Airlock-Dienst einstellen und testen, die Lock-Registry spiegeln, Locks einem Träger zuweisen oder freigeben.",
+    actors: ["admin"], surfaces: ["admin-ui"],
+    routes: ["/api/admin/airlock/config", "/api/admin/airlock/test", "/api/admin/airlock/locks", "/api/admin/airlock/assign", "/api/admin/airlock/assigned"],
+  }),
+  c({
+    id: "ai-keyholder-config", mechanic: "KI-Keyholderin", title: "Eingebaute KI-Keyholderin einrichten",
+    what: "Schaltet die eingebaute KI-Keyholderin je Träger ein, setzt Persona, Intensität und Zeitplan, zeigt ihren Laufstatus und löscht auf Wunsch Verlauf und Gedächtnis.",
+    actors: ["admin"], surfaces: ["admin-ui"],
+    routes: ["/api/admin/ai-keyholder/[userId]", "/api/admin/ai-keyholder/[userId]/status", "/api/admin/ai-keyholder/[userId]/messages"],
+  }),
+  c({
+    id: "ai-backend-config", mechanic: "KI-Keyholderin", title: "KI-Backend einrichten",
+    what: "Instanzweite LLM- und Medien-Verbindung der eingebauten KI-Keyholderin; Schlüssel werden nie ausgeliefert.",
+    actors: ["admin"], surfaces: ["admin-ui"], routes: ["/api/admin/ai-backend/config"],
+  }),
+  c({
+    id: "ai-personas", mechanic: "KI-Keyholderin", title: "Persona-Vorlagen pflegen",
+    what: "Vorlagen für Persönlichkeit und Regeln der eingebauten KI-Keyholderin anlegen, ändern und löschen.",
+    actors: ["admin"], surfaces: ["admin-ui"], routes: ["/api/admin/ai-personas", "/api/admin/ai-personas/[id]"],
+  }),
+  c({
+    id: "ai-keyholder-chat", mechanic: "KI-Keyholderin", title: "Mit der KI-Keyholderin chatten",
+    what: "Der Träger schreibt der eingebauten KI-Keyholderin, optional mit Foto; die Antwort kommt gestreamt und kann eine Aktion auslösen.",
+    actors: ["sub"], surfaces: ["sub-ui"], routes: ["/api/ai-keyholder/chat"],
+  }),
+  c({
+    id: "ai-keyholder-tasks", mechanic: "KI-Keyholderin", title: "Aufgaben der KI-Keyholderin erledigen",
+    what: "Der Träger sieht die Aufgaben der eingebauten KI-Keyholderin (Medium ansehen, Antwort schreiben) und erledigt sie.",
+    actors: ["sub"], surfaces: ["sub-ui"], routes: ["/api/ai-keyholder/tasks"],
+  }),
+  c({
+    id: "ai-keyholder-run", mechanic: "KI-Keyholderin", title: "Autonomer Lauf der KI-Keyholderin",
+    what: "Der Cron-Lauf, in dem die eingebaute KI-Keyholderin selbst entscheidet und handelt — gesichert über ein gemeinsames Geheimnis.",
+    actors: ["system"], surfaces: ["automatik"], routes: ["/api/ai-keyholder/run"],
+  }),
+  c({
+    id: "ai-keyholder-media", mechanic: "KI-Keyholderin", title: "Medien und Avatar erzeugen",
+    what: "Stellt Bild-/Video-Aufträge und Avatar-Erzeugung in die Warteschlange; der Cron arbeitet sie ab und stellt fertige Medien als Aufgabe zu.",
+    actors: ["admin", "system"], surfaces: ["admin-ui", "automatik"],
+    routes: ["/api/ai-keyholder/generate-media", "/api/ai-keyholder/generate-avatar", "/api/ai-keyholder/media-poll"],
   }),
 ];

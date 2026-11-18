@@ -1,13 +1,17 @@
 import { prisma } from "@/lib/prisma";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 
 /** True if the vorgabe targets the built-in KG category (or is legacy pre-migration
  *  with no category). Centralizes the predicate so calendar/monthstats and goal-card
- *  filtering stay in sync. */
+ *  filtering stay in sync.
+ *
+ *  Über den KG-SLUG, nicht `isBuiltIn` — passend zu `KG_VORGABE_WHERE` in queries.ts: im Fork ist
+ *  auch die Plug-Kategorie eingebaut, ihre Ziele sind aber Kategorie-Ziele, keine KG-Ziele. */
 export function isKgVorgabe(v: {
   categoryId?: string | null;
-  category?: { isBuiltIn: boolean } | null;
+  category?: { slug: string } | null;
 }): boolean {
-  return !v.categoryId || v.category?.isBuiltIn === true;
+  return !v.categoryId || v.category?.slug === KG_BUILTIN_SLUG;
 }
 
 /** Die KANONISCHE Kategorie-Kennung einer Vorgabe — bewusst `isKgVorgabe` und nicht eine eigene
@@ -68,9 +72,9 @@ export async function reorderVorgabenDates(userId: string) {
   const all = await prisma.trainingVorgabe.findMany({
     where: { userId, deletedAt: null },
     orderBy: { gueltigAb: "asc" },
-    // `isBuiltIn` mitladen, damit `goalCategoryKey` dasselbe Prädikat benutzt wie die Lesepfade, statt
+    // `slug` mitladen, damit `goalCategoryKey` dasselbe Prädikat benutzt wie die Lesepfade, statt
     // die Kategorie-Tabelle ein zweites Mal zu befragen und die Regel neu zu formulieren.
-    include: { category: { select: { isBuiltIn: true } } },
+    include: { category: { select: { slug: true } } },
   });
 
   // Pro Kategorie gruppieren — über DENSELBEN Schlüssel, mit dem `getActiveVorgabe` und

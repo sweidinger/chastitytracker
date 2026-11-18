@@ -38,6 +38,11 @@ export interface CategoryRow {
   needsDevice: boolean;
   requirePhoto: boolean;
   allowVorgaben: boolean;
+  isSessionCategory: boolean;
+  maxSessionMinutes: number;
+  requiresVideo: boolean;
+  orgasmusZiel: string;
+  region: string;
 }
 
 interface Props {
@@ -259,11 +264,13 @@ function CategoryRowItem({
   const style = categoryStyle(c.color);
   // Per mockup #6: KG shows built-in features ("Foto-Pflicht · Siegel · Kontrollen"),
   // others show "ohne Foto-Pflicht" or "Inventar-only" if tracking disabled.
-  const featureLine = !c.trackingEnabled
-    ? t("featuresInventoryOnly")
-    : c.isBuiltIn
-      ? t("featuresKg")
-      : t("featuresWear");
+  const featureLine = c.isSessionCategory
+    ? t("featuresSession")
+    : !c.trackingEnabled
+      ? t("featuresInventoryOnly")
+      : c.isBuiltIn
+        ? t("featuresKg")
+        : t("featuresWear");
   return (
     // Kein Kasten je Kategorie: die Liste trennt durch Haarlinien. Ein Rahmen um jede Zeile
     // wiederholt nur, was die Zeile selbst schon ist.

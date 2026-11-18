@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#111827"/>
+  <rect x="138" y="228" width="236" height="164" rx="34" fill="white"/>
+  <path d="M176 228V178a80 80 0 0 1 160 0v50" fill="none" stroke="white" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="256" cy="306" r="25" fill="#111827"/>
+  <rect x="242" y="306" width="28" height="38" rx="10" fill="#111827"/>
+  <text x="256" y="452" font-family="Arial, Helvetica, sans-serif" font-size="80" font-weight="800" fill="#ffffff" text-anchor="middle" letter-spacing="6">BETA</text>
+  <rect x="22" y="22" width="468" height="468" rx="96" fill="none" stroke="#ef4444" stroke-width="34"/>
+</svg>

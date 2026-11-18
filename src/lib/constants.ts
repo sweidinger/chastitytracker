@@ -85,11 +85,15 @@ export const LOCALES_LONG = [
  */
 export const APP_NAME = "Chastity Tracker";
 
-export const VALID_TYPES = ["VERSCHLUSS", "OEFFNEN", "PRUEFUNG", "ORGASMUS", "WEAR_BEGIN", "WEAR_END"] as const;
+export const VALID_TYPES = ["VERSCHLUSS", "OEFFNEN", "PRUEFUNG", "ORGASMUS", "WEAR_BEGIN", "WEAR_END", "SESSION_BEGIN", "SESSION_END", "PAUSE_BEGIN", "PAUSE_END"] as const;
 /** Entry types restricted to KG (the built-in DeviceCategory). */
 export const KG_ENTRY_TYPES: ReadonlySet<string> = new Set(["VERSCHLUSS", "OEFFNEN"]);
 /** Entry types for non-KG DeviceCategories (Plug, Collar, ...). Require deviceId. */
 export const WEAR_ENTRY_TYPES: ReadonlySet<string> = new Set(["WEAR_BEGIN", "WEAR_END"]);
+/** Entry types for session categories (Dildo, Vibrator, ...). Require deviceId from a session category. */
+export const SESSION_ENTRY_TYPES: ReadonlySet<string> = new Set(["SESSION_BEGIN", "SESSION_END"]);
+/** Entry types for pause tracking (applies to both KG/Cage and Plug). pauseDevice="CAGE"|"PLUG". */
+export const PAUSE_ENTRY_TYPES: ReadonlySet<string> = new Set(["PAUSE_BEGIN", "PAUSE_END"]);
 /** Entry types whose CREATE (`POST /api/entries`) may carry a box photo (`boxImageUrl`): der
  *  Schlüssel-Nachweis durchs Sichtfenster der Box, bei jeder Kontrolle wiederholt — nur die
  *  Wiederholung belegt, dass der Schlüssel drin GEBLIEBEN ist. Die Wiederholung darf seit
@@ -203,12 +207,13 @@ export function bleBridgeKey(): string | null {
 export function boxCouplingEnabled(): boolean {
   return heimdallEnabled() || lockmeboxEnabled();
 }
-export const ORGASMUS_ARTEN = ["Orgasmus", "ruinierter Orgasmus", "feuchter Traum"] as const;
+export const ORGASMUS_ARTEN = ["Orgasmus", "ruinierter Orgasmus", "feuchter Traum", "Belohnung"] as const;
 /** Maps each ORGASMUS_ARTEN value to its orgasmForm i18n key (shared by entry + Anforderung forms). */
 export const ORGASMUS_ART_I18N_KEYS: Record<string, string> = {
   "Orgasmus": "artOrgasmus",
   "ruinierter Orgasmus": "artRuiniert",
   "feuchter Traum": "artTraum",
+  "Belohnung": "artBelohnung",
 };
 /** Translates an orgasmusArt base value via the orgasmForm namespace, falling back to the raw value. */
 export function orgasmusArtLabel(art: string, t: (key: string) => string): string {
@@ -245,10 +250,17 @@ export function orgasmusAnforderungArtLabel(art: OrgasmusAnforderungArt, t: (key
 export const DEVICE_BEARING_TYPES: readonly string[] = ["VERSCHLUSS", "WEAR_BEGIN", "WEAR_END", "PRUEFUNG"];
 
 export const AUTO_ENTFERNT_REASON = "AUTO_ENTFERNT";
-export const OEFFNEN_GRUENDE = ["REINIGUNG", "KEYHOLDER", "NOTFALL", "ANDERES", AUTO_ENTFERNT_REASON] as const;
+// PAUSE_ABGELAUFEN: system-only reason for the auto-created OEFFNEN when a CAGE cleaning/toilet
+// pause runs past its maximum duration (see pauseOverstayService.ts). System-only like AUTO_ENTFERNT.
+export const PAUSE_ABGELAUFEN_REASON = "PAUSE_ABGELAUFEN";
+export const OEFFNEN_GRUENDE = ["REINIGUNG", "TOILETTE", "KEYHOLDER", "NOTFALL", "ANDERES", AUTO_ENTFERNT_REASON, PAUSE_ABGELAUFEN_REASON] as const;
 export type OeffnenGrund = typeof OEFFNEN_GRUENDE[number];
+/** Standard-Öffnungsgründe für das Öffnen/Trage-Ende. Reinigung/Toilette laufen ausschließlich über
+ *  die Pause-Funktion und sind hier bewusst ausgenommen — ihre Codes/Labels bleiben in OEFFNEN_GRUENDE
+ *  erhalten (Pause-Labels + Bestands-Einträge). AUTO_ENTFERNT ist system-only (siehe unten). */
+export const DEFAULT_OEFFNEN_GRUENDE = ["KEYHOLDER", "NOTFALL", "ANDERES"] as const;
 /** Reserved AND hidden from the user-facing opening-reason picker — system-only codes. */
-export const SYSTEM_ONLY_OPENING_CODES: readonly string[] = [AUTO_ENTFERNT_REASON];
+export const SYSTEM_ONLY_OPENING_CODES: readonly string[] = [AUTO_ENTFERNT_REASON, PAUSE_ABGELAUFEN_REASON];
 
 /** Wer einen Eintrag verursacht hat. `system` = niemand hat gehandelt, der Tracker hat gebucht
  *  (Eskalation einer unbeantworteten Kontrolle). Spiegelt die `Entry.source`-Spalte; die Regel
@@ -287,10 +299,12 @@ export const LOCK_ENDED_REASON = {
 /** Maps OEFFNEN_GRUENDE values to openForm i18n keys */
 export const GRUND_I18N_KEYS: Record<typeof OEFFNEN_GRUENDE[number], string> = {
   REINIGUNG: "grundReinigung",
+  TOILETTE: "grundToilette",
   KEYHOLDER: "grundKeyholder",
   NOTFALL: "grundNotfall",
   ANDERES: "grundAnderes",
   AUTO_ENTFERNT: "grundAutoEntfernt",
+  PAUSE_ABGELAUFEN: "grundPauseAbgelaufen",
 };
 
 // ── Entry display constants (shared by dashboard + admin entry lists) ─────────
@@ -303,6 +317,8 @@ export const TYPE_STATS_KEYS: Record<string, string> = {
   ORGASMUS: "orgasm",
   WEAR_BEGIN: "wearBegin",
   WEAR_END: "wearEnd",
+  PAUSE_BEGIN: "pauseBegin",
+  PAUSE_END: "pauseEnd",
 };
 
 /** Hex colors for HTML email templates (no Tailwind/CSS vars available in email) */
@@ -607,6 +623,35 @@ export const POST_LOCK_INSPECTION_DEADLINE_RANGE = { ...AUTO_INSPECTION_DEADLINE
 export const AUTO_INSPECTION_DEADLINE_FROM_RANGE = { ...AUTO_INSPECTION_DEADLINE, fallback: 15 } as const satisfies NumberRange;
 /** Obere Frist-Grenze („bis"). */
 export const AUTO_INSPECTION_DEADLINE_TO_RANGE = { ...AUTO_INSPECTION_DEADLINE, fallback: 60 } as const satisfies NumberRange;
+
+// ── Zufalls-Engine ────────────────────────────────────────────────────────────
+/** Konsequenz-Typen einer Zufalls-Option (String-Enum, in ZufallsOption.outcomeType gespeichert).
+ *  Die typspezifischen Parameter liegen als JSON in outcomeJson — siehe zufallService.ts. */
+export const ZUFALL_OUTCOME_TYPES = [
+  "TIME_ADD",         // Sperrzeit verlängern
+  "TIME_SUB",         // Sperrzeit verkürzen
+  "PENALTY",          // Strafe (Straf-Aktion oder freier StrafeRecord)
+  "REWARD",           // Belohnungs-Fenster (ohne Guthaben-Gate)
+  "ORGASM_DIRECTIVE", // Orgasmus-Anweisung
+  "SESSION_REQUEST",  // Session anfordern (SessionAnforderung)
+  "NOTHING",          // nichts passiert (Nieten füllen das Rad)
+] as const;
+export type ZufallOutcomeType = typeof ZUFALL_OUTCOME_TYPES[number];
+
+/** Auslöse-Arten eines Pools. Aktuell nur manuelle Ziehung (Sub oder Keyholder). */
+export const ZUFALL_TRIGGER_TYPES = ["MANUAL"] as const;
+export type ZufallTriggerType = typeof ZUFALL_TRIGGER_TYPES[number];
+
+/** Gewicht einer Option (relativ; Summe muss nicht 100 sein). */
+export const ZUFALL_WEIGHT_RANGE = { min: 1, max: 1000, fallback: 1 } as const satisfies NumberRange;
+/** Cooldown zwischen zwei Ziehungen in Minuten (0 = kein Cooldown, max = eine Woche). */
+export const ZUFALL_COOLDOWN_MIN_RANGE = { min: 0, max: 10080, fallback: 0 } as const satisfies NumberRange;
+/** Obergrenze für TIME_ADD-Stunden EINER Ziehung (0 = keine Deckelung). */
+export const ZUFALL_MAXADD_H_RANGE = { min: 0, max: 168, fallback: 24 } as const satisfies NumberRange;
+/** Deckel für die Sperrzeit-Verlängerung EINER Ziehung in MINUTEN (0 = keine Deckelung). */
+export const ZUFALL_MAXADD_MIN_RANGE = { min: 0, max: 10080, fallback: 60 } as const satisfies NumberRange;
+/** Stunden-Parameter einer zeit-/fensterbezogenen Option (TIME_ADD/SUB/REWARD/ORGASM_DIRECTIVE). */
+export const ZUFALL_OPTION_HOURS_RANGE = { min: 0, max: 168, fallback: 3 } as const satisfies NumberRange;
 
 /** Call-to-Action-Button-Farben für HTML-Mails (in E-Mail keine CSS-Variablen → Hex).
  *  Bewusst getrennt von TYPE_EMAIL_COLORS: das ist der Akzent je Eintrags-TYP, nicht die
@@ -951,7 +996,7 @@ export function validateEntryPayload(
   if (!type || !VALID_TYPES.includes(type as (typeof VALID_TYPES)[number])) {
     return "INVALID_TYPE";
   }
-  if (WEAR_ENTRY_TYPES.has(type) && !deviceCategoriesEnabled()) {
+  if ((WEAR_ENTRY_TYPES.has(type) || SESSION_ENTRY_TYPES.has(type)) && !deviceCategoriesEnabled()) {
     return "DEVICE_CATEGORIES_DISABLED";
   }
   if (type === "OEFFNEN") {

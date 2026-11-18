@@ -29,7 +29,16 @@ export interface CreateVerschlussAnforderungParams {
   /** ANFORDERUNG only: nach dem Einschliessen UNBEFRISTET gesperrt. Schliesst minDurationHours/lockEndsAt aus. */
   lockIndefinite?: boolean;
   deviceId?: string | null;
+  /** Airlock-NFC (ANFORDERUNG only): vorgegebenes Lock aus dem Pool des Subs. Der Sub muss beim
+   *  Verschluss genau dieses per NFC scannen. null = keine Vorgabe (Sub wählt aus dem Pool). */
+  airlockCode?: string | null;
+  /** Fork: Non-KG category (e.g. Plug). When set: uses wear-state instead of KG lock-state. */
+  deviceCategoryId?: string | null;
+  /** Fork: Wear-Anforderung: Foto beim Anlegen erzwingen (true) / optional (false) / Kategorie-Default (null). */
+  fotoPflicht?: boolean | null;
   cleaningAllowed?: boolean;
+  /** Fork: Toiletten-Pausen während der (mitgebrachten) Sperrzeit — dieselbe Regel wie `cleaningAllowed`. */
+  toiletteErlaubt?: boolean;
   /** Verzögerte Auslösung in Minuten (>0). Fehlt/0 = sofort (sofern kein wirksamAbAt). */
   delayMinutes?: number | null;
   /** Absoluter Versandzeitpunkt (ISO-String oder Date). Hat Vorrang vor delayMinutes. */
@@ -137,7 +146,8 @@ export async function createVerschlussAnforderung(
   params: CreateVerschlussAnforderungParams,
   actor: MessageActor,
 ): Promise<ServiceResult<{ id: string; scheduledFor: string | null }>> {
-  const { userId, art, message, endsAt, fristH, minDurationHours, lockEndsAt, lockIndefinite, deviceId, cleaningAllowed, delayMinutes, wirksamAbAt } = params;
+  const { userId, art, message, endsAt, fristH, minDurationHours, lockEndsAt, lockIndefinite, deviceId, airlockCode, deviceCategoryId, fotoPflicht, cleaningAllowed, toiletteErlaubt, delayMinutes, wirksamAbAt } = params;
+  const isPlugCategory = !!deviceCategoryId;
 
   if (!userId) return serviceFail(400, "USER_ID_REQUIRED");
   if (art !== "ANFORDERUNG" && art !== "SPERRZEIT") {
@@ -206,26 +216,49 @@ export async function createVerschlussAnforderung(
     if (!device) return serviceFail(400, "INVALID_DEVICE");
   }
 
+  // Airlock-Vorgabe: das vorgegebene Lock muss diesem Sub aktuell zugewiesen und nicht getötet sein.
+  if (airlockCode && art === "ANFORDERUNG") {
+    const lock = await prisma.airlockLock.findUnique({ where: { code: airlockCode } });
+    const dead = lock?.status === "retired" || lock?.status === "voided" || !!lock?.retireRequestedAt;
+    if (!lock || lock.assignedUserId !== userId || lock.releasedAt || dead) {
+      return serviceFail(400, "AIRLOCK_LOCK_NOT_ASSIGNED");
+    }
+  }
+
   // Wrap state-check + withdraw + create in transaction to prevent TOCTOU race
   let anforderung;
   // Wurf- und Fang-Seite hängen an derselben Tabelle — siehe kontrolleService.
   const { table: ERRORS, fail } = serviceErrors({
     ALREADY_LOCKED: { status: 400, error: "USER_ALREADY_LOCKED" },
     NOT_LOCKED: { status: 400, error: "USER_NOT_LOCKED" },
+    ALREADY_WEARING_PLUG: { status: 400, error: "PLUG_ALREADY_WORN" },
+    NOT_WEARING_PLUG: { status: 400, error: "PLUG_NOT_WORN" },
   });
   try {
     anforderung = await prisma.$transaction(async (tx) => {
       // tx zwingend durchreichen: der Zustands-Check muss in DERSELBEN Transaktion lesen (TOCTOU).
-      const isLocked = await getIsLocked(userId, tx);
-
-      // Der Lock-Zustand wird nur gegen eine SOFORT wirksame Direktive geprüft. Eine TERMINIERTE
+      // Der Ist-Zustand wird nur gegen eine SOFORT wirksame Direktive geprüft. Eine TERMINIERTE
       // sagt nichts über jetzt, sondern über später: „schliess dich morgen früh ein" ist auch dann
-      // sinnvoll, wenn der Sub gerade noch verschlossen ist. Ob die Auslösung dann noch passt,
-      // entscheidet der Poller (processDueVerschlussAnforderungen) — er zieht sie als `obsolete`
-      // zurück, statt eine unpassende Anweisung zuzustellen.
-      if (!wirksamAb) {
-        if (art === "ANFORDERUNG" && isLocked) throw fail("ALREADY_LOCKED");
-        if (art === "SPERRZEIT" && !isLocked) throw fail("NOT_LOCKED");
+      // sinnvoll, wenn der Sub gerade noch verschlossen/tragend ist. Ob die Auslösung dann noch
+      // passt, entscheidet der Poller (processDueVerschlussAnforderungen) — er zieht sie als
+      // `obsolete` zurück, statt eine unpassende Anweisung zuzustellen.
+      if (isPlugCategory) {
+        // Plug: Zustand über WEAR_BEGIN/WEAR_END bestimmen statt KG VERSCHLUSS/OEFFNEN.
+        if (!wirksamAb) {
+          const latestWear = await tx.entry.findFirst({
+            where: { userId, type: { in: ["WEAR_BEGIN", "WEAR_END"] }, device: { categoryId: deviceCategoryId } },
+            orderBy: { startTime: "desc" },
+          });
+          const isWearing = latestWear?.type === "WEAR_BEGIN";
+          if (art === "ANFORDERUNG" && isWearing) throw fail("ALREADY_WEARING_PLUG");
+          if (art === "SPERRZEIT" && !isWearing) throw fail("NOT_WEARING_PLUG");
+        }
+      } else {
+        const isLocked = await getIsLocked(userId, tx);
+        if (!wirksamAb) {
+          if (art === "ANFORDERUNG" && isLocked) throw fail("ALREADY_LOCKED");
+          if (art === "SPERRZEIT" && !isLocked) throw fail("NOT_LOCKED");
+        }
       }
 
       // Nur die SPERRZEIT ist exklusiv: eine neue Sperre ERSETZT die bestehende, sonst hätte die
@@ -233,9 +266,11 @@ export async function createVerschlussAnforderung(
       // durchsetzte — eine Verkürzung wäre wirkungslos geblieben. ANFORDERUNGen dürfen dagegen
       // koexistieren: mehrere (typisch terminierte) Einschliess-Anweisungen sind eine Pipeline, und
       // ein Verschluss erfüllt sie alle auf einmal (siehe POST /api/entries).
+      // Fork-Scoping: pro deviceCategoryId (Körperregion), damit KG- und Plug-Sperren unabhängig
+      // voneinander sind.
       if (art === "SPERRZEIT") {
         await tx.verschlussAnforderung.updateMany({
-          where: { userId, art, fulfilledAt: null, withdrawnAt: null },
+          where: { userId, art, deviceCategoryId: deviceCategoryId ?? null, fulfilledAt: null, withdrawnAt: null },
           data: { withdrawnAt: new Date(), endedReason: LOCK_ENDED_REASON.keyholder }, // von einer neuen Direktive ersetzt
         });
       }
@@ -243,9 +278,13 @@ export async function createVerschlussAnforderung(
       const effectiveMinDurationHours = art === "ANFORDERUNG" ? (minDurationHours || null) : null;
       // Streng `=== true`: die Route reicht den rohen Body durch, und `!!"false"` wäre wahr.
       const effectiveLockIndefinite = art === "ANFORDERUNG" && lockIndefinite === true;
-      const effectiveCleaning = effectiveCleaningAllowed(cleaningAllowed, {
+      const lockPeriodSpec = {
         isLockPeriod: art === "SPERRZEIT", minDurationHours: effectiveMinDurationHours, lockEndsAt: lockEndsAtDate, lockIndefinite: effectiveLockIndefinite,
-      });
+      };
+      // Fork: Toiletten-Freigabe folgt derselben Regel wie die Reinigung (wirkt nur über eine
+      // Sperrzeit). Für den Plug gibt es weder Reinigungs- noch Toilettenfreigabe.
+      const effectiveCleaning = !isPlugCategory && effectiveCleaningAllowed(cleaningAllowed, lockPeriodSpec);
+      const effectiveToilette = !isPlugCategory && effectiveCleaningAllowed(toiletteErlaubt, lockPeriodSpec);
 
       return tx.verschlussAnforderung.create({
         data: {
@@ -257,8 +296,12 @@ export async function createVerschlussAnforderung(
           lockEndsAt: lockEndsAtDate,
           lockIndefinite: effectiveLockIndefinite,
           deviceId: art === "ANFORDERUNG" ? (deviceId || null) : null,
+          airlockCode: art === "ANFORDERUNG" ? (airlockCode || null) : null,
+          deviceCategoryId: deviceCategoryId || null,
+          fotoPflicht: fotoPflicht ?? null,
           cleaningAllowed: effectiveCleaning,
           createdBy: actorColumn(actor),
+          toiletteErlaubt: effectiveToilette,
           wirksamAb,
           benachrichtigtAt, // sofort = jetzt benachrichtigt; geplant = Poller
         },
@@ -272,7 +315,7 @@ export async function createVerschlussAnforderung(
 
   // Sofort benachrichtigen; bei geplanter Auslösung übernimmt der Poller bei Fälligkeit.
   if (!wirksamAb) {
-    await sendVerschlussAnforderungNotifications({ user, art, message, endsAtDate, lockSpec: anforderung, requestId: anforderung.id, actor });
+    await sendVerschlussAnforderungNotifications({ user, art, message, endsAtDate, lockSpec: anforderung, requestId: anforderung.id, actor, isPlugCategory });
   }
 
   // Instant-Push: Heimdall re-pullt die Config (neue/geänderte Sperre) für eine LIVE Box sofort.
@@ -307,8 +350,10 @@ export async function sendVerschlussAnforderungNotifications(opts: {
    * einem neuen Aufrufer getroffen werden müssen, statt still durchzurutschen.
    */
   actor: MessageActor;
+  /** Fork: Plug-Direktive (deviceCategoryId gesetzt) — eigene Texte, keine Sperr-Dauer-Angaben. */
+  isPlugCategory?: boolean;
 }) {
-  const { user, art, message, endsAtDate, lockSpec, requestId, actor } = opts;
+  const { user, art, message, endsAtDate, lockSpec, requestId, actor, isPlugCategory } = opts;
 
   // Die Anforderungs-Nachricht des Keyholders wird NICHT mitkopiert: der Posteingang zeigt auf die
   // Direktive und liest sie beim Anzeigen frisch von dort. Eine spätere Korrektur über
@@ -333,27 +378,31 @@ export async function sendVerschlussAnforderungNotifications(opts: {
   /** Die Mail dieser Art — gebaut wird sie von `deliverToChannels` erst, wenn sie hinausgeht. */
   const buildMail = () => {
     if (art === "SPERRZEIT") {
+      const subject = isPlugCategory ? t("lockPeriodSetSubjectPlug") : t("lockPeriodSetSubject");
       return {
-        subject: t("lockPeriodSetSubject"),
-        html: dashboardEmailHtml(t("lockPeriodSetSubject"),
+        subject,
+        html: dashboardEmailHtml(subject,
           `${greeting}
-        <p>${escHtml(t("lockPeriodSetBody"))}</p>
+        <p>${escHtml(isPlugCategory ? t("lockPeriodSetBodyPlug") : t("lockPeriodSetBody"))}</p>
         ${messageHtml}
         ${lockEndHtml(endsAtDate)}`, t("dashboardButton")),
       };
     }
     const deadlineHtml = endsAtDate
-      ? `<p><strong>${t("lockUntilLabel")}</strong> ${formatDateTime(endsAtDate)}</p>`
+      ? `<p><strong>${isPlugCategory ? t("lockUntilLabelPlug") : t("lockUntilLabel")}</strong> ${formatDateTime(endsAtDate)}</p>`
       : "";
-    const minDurationHtml = lockSpec?.minDurationHours
+    // Mindest-Tragedauer und Sperr-Ende gibt es nur beim Käfig — für den Plug (Fork) wird keine
+    // Dauer angekündigt.
+    const minDurationHtml = lockSpec?.minDurationHours && !isPlugCategory
       ? `<p><strong>${t("lockMinWearLabel")}</strong> ${escHtml(formatDurationHours(lockSpec.minDurationHours, user.locale))}</p>`
       : "";
-    const sperrBisHtml = lockSpec?.lockEndsAt || lockSpec?.lockIndefinite ? lockEndHtml(lockSpec.lockEndsAt) : "";
+    const sperrBisHtml = !isPlugCategory && (lockSpec?.lockEndsAt || lockSpec?.lockIndefinite) ? lockEndHtml(lockSpec.lockEndsAt) : "";
+    const subject = isPlugCategory ? t("lockRequestSubjectPlug") : t("lockRequestSubject");
     return {
-      subject: t("lockRequestSubject"),
-      html: dashboardEmailHtml(t("lockRequestSubject"),
+      subject,
+      html: dashboardEmailHtml(subject,
         `${greeting}
-        <p>${escHtml(t("lockRequestBody"))}</p>
+        <p>${escHtml(isPlugCategory ? t("lockRequestBodyPlug") : t("lockRequestBody"))}</p>
         ${messageHtml}
         ${deadlineHtml}
         ${minDurationHtml}
@@ -361,13 +410,17 @@ export async function sendVerschlussAnforderungNotifications(opts: {
     };
   };
 
-  const pushTitle = art === "ANFORDERUNG" ? t("lockPushRequestTitle") : t("lockPushPeriodTitle");
+  const pushTitle = art === "ANFORDERUNG"
+    ? (isPlugCategory ? t("lockPushRequestTitlePlug") : t("lockPushRequestTitle"))
+    : (isPlugCategory ? t("lockPeriodSetSubjectPlug") : t("lockPushPeriodTitle"));
   const pushParts: string[] = [];
   if (art === "ANFORDERUNG") {
-    pushParts.push(t("lockPushRequestBody"));
+    pushParts.push(isPlugCategory ? t("lockPushRequestBodyPlug") : t("lockPushRequestBody"));
     if (endsAtDate) pushParts.push(t("lockPushDeadline", { date: formatDateTime(endsAtDate) }));
-    if (lockSpec?.lockEndsAt) pushParts.push(t("lockPushUntil", { date: formatDateTime(lockSpec.lockEndsAt) }));
-    else if (lockSpec?.lockIndefinite) pushParts.push(t("lockIndefinite"));
+    if (!isPlugCategory) {
+      if (lockSpec?.lockEndsAt) pushParts.push(t("lockPushUntil", { date: formatDateTime(lockSpec.lockEndsAt) }));
+      else if (lockSpec?.lockIndefinite) pushParts.push(t("lockIndefinite"));
+    }
   } else {
     pushParts.push(endsAtDate ? t("lockPushUntil", { date: formatDateTime(endsAtDate) }) : t("lockIndefinite"));
   }
@@ -552,6 +605,7 @@ export async function updateLockRequest(
       user: va.user, art: "ANFORDERUNG",
       message: next.message, endsAtDate: next.endsAt, lockSpec: next,
       requestId: va.id,
+      isPlugCategory: !!va.deviceCategoryId,
       // Die Anforderung selbst nennt ihren ANORDNENDEN, nicht den, der sie vorgezogen hat — genau
       // wie auf dem Poller-Weg, der dieselbe Meldung verschickt. OHNE Ausweichen auf `actor`: eine
       // Altzeile ohne Autor bliebe sonst je nach Zustellweg mal „System" (Poller) und mal der

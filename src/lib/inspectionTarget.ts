@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 import { getLatestKgEntry, getActiveWearSessionForCategory, getActiveWearSessions, getIsLocked, type PrismaTx } from "@/lib/queries";
 import { deviceCategoriesEnabled } from "@/lib/constants";
 
@@ -86,7 +87,7 @@ export async function resolveInspectionTarget(
       where: { id: pinnedDeviceId },
       select: {
         userId: true, name: true, archivedAt: true,
-        category: { select: { id: true, name: true, isBuiltIn: true } },
+        category: { select: { id: true, name: true, slug: true } },
       },
     });
     if (!device || device.userId !== userId || device.archivedAt) {
@@ -94,20 +95,23 @@ export async function resolveInspectionTarget(
     }
     // Das Gerät bestimmt die Kategorie — ein mitgeschicktes `categoryId` kann ihr nicht
     // widersprechen, weil es hier gar nicht erst gelesen wird.
-    const builtIn = device.category?.isBuiltIn ?? false;
-    categoryId = builtIn ? null : device.category?.id ?? null;
-    categoryName = builtIn ? null : device.category?.name ?? null;
+    // KG = slug "kg", NICHT `isBuiltIn`: im Fork ist auch die Plug-Kategorie eingebaut, und eine
+    // Plug-Kontrolle muss ihre Kategorie behalten (sonst würde sie zur KG-Kontrolle).
+    const isKg = device.category?.slug === KG_BUILTIN_SLUG;
+    categoryId = isKg ? null : device.category?.id ?? null;
+    categoryName = isKg ? null : device.category?.name ?? null;
     deviceName = device.name;
   } else if (categoryId) {
     const category = await client.deviceCategory.findUnique({
       where: { id: categoryId },
-      select: { userId: true, name: true, isBuiltIn: true },
+      select: { userId: true, name: true, slug: true },
     });
     if (!category || category.userId !== userId) {
       return { ok: false, code: "INSPECTION_TARGET_INVALID" };
     }
-    categoryId = category.isBuiltIn ? null : categoryId;
-    categoryName = category.isBuiltIn ? null : category.name;
+    const isKg = category.slug === KG_BUILTIN_SLUG; // siehe Geräte-Zweig: Plug ist auch eingebaut
+    categoryId = isKg ? null : categoryId;
+    categoryName = isKg ? null : category.name;
   }
 
   if (categoryId === null) {

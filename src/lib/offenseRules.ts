@@ -44,6 +44,11 @@ export const OFFENSE_RULE_MODES = {
   // Dreistufig: `lockedOnly` ahndet nur, was während einer laufenden Sperrzeit passiert ist,
   // `always` jeden Orgasmus ohne offenes Fenster.
   unauthorized_orgasm: ["off", "lockedOnly", "always"],
+  // Fork-Arten
+  missed_session: ["off", "on"],
+  erektion: ["off", "on"],
+  pause_overage: ["off", "on"],
+  orgasm_over_budget: ["off", "on"],
 } as const satisfies Partial<Record<OffenseCanonicalType, readonly OffenseMode[]>>;
 
 /** Eine Art, deren Geltung eingestellt werden kann. */
@@ -82,6 +87,11 @@ export const OFFENSE_RULE_DEFAULT: Record<SwitchableOffenseType, OffenseMode> = 
   // Vergehen an. Die Keyholderin schaltet es je Träger ein; die Frist selbst steht in den Box-Einstellungen.
   box_photo_missing: "off",
   unauthorized_orgasm: "off",
+  // Fork-Arten: AN wie im Fork bisher — dort zählten sie ohne Schalter immer.
+  missed_session: "on",
+  erektion: "on",
+  pause_overage: "on",
+  orgasm_over_budget: "on",
 };
 
 export function isSwitchableOffenseType(type: string): type is SwitchableOffenseType {

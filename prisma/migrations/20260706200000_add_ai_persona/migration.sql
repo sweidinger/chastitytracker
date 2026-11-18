@@ -1,0 +1,12 @@
+-- CreateTable
+CREATE TABLE "AiPersona" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "systemPrompt" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "AiPersona_name_key" ON "AiPersona"("name");

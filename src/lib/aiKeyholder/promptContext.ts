@@ -1,0 +1,156 @@
+import { prisma } from "@/lib/prisma";
+import { buildTagesformContext, tagesformPromptText, type TagesformView } from "@/lib/tagesformService";
+import { getActivePause, pauseReasonsForDevice, type PauseDevice } from "@/lib/pauseService";
+
+/** Cooldown zwischen zwei Kontrollen desselben Geräts (Minuten). Muss zur serverseitigen
+ *  Durchsetzung in keyholderService passen — der Prompt-Text ist nur die Vorwarnung. */
+const KONTROLLE_COOLDOWN_MIN = 60;
+
+/** Geräte-Liste: KG-Käfige UND Nicht-KG-Geräte.
+ *  Der autonome Lauf filterte früher `!isBuiltIn` — und schloss damit ausgerechnet die KG-Käfige
+ *  aus, deren exakten Namen sein eigener Prompt für `anforderungDeviceName` verlangt. */
+async function buildDeviceListText(userId: string): Promise<string> {
+  try {
+    const devices = await prisma.device.findMany({
+      where: { userId, archivedAt: null },
+      include: { category: { select: { name: true, slug: true } } },
+    });
+    // Detail je Gerät: Größen-Reihenfolge (sortOrder) + Beschreibung (enthält oft Durchmesser/Gewicht),
+    // damit der Keyholder bei mehreren gleichartigen Geräten (z.B. Plugs) BEWUSST nach Größe wählen kann.
+    const detailOf = (d: { sortOrder: number; description: string | null }) =>
+      [`Größe ${d.sortOrder}`, d.description?.trim()].filter(Boolean).join("; ");
+    const fmt = (d: { name: string; sortOrder: number; description: string | null }, cat?: string) => {
+      const detail = detailOf(d);
+      return `${d.name}${cat ? ` (${cat})` : ""}${detail ? ` [${detail}]` : ""}`;
+    };
+    const bySize = (a: { sortOrder: number }, b: { sortOrder: number }) => a.sortOrder - b.sortOrder;
+    const kgCages = devices.filter((d) => d.category?.slug === "kg").sort(bySize).map((d) => fmt(d));
+    const nonKgDevices = devices
+      .filter((d) => d.category?.slug !== "kg")
+      .sort(bySize)
+      .map((d) => fmt(d, d.category?.name ?? "?"));
+
+    const parts: string[] = [];
+    if (kgCages.length > 0) parts.push(`KG-Käfige (für anforderungDeviceName): ${kgCages.join(", ")}`);
+    if (nonKgDevices.length > 0) parts.push(`Andere Geräte (für wearDeviceName): ${nonKgDevices.join(", ")}`);
+    return parts.length > 0
+      ? `\n\n--- Verfügbare Geräte des Users (Namen EXAKT übernehmen; bei mehreren gleichartigen Geräten wähle bewusst anhand Größe/Beschreibung) ---\n${parts.join("\n")}`
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Session-Kategorien für create_session_anforderung. */
+async function buildSessionCategoriesText(userId: string): Promise<string> {
+  try {
+    const sessionCats = await prisma.deviceCategory.findMany({
+      where: { userId, isSessionCategory: true },
+      select: {
+        name: true,
+        maxSessionMinutes: true,
+        orgasmusZiel: true,
+        devices: { where: { archivedAt: null }, select: { name: true } },
+      },
+    });
+    if (sessionCats.length === 0) return "";
+    return (
+      "\n\n--- Verfügbare Session-Kategorien (für create_session_anforderung, sessionCategoryName EXAKT) ---\n" +
+      sessionCats
+        .map((c) => {
+          const deviceNames = c.devices.length > 0 ? ` [Devices: ${c.devices.map((d) => d.name).join(", ")}]` : " [keine Devices]";
+          const ziel = c.orgasmusZiel !== "KEINE" ? ` | Ziel: ${c.orgasmusZiel === "ERFORDERLICH" ? "Orgasmus erforderlich" : "Orgasmus verboten"}` : "";
+          return `${c.name} (max. ${c.maxSessionMinutes} Min.${ziel})${deviceNames}`;
+        })
+        .join("\n")
+    );
+  } catch {
+    return "";
+  }
+}
+
+/** Kontrolle-Cooldown pro Gerät (CAGE / PLUG getrennt). */
+async function buildKontrolleCooldownText(userId: string, now: Date = new Date()): Promise<string> {
+  try {
+    const cooldownLines: string[] = [];
+    for (const dev of ["CAGE", "PLUG"] as const) {
+      const lastKon = await prisma.kontrollAnforderung.findFirst({
+        where: { userId, deviceKind: dev },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      });
+      if (!lastKon) continue;
+      const minSince = Math.floor((now.getTime() - lastKon.createdAt.getTime()) / 60_000);
+      if (minSince < KONTROLLE_COOLDOWN_MIN) {
+        cooldownLines.push(
+          `${dev}: letzte vor ${minSince} Min. — nächste frühestens in ${KONTROLLE_COOLDOWN_MIN - minSince} Min.`,
+        );
+      }
+    }
+    return cooldownLines.length > 0
+      ? `\n\n⚠ Kontrolle-Cooldown aktiv:\n${cooldownLines.join("\n")}\ncreate_kontrolle für betroffenes Device NICHT verwenden (wird serverseitig hart abgelehnt).`
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Aktuell LAUFENDER Pausen-Überzug (PAUSE_BEGIN ohne PAUSE_END, länger offen als die je Grund/Gerät
+ *  erlaubte Maximaldauer). Nicht im Overview enthalten — deshalb hier als eigenes Warn-Signal, damit die
+ *  Keyholderin einen überfälligen Ausschluss proaktiv ansprechen kann (die Strafbuch-Zeile erfasst nur
+ *  ABGESCHLOSSENE Überzüge). Non-fatal: schlägt eine Query fehl, fehlt nur dieser Block. */
+async function buildPauseOverrunText(userId: string, now: Date = new Date()): Promise<string> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        cleaningAllowed: true, cleaningMaxMinutes: true, cleaningMaxPerDay: true,
+        toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true,
+        plugReinigungErlaubt: true, plugReinigungMaxMinuten: true, plugReinigungMaxProTag: true,
+        plugToiletteMaxMinuten: true,
+      },
+    });
+    if (!user) return "";
+    const lines: string[] = [];
+    for (const device of ["CAGE", "PLUG"] as PauseDevice[]) {
+      const active = await getActivePause(userId, device);
+      if (!active) continue;
+      const entry = await prisma.entry.findUnique({ where: { id: active.id }, select: { oeffnenGrund: true } });
+      const grund = entry?.oeffnenGrund;
+      if (grund !== "REINIGUNG" && grund !== "TOILETTE") continue;
+      const reason = pauseReasonsForDevice(user, device).find((r) => r.grund === grund);
+      if (!reason || reason.maxMinuten <= 0) continue;
+      const elapsedMin = Math.floor((now.getTime() - active.startTime.getTime()) / 60_000);
+      if (elapsedMin > reason.maxMinuten) {
+        const grundLabel = grund === "REINIGUNG" ? "Reinigung" : "Toilette";
+        lines.push(`${device}/${grundLabel}: seit ${elapsedMin} Min offen (max ${reason.maxMinuten} Min) — ${elapsedMin - reason.maxMinuten} Min über der Grenze.`);
+      }
+    }
+    return lines.length > 0
+      ? `\n\n⚠ PAUSEN-ÜBERZUG (LÄUFT GERADE):\n${lines.join("\n")}\nDer Ausschluss ist überfällig — sprich den Sub darauf an.`
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Baut den gemeinsamen Kontext für alle Prompt-Pfade (Chat, autonomer Lauf, Reaktionen) als
+ *  ein anhängbarer String — Geräte, Session-Kategorien, Kontrolle-Cooldown, Tagesform, in stabiler
+ *  Reihenfolge. Jeder Baustein ist für sich non-fatal: schlägt eine Query fehl, fehlt nur dieser Block.
+ *
+ *  `tagesformView` durchreichen, wenn der Aufrufer das Overview ohnehin schon geladen hat
+ *  (`overview.tagesform`) — dann entfällt die zweite Tagesform-Query. */
+export async function buildSharedPromptContext(
+  userId: string,
+  tagesformView?: TagesformView,
+): Promise<string> {
+  const [deviceListText, sessionCategoriesText, kontrolleCooldownText, tagesformText, pauseOverrunText] = await Promise.all([
+    buildDeviceListText(userId),
+    buildSessionCategoriesText(userId),
+    buildKontrolleCooldownText(userId),
+    tagesformView ? Promise.resolve(tagesformPromptText(tagesformView)) : buildTagesformContext(userId),
+    buildPauseOverrunText(userId),
+  ]);
+
+  return deviceListText + sessionCategoriesText + kontrolleCooldownText + tagesformText + pauseOverrunText;
+}

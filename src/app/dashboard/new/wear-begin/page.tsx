@@ -11,7 +11,7 @@ import { getActiveWearSessionForCategory, getMobileDesktopMode } from "@/lib/que
 import { nowDatetimeLocal, safeInternalPath, APP_TZ } from "@/lib/utils";
 import WearForm from "../../WearForm";
 
-export default async function NewWearBeginPage({ searchParams }: { searchParams: Promise<{ category?: string; device?: string; redirectTo?: string }> }) {
+export default async function NewWearBeginPage({ searchParams }: { searchParams: Promise<{ category?: string; device?: string; redirectTo?: string; anforderung?: string }> }) {
   if (!deviceCategoriesEnabled()) notFound();
   const session = await auth();
   if (!session) redirect("/login");
@@ -19,15 +19,17 @@ export default async function NewWearBeginPage({ searchParams }: { searchParams:
 
   // `redirectTo` kommt hier aus der URL (Ketten-Weiterleitung der Aufgaben-Bedingungen) — deshalb
   // durch `safeInternalPath`, anders als bei den serverseitig gebauten Zielen der Admin-Formulare.
-  const { category: categoryId, device: wantedDevice, redirectTo } = await searchParams;
+  const { category: categoryId, device: wantedDevice, redirectTo, anforderung: anforderungId } = await searchParams;
   if (!categoryId) redirect("/dashboard/categories");
   const target = safeInternalPath(redirectTo) ?? undefined;
 
   const category = await prisma.deviceCategory.findUnique({
     where: { id: categoryId },
-    select: { id: true, userId: true, name: true, color: true, icon: true, isBuiltIn: true, requirePhoto: true },
+    select: { id: true, userId: true, name: true, color: true, icon: true, isBuiltIn: true, slug: true, requirePhoto: true },
   });
-  if (!category || category.userId !== session.user.id || category.isBuiltIn) notFound();
+  // Block KG (uses VERSCHLUSS/OEFFNEN, not WEAR_BEGIN/END); allow plug + user-defined.
+  if (!category || category.userId !== session.user.id) notFound();
+  if (category.isBuiltIn && category.slug !== "plug") notFound();
 
   // Block if a session is already active in this category
   const active = await getActiveWearSessionForCategory(session.user.id, categoryId);
@@ -44,6 +46,21 @@ export default async function NewWearBeginPage({ searchParams }: { searchParams:
   // ersetzen (und ein Gerät, das es nicht mehr gibt, darf das Formular nicht leer machen).
   const preferred = devices.findIndex((d) => d.id === wantedDevice);
   if (preferred > 0) devices.unshift(...devices.splice(preferred, 1));
+
+  // Aus einer Wear-Anforderung geöffnet (Fork): Gerät fest vorwählen + sperren, Foto-Pflicht ggf.
+  // überschreiben. Der Server erzwingt beides ebenfalls (POST /api/entries, WEAR_BEGIN).
+  let forcedDeviceId: string | null = null;
+  let requirePhoto = category.requirePhoto;
+  if (anforderungId) {
+    const anf = await prisma.verschlussAnforderung.findFirst({
+      where: { id: anforderungId, userId: session.user.id, deviceCategoryId: categoryId, art: "ANFORDERUNG", fulfilledAt: null, withdrawnAt: null },
+      select: { deviceId: true, fotoPflicht: true },
+    });
+    if (anf) {
+      forcedDeviceId = anf.deviceId;
+      if (anf.fotoPflicht !== null) requirePhoto = anf.fotoPflicht;
+    }
+  }
 
   const [t, mobileDesktopMode] = await Promise.all([
     getTranslations("wearForm"),
@@ -76,9 +93,10 @@ export default async function NewWearBeginPage({ searchParams }: { searchParams:
       <WearForm
         kind="begin"
         mobileDesktopMode={mobileDesktopMode}
-        category={{ id: category.id, name: category.name, color: category.color, icon: category.icon, requirePhoto: category.requirePhoto }}
+        category={{ id: category.id, name: category.name, color: category.color, icon: category.icon, requirePhoto }}
         devices={devices}
         redirectTo={target}
+        forcedDeviceId={forcedDeviceId}
         tz={tz}
         nowDefault={nowDatetimeLocal(tz)}
       />

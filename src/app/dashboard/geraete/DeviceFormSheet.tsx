@@ -48,6 +48,7 @@ export default function DeviceForm({ onClose, onSaved, device, categories, initi
     ?? categories?.[0]?.id
     ?? "";
   const showCategoryPicker = (categories?.length ?? 0) > 1;
+  // Größen-Reihenfolge ist nur für Plug-Geräte relevant (Strafaktion „nächstgrößerer Plug").
 
   const [name, setName] = useState(device?.name ?? "");
   const [description, setDescription] = useState(device?.description ?? "");
@@ -65,6 +66,8 @@ export default function DeviceForm({ onClose, onSaved, device, categories, initi
   const photoIsReference = !categoryId || categories?.find((c) => c.id === categoryId)?.isBuiltIn !== false;
   // Default true = Bestandsverhalten; ein neues Gerät verlangt einen Code, bis jemand ihn abschaltet.
   const [requireCode, setRequireCode] = useState(device?.requireInspectionCode ?? true);
+  // Fork: Grössenreihenfolge innerhalb der Kategorie.
+  const [sortOrder, setSortOrder] = useState(device?.sortOrder != null ? String(device.sortOrder) : "0");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -94,6 +97,7 @@ export default function DeviceForm({ onClose, onSaved, device, categories, initi
       purchasePrice: parsedPrice,
       currency: parsedPrice !== null ? currency : null,
       categoryId: categoryId || null,
+      sortOrder: Number.isFinite(parseInt(sortOrder, 10)) ? parseInt(sortOrder, 10) : 0,
     };
     if (canEditInspectionCode) payload.requireInspectionCode = requireCode;
     if (userId) payload.userId = userId;
@@ -221,6 +225,18 @@ export default function DeviceForm({ onClose, onSaved, device, categories, initi
               />
             </div>
           </div>
+
+          {categories?.find((c) => c.id === categoryId)?.slug === "plug" && (
+            <Input
+              label={t("sortOrder")}
+              type="number"
+              inputMode="numeric"
+              step="1"
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value)}
+              hint={t("sortOrderHint")}
+            />
+          )}
 
           <FormError message={error} />
 

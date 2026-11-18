@@ -16,6 +16,7 @@ import TaskFields, { type PunishmentOffenseOption, type TaskFormInitial } from "
 import { recurrenceFromRow } from "@/lib/recurrenceForm";
 import { TASK_FORM_QUERY } from "@/lib/entryFormRoute";
 import type { RecurrenceFreq } from "@/lib/taskRecurrence";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 
 /** Minuten → Dauer-Eingabe (Stunden bei glattem Wert, sonst Minuten) fürs Vorbefüllen. */
 function minutesToDuration(min: number): { hours: string; holdUnit: "h" | "min" } {
@@ -66,7 +67,8 @@ export default async function AdminTaskPage({
     getTranslations("taskSeries"),
     deviceCategoriesEnabled()
       ? prisma.deviceCategory.findMany({
-          where: { userId, isBuiltIn: false, trackingEnabled: true },
+          // Nicht-KG über den Slug (die Fork-Plug-Kategorie ist eingebaut, aber Trage-Ziel).
+          where: { userId, slug: { not: KG_BUILTIN_SLUG }, trackingEnabled: true },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           select: {
             id: true, name: true, color: true, icon: true,

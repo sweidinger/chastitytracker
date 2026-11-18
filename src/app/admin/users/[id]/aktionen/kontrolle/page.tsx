@@ -17,6 +17,7 @@ export default async function AdminKontrollePage({ params }: { params: Promise<{
   if (!user.email || targets.length === 0) redirect(`/admin/users/${id}/aktionen`);
 
   // Die Ziele stehen hier schon (der Guard braucht sie) — durchreichen statt sie das Formular
-  // gleich noch einmal über die Route holen zu lassen.
+  // gleich noch einmal über die Route holen zu lassen. Der Cage/Plug-Umschalter des Forks
+  // (`?plug=1`) ist in der Ziel-Auswahl aufgegangen.
   return <KontrolleForm userId={id} targets={targets} />;
 }

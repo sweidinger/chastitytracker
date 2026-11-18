@@ -88,11 +88,19 @@ export const SUB_DASHBOARD_BLOCKS = [
   // `alwaysOn`, weil hier die überfällige Kontrolle samt „Jetzt erfassen“ steht — siehe die
   // Begründung an `DashboardBlockDef.alwaysOn`.
   { id: "alerts", surface: "subDashboard", role: "sub", labelKey: "blockAlerts", alwaysOn: true },
+  // Fork: Plug tragen / Session starten / Plug-Sperrdauer — Fristen wie `alerts`, deshalb ebenso
+  // `alwaysOn` (Begründung an `DashboardBlockDef.alwaysOn`).
+  { id: "forkRequests", surface: "subDashboard", role: "sub", labelKey: "blockForkRequests", alwaysOn: true },
+  // Fork: Gesundheits-Stopp. Aktiv ein Zustand mit Folgen (pausiert Anforderungen), deshalb nicht
+  // ausblendbar — sonst wüsste der Träger nicht mehr, dass er läuft, und könnte ihn nicht beenden.
+  { id: "healthHold", surface: "subDashboard", role: "sub", labelKey: "blockHealthHold", alwaysOn: true },
   // `alwaysOn`, seit der Block nur noch STÖRUNGEN zeigt: wer ihn ausblendet, verliert die
   // Vorwarnung vor der Not-Öffnung — und die lässt sich nur rechtzeitig verhindern (heimdall#1).
   { id: "boxStatus", surface: "subDashboard", role: "sub", labelKey: "blockBoxStatus", alwaysOn: true },
   { id: "openTasks", surface: "subDashboard", role: "sub", labelKey: "blockOpenTasks", collapsible: true },
   { id: "openPenalties", surface: "subDashboard", role: "sub", labelKey: "blockOpenPenalties", collapsible: true },
+  // Fork: Strafen-Erledigung (offen / zur Prüfung gemeldet).
+  { id: "penaltyTasks", surface: "subDashboard", role: "sub", labelKey: "blockPenaltyTasks" },
   { id: "weightRelease", surface: "subDashboard", role: "sub", labelKey: "blockWeightRelease", collapsible: true },
   // `alwaysOn`, seit dieser Block BEIDE Zustände trägt (#100) — und damit auch die Reinigungspause:
   // Countdown, Straffrist-Zeile und der Knopf „Wieder verschliessen". Die hingen vorher an
@@ -101,9 +109,14 @@ export const SUB_DASHBOARD_BLOCKS = [
   // kassierte ein Vergehen für etwas, das ihm niemand gezeigt hat. Gespeichert ist die Kennung,
   // nicht die Beschriftung: die Umbenennung des Labels warnt niemanden.
   { id: "runningSession", surface: "subDashboard", role: "sub", labelKey: "blockRunningSession", alwaysOn: true },
+  // Fork: die grosse Plug-Karte, direkt unter der KG-Karte. Ausgeblendet steht der Plug wieder als
+  // Zeile unter `activeWearSessions` (samt Pause-Knopf) — nichts geht verloren.
+  { id: "plugSession", surface: "subDashboard", role: "sub", labelKey: "blockPlugSession" },
   { id: "activeWearSessions", surface: "subDashboard", role: "sub", labelKey: "blockActiveWear" },
   { id: "incompleteCategories", surface: "subDashboard", role: "sub", labelKey: "blockIncompleteCategories" },
   { id: "categoryGoals", surface: "subDashboard", role: "sub", labelKey: "blockCategoryGoals", collapsible: true },
+  // Fork: Tagesform (Erregung / Körper / Headspace).
+  { id: "dailyForm", surface: "subDashboard", role: "sub", labelKey: "blockDailyForm" },
   { id: "inactiveCategories", surface: "subDashboard", role: "sub", labelKey: "blockInactiveCategories" },
   { id: "statusAndStats", surface: "subDashboard", role: "sub", labelKey: "blockStatusAndStats" },
   // Die orgasmusfreie Zeit — auf dem Dashboard wie auf der Statistik-Seite (dieselbe
@@ -112,6 +125,10 @@ export const SUB_DASHBOARD_BLOCKS = [
   // nichts und wäre lauter als der Inhalt. Dieselbe Entscheidung wie beim gleichnamigen
   // Statistik-Block.
   { id: "orgasmFree", surface: "subDashboard", role: "sub", labelKey: "blockStatsOrgasmFree" },
+  // Fork: Denial-Zähler mit Orgasmus-Budget und das Belohnungs-Guthaben — neben der
+  // orgasmusfreien Zeit, zu der sie inhaltlich gehören.
+  { id: "denialCounter", surface: "subDashboard", role: "sub", labelKey: "blockDenialCounter" },
+  { id: "rewards", surface: "subDashboard", role: "sub", labelKey: "blockRewards" },
   // Die Werbung steht bewusst HINTER `statusAndStats` — dort sitzt der Willkommen-Block eines
   // leeren Kontos. Davor gestellt bewarb der erste Bildschirm der App eine Zusatzfunktion
   // („Tracke mehr als nur KG"), bevor er die Grundfunktion erklärte: wer neu ist, weiss noch
@@ -146,8 +163,13 @@ const STATS_BLOCKS = [
   // Der Stimmungsverlauf aus dem Tagebuch (#114). In der Keyholder-Sicht nur aus freigegebenen
   // Einträgen und nur für die ZUGEORDNETE Keyholderin — die Admin-Rolle allein sieht ihn leer.
   { id: "mood", labelKey: "blockStatsMood" },
+  // Fork: Tagesform-Verlauf der letzten 14 Tage.
+  { id: "dailyFormHistory", labelKey: "blockStatsDailyForm" },
   { id: "monthStats", labelKey: "blockStatsMonths" },
   { id: "unlawfulOpenings", labelKey: "blockStatsUnlawful" },
+  // Fork: Trage-Statistik je Kategorie und die Belohnungs-/Straf-Historie.
+  { id: "wearByCategory", labelKey: "blockStatsWearByCategory" },
+  { id: "rewardHistory", labelKey: "blockStatsRewardHistory" },
 ] as const;
 
 /** Beide Statistik-Oberflächen teilen sich die Block-Namen — der Typ deshalb auch. */

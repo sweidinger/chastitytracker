@@ -71,6 +71,30 @@ export const SHARED_SERVICE_CODES = [
   "PUSH_NOT_ENABLED",
   // Verbinden mit Telegram, obwohl die Instanz gar keinen Bot führt (kein Token/Bot-Name).
   "TELEGRAM_NOT_CONFIGURED",
+  // Fork: Plug-Direktiven pruefen den Trage-Zustand (WEAR_BEGIN/WEAR_END), nicht den KG-Verschluss.
+  // Eigene Codes, damit dem Keyholder nicht "Benutzer ist verschlossen" fuer einen Plug erscheint.
+  "PLUG_ALREADY_WORN",
+  "PLUG_NOT_WORN",
+  // Fork: Straf-Erledigung, Straf-Aktionen, Session-Kategorien. (Gesundheits-Stopp: seit Upstream
+  // v6 in `HEALTH_HOLD_CODES`.)
+  "PENALTY_NOT_FOUND",
+  "PENALTY_ALREADY_DONE",
+  "PENALTY_REPORT_PENDING",
+  "PENALTY_REASON_REQUIRED",
+  "PENALTY_NO_REPORT",
+  "PENALTY_HOURS_REQUIRED",
+  "PENALTY_NO_LARGER_PLUG",
+  "PENALTY_UNKNOWN_ACTION",
+  "INVALID_SESSION_CATEGORY",
+  "NO_SESSION_CATEGORY",
+  // Fork: Belohnungs-Oekonomie (Guthaben, Belohnungs-Fenster).
+  "REWARD_GOAL_NOT_ELIGIBLE",
+  "REWARD_ALREADY_CREDITED",
+  "REWARD_WINDOW_ACTIVE",
+  "REWARD_NO_CREDIT",
+  "REWARD_NO_CREDIT_TO_REVOKE",
+  "REWARD_HOURS_REQUIRED",
+  "REWARD_NO_WINDOW_TO_DELAY",
 ] as const;
 
 /** kontrolleService + the inspection routes. */
@@ -139,6 +163,8 @@ export const LOCK_CODES = [
   "LOCK_PERIOD_ALREADY_WITHDRAWN",
   "LOCK_PERIOD_END_MUST_BE_FUTURE",
   "LOCK_PERIOD_END_MUST_BE_AFTER_TRIGGER",
+  // Airlock-NFC: das bei der Anforderung vorgegebene Lock ist dem Sub nicht (mehr) zugewiesen.
+  "AIRLOCK_LOCK_NOT_ASSIGNED",
 ] as const;
 
 /** orgasmusAnforderungService (orgasm directives). */
@@ -418,6 +444,15 @@ export const JOURNAL_CODES = [
   "JOURNAL_INVALID_SETTING",
 ] as const;
 
+/** zufallService (Zufalls-Engine): Ziehung + Pool-/Options-CRUD. */
+export const ZUFALL_CODES = [
+  "ZUFALL_POOL_NOT_FOUND",
+  "ZUFALL_NO_OPTIONS",
+  "ZUFALL_COOLDOWN_ACTIVE",
+  "ZUFALL_INVALID_OUTCOME",
+  "ZUFALL_INVALID_INPUT",
+] as const;
+
 /** Every code the service layer can return — the set the i18n parity test iterates. */
 export const SERVICE_ERROR_CODES = [
   ...new Set<string>([
@@ -442,6 +477,7 @@ export const SERVICE_ERROR_CODES = [
     ...HEALTH_HOLD_CODES,
     ...ENTRY_CORRECTION_CODES,
     ...JOURNAL_CODES,
+    ...ZUFALL_CODES,
   ]),
 ] as readonly string[];
 
@@ -470,7 +506,8 @@ export type ServiceErrorCode =
   | (typeof WEIGHT_CODES)[number]
   | (typeof HEALTH_HOLD_CODES)[number]
   | (typeof ENTRY_CORRECTION_CODES)[number]
-  | (typeof JOURNAL_CODES)[number];
+  | (typeof JOURNAL_CODES)[number]
+  | (typeof ZUFALL_CODES)[number];
 
 /**
  * Die Keyholder-Fassung der beiden Verschluss-Absagen — die Übersetzung, die der Absatz oben

@@ -41,21 +41,24 @@ export async function forgetUpload(filename: string): Promise<void> {
 
 /** Die Nutzer, deren Zeilen auf die Datei verweisen, samt dem versiegelten Code-Foto, falls sie eines ist. */
 async function referenceOwners(imageUrl: string) {
-  const [entries, devices, refs, proofs, weights] = await Promise.all([
+  const [entries, devices, refs, proofs, weights, penaltyProofs] = await Promise.all([
     prisma.entry.findMany({
-      where: { OR: [{ imageUrl }, { codeImageUrl: imageUrl }, { boxImageUrl: imageUrl }] },
+      // Fork: `videoUrl` (Session-Nachweis-Video, /api/upload-video) gehört genauso dazu.
+      where: { OR: [{ imageUrl }, { codeImageUrl: imageUrl }, { boxImageUrl: imageUrl }, { videoUrl: imageUrl }] },
       select: { userId: true, codeImageUrl: true, startTime: true },
     }),
     prisma.device.findMany({ where: { imageUrl }, select: { userId: true } }),
     prisma.deviceReferenceImage.findMany({ where: { imageUrl }, select: { device: { select: { userId: true } } } }),
     prisma.taskProof.findMany({ where: { imageUrl }, select: { task: { select: { userId: true } } } }),
     prisma.weightEntry.findMany({ where: { imageUrl }, select: { userId: true } }),
+    // Fork: Nachweis-Foto zur Erledigungs-Meldung einer Strafe.
+    prisma.strafeRecord.findMany({ where: { nachweisUrl: imageUrl }, select: { userId: true } }),
   ]);
   const codePhoto = entries.find((e) => e.codeImageUrl === imageUrl) ?? null;
   return {
     ids: [
       ...entries.map((e) => e.userId), ...devices.map((d) => d.userId), ...refs.map((r) => r.device.userId),
-      ...proofs.map((p) => p.task.userId), ...weights.map((w) => w.userId),
+      ...proofs.map((p) => p.task.userId), ...weights.map((w) => w.userId), ...penaltyProofs.map((s) => s.userId),
     ],
     codePhoto: codePhoto && { userId: codePhoto.userId, startTime: codePhoto.startTime },
   };

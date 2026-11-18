@@ -56,16 +56,23 @@ describe("resolveInspectionTarget — KG ist die Vorgabe", () => {
   it("die eingebaute KG-Kategorie wird auf `categoryId: null` normalisiert — EINE Darstellung", async () => {
     // Sonst gäbe es zwei Schreibweisen desselben Ziels, und der „eine je Ziel"-Guard träfe die
     // Bestandszeilen (categoryId: null) nicht mehr.
-    categoryMock.mockResolvedValue({ userId: "u1", name: "Keuschheitsgürtel", isBuiltIn: true });
+    categoryMock.mockResolvedValue({ userId: "u1", name: "Keuschheitsgürtel", slug: "kg" });
     const r = await resolveInspectionTarget("u1", { categoryId: "cat-kg" });
     expect(r.ok && r.target.categoryId).toBeNull();
     expect(r.ok && r.target.categoryName).toBeNull();
+  });
+
+  it("eine ANDERE eingebaute Kategorie (Fork: Plug) bleibt ihre Kategorie — KG ist slug \"kg\", nicht isBuiltIn", async () => {
+    categoryMock.mockResolvedValue({ userId: "u1", name: "Anal-Plug", slug: "plug", isBuiltIn: true });
+    const r = await resolveInspectionTarget("u1", { categoryId: "plugcat_u1" });
+    expect(r.ok && r.target.categoryId).toBe("plugcat_u1");
+    expect(r.ok && r.target.categoryName).toBe("Anal-Plug");
   });
 });
 
 describe("resolveInspectionTarget — Trage-Kategorien", () => {
   it("Kategorie: aktiv nur bei laufender Trage-Session, Gerät = das getragene", async () => {
-    categoryMock.mockResolvedValue({ userId: "u1", name: "Plug", isBuiltIn: false });
+    categoryMock.mockResolvedValue({ userId: "u1", name: "Plug", slug: "plug" });
     const r = await resolveInspectionTarget("u1", { categoryId: "cat-plug" });
     expect(r.ok && r.target).toMatchObject({
       categoryId: "cat-plug", categoryName: "Plug", active: true, activeDeviceId: "plug-1", lockEntry: null,
@@ -73,7 +80,7 @@ describe("resolveInspectionTarget — Trage-Kategorien", () => {
   });
 
   it("ohne laufende Session: Ziel bleibt gültig, aber inaktiv (der Aufrufer lehnt ab, nicht wir)", async () => {
-    categoryMock.mockResolvedValue({ userId: "u1", name: "Plug", isBuiltIn: false });
+    categoryMock.mockResolvedValue({ userId: "u1", name: "Plug", slug: "plug" });
     wearMock.mockResolvedValue(null);
     const r = await resolveInspectionTarget("u1", { categoryId: "cat-plug" });
     expect(r.ok && r.target.active).toBe(false);
@@ -82,7 +89,7 @@ describe("resolveInspectionTarget — Trage-Kategorien", () => {
   it("Gerät leitet die Kategorie ab und verengt das Ziel", async () => {
     deviceMock.mockResolvedValue({
       userId: "u1", name: "njoy", archivedAt: null,
-      category: { id: "cat-plug", name: "Plug", isBuiltIn: false },
+      category: { id: "cat-plug", name: "Plug", slug: "plug" },
     });
     const r = await resolveInspectionTarget("u1", { deviceId: "plug-1" });
     expect(r.ok && r.target).toMatchObject({ categoryId: "cat-plug", deviceId: "plug-1", deviceName: "njoy" });
@@ -91,7 +98,7 @@ describe("resolveInspectionTarget — Trage-Kategorien", () => {
   it("ein KG-Gerät bleibt KG-Ziel (categoryId null), verengt aber aufs Gerät", async () => {
     deviceMock.mockResolvedValue({
       userId: "u1", name: "Stahl", archivedAt: null,
-      category: { id: "cat-kg", name: "KG", isBuiltIn: true },
+      category: { id: "cat-kg", name: "KG", slug: "kg" },
     });
     const r = await resolveInspectionTarget("u1", { deviceId: "kg-1" });
     expect(r.ok && r.target.categoryId).toBeNull();
@@ -109,7 +116,7 @@ describe("resolveInspectionTarget — fremde/ungültige Ziele", () => {
   it("archiviertes Gerät: INSPECTION_TARGET_INVALID — es ist nicht mehr im Einsatz", async () => {
     deviceMock.mockResolvedValue({
       userId: "u1", name: "alt", archivedAt: new Date(),
-      category: { id: "cat-plug", name: "Plug", isBuiltIn: false },
+      category: { id: "cat-plug", name: "Plug", slug: "plug" },
     });
     const r = await resolveInspectionTarget("u1", { deviceId: "d-alt" });
     expect(r.ok).toBe(false);

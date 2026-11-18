@@ -161,7 +161,20 @@ Sperre `cleaningAllowed` hat. Freie Wechsel erlauben ⇒ `cleaningAllowed` setze
 - Kanonische Typen (`get_offenses`): `unauthorized_opening`, `cleaning_limit`, `late_control`,
   `rejected_control`, `auto_removed_control`, `wrong_device`, `missed_orgasm`, `wrong_orgasm_type`, `late_lock`,
   `cleaning_not_relocked`, `unfulfilled_task`, `missed_weight_report`, `box_photo_missing`,
-  `admin_password_change`, `unauthorized_orgasm`, `manual_offense`.
+  `admin_password_change`, `unauthorized_orgasm`, `manual_offense`, `missed_session`,
+  `erektion`, `pause_overage`, `orgasm_over_budget`.
+- `missed_session` = eine **Session-Anforderung**, deren Frist ablief, ohne dass eine passende
+  (Mindestdauer/Gerät/Nachweis erfüllende) Session erfasst wurde. `erektion` = beim Öffnen
+  (Reinigung/Toilette) wurde eine Erektion gemeldet. `pause_overage` = eine abgeschlossene Pause
+  überschritt die erlaubte Maximaldauer. `orgasm_over_budget` = ein Orgasmus über dem
+  Orgasmus-Budget des laufenden Zeitraums. Alle abgeleitet, keine davon wird automatisch bestraft.
+  Bei `late_lock` nennt `context.categoryName` die Geräte-Kategorie der Anforderung (`null` = KG).
+- **Schwere & Strafmaß:** Jede Zeile in `get_offenses` trägt eine `severity` (leicht|mittel|schwer,
+  inkl. Wiederholungs-Eskalation; `baseSeverity` ohne, `escalated` = hochgestuft) und ist danach
+  sortiert (schwer zuerst). `penaltySuggestionsBySeverity` liefert passende, NICHT bindende
+  Straf-Vorschläge je Stufe. Wähle das Strafmaß proportional zur Schwere. Leitlinie: ein ruinierter
+  Orgasmus (Pflicht) und eine angeordnete Session sind STRAFEN; ein normaler Orgasmus
+  (Gelegenheit/Erlaubnis) ist eine BELOHNUNG und wird NIE als Strafe vergeben.
 - `admin_password_change` fällt aus der Reihe: Das Passwort eines ADMIN-Kontos wurde geändert,
   während eine Sperrzeit lief. `via` nennt den Weg — `reset_token` (über das Postfach neuen
   Zugang verschafft), `self`, `set_by_other`. Als einziges Vergehen wird es im Moment des

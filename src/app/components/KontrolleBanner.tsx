@@ -76,6 +76,10 @@ interface Props {
   /** Träger-Sicht der GROSSEN Fassung: der Fristen-Joker (`InspectionJokerButton`), unter dem
    *  Erfassen-Knopf. Nur gesetzt, wenn er für diese Kontrolle jetzt einsetzbar ist. */
   jokerAction?: ReactNode;
+  /** Geräteart (KG/Plug) der Kontrolle (`KontrollAnforderung.deviceKind`) — für Aufrufer, die
+   *  kein `target` (Gerätename) haben. Erscheint an derselben Stelle wie `target`, das Vorrang hat:
+   *  beide sollen nur mehrere gleichzeitig offene Kontrollen unterscheiden. */
+  deviceLabel?: string | null;
 }
 
 /**
@@ -96,7 +100,7 @@ interface Props {
 export default function KontrolleBanner({
   deadline,
   code,
-  target,
+  target: rawTarget,
   overdue,
   autoMarkAt,
   variant,
@@ -105,10 +109,12 @@ export default function KontrolleBanner({
   outlook,
   actions,
   jokerAction,
+  deviceLabel,
   tz = APP_TZ,
   viewerTz,
 }: Props) {
   const t = useTranslations("kontrolleBanner");
+  const target = rawTarget ?? deviceLabel ?? null;
   const dl = toDateLocale(useLocale());
   const urgency = overdue ? URGENCY.overdue : URGENCY.running;
   const titleKey = `${t(urgency.titleKey)}${target ? ` · ${target}` : ""}`;

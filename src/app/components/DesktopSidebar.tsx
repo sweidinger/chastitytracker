@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { usePathname } from "next/navigation";
 import {
-  Home, ClipboardList, BarChart2, Plus, LogOut,
+  Home, ClipboardList, BarChart2, Plus, LogOut, Bot, Dices,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useSignOut } from "@/app/hooks/useSignOut";
@@ -26,9 +26,11 @@ interface Props {
   weight?: boolean;
   /** Die dringendste offene Kontroll-Anforderung — Begründung in `NewEntrySheet`. */
   openInspection?: { code: string | null; href: string } | null;
+  aiKeyholderEnabled?: boolean;
+  zufallActive?: boolean;
 }
 
-export default function DesktopSidebar({ isAdmin, isKeyholder, isLocked, lockCallPending, version, categoryRows, bildersafe, weight, openInspection }: Props) {
+export default function DesktopSidebar({ isAdmin, isKeyholder, isLocked, lockCallPending, version, categoryRows, bildersafe, weight, openInspection, aiKeyholderEnabled, zufallActive }: Props) {
   const t = useTranslations("nav");
   const { requestSignOut, signOutDialog } = useSignOut();
   const pathname = usePathname();
@@ -40,6 +42,8 @@ export default function DesktopSidebar({ isAdmin, isKeyholder, isLocked, lockCal
     { href: "/dashboard", icon: Home, label: t("overview"), exact: true },
     { href: "/dashboard/eintraege", icon: ClipboardList, label: t("entries"), exact: false },
     { href: "/dashboard/stats", icon: BarChart2, label: t("stats"), exact: false },
+    ...(aiKeyholderEnabled ? [{ href: "/dashboard/keyholder", icon: Bot, label: t("aiKeyholder"), exact: false }] : []),
+    ...(zufallActive ? [{ href: "/dashboard/zufall", icon: Dices, label: t("zufall"), exact: false }] : []),
     ...adminNavEntry({ isAdmin, isKeyholder, adminLabel: t("admin"), keyholderLabel: t("keyholder") }),
   ];
 

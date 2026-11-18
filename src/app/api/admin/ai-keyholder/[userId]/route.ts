@@ -1,0 +1,118 @@
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { requireAdminApi } from "@/lib/authGuards";
+
+/**
+ * GET /api/admin/ai-keyholder/[userId]
+ * Returns the AiKeyholderConfig for the given user (or null if not yet created).
+ */
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ userId: string }> },
+) {
+  const err = await requireAdminApi();
+  if (err) return err;
+
+  const { userId } = await params;
+  const config = await prisma.aiKeyholderConfig.findUnique({ where: { userId } });
+
+  // Never return the encrypted keys — expose only whether they are set
+  if (config) {
+    const { anthropicApiKeyEnc, mediaApiKeyEnc, ...safeConfig } = config;
+    return NextResponse.json({
+      config: { ...safeConfig, anthropicApiKeySet: !!anthropicApiKeyEnc, mediaApiKeySet: !!mediaApiKeyEnc },
+    });
+  }
+  return NextResponse.json({ config: null });
+}
+
+/**
+ * PATCH /api/admin/ai-keyholder/[userId]
+ * Upserts the AiKeyholderConfig for the given user.
+ * Accepts a partial body — only provided fields are updated.
+ */
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ userId: string }> },
+) {
+  const err = await requireAdminApi();
+  if (err) return err;
+
+  const { userId } = await params;
+
+  // Ensure the target user exists
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+  const body = await req.json() as {
+    enabled?: boolean;
+    llmProvider?: string;
+    ollamaBaseUrl?: string | null;
+    ollamaModel?: string | null;
+    systemPrompt?: string | null;
+    intensity?: number | null;
+    moodScore?: number | null;
+    proactiveCheckinMinHours?: number | null;
+    visionEnabled?: boolean;
+    cronExpression?: string | null;
+    randomIntervalMinMin?: number | null;
+    randomIntervalMinMax?: number | null;
+    mediaEnabled?: boolean;
+    comfyUiBaseUrl?: string | null;
+    mediaPromptTemplates?: string | null;
+    /** Media backend: "comfyui" (self-hosted) | "novita" (hosted API). */
+    mediaProvider?: string;
+    /** Novita checkpoint filename (model_name), e.g. "sd_xl_base_1.0.safetensors". */
+    mediaModelName?: string | null;
+    /** Dedicated media-prompt LLM: "inherit" | "anthropic" | "ollama". */
+    mediaLlmProvider?: string;
+    mediaLlmBaseUrl?: string | null;
+    mediaLlmModel?: string | null;
+    mediaPersonaAnchor?: string | null;
+    mediaSeed?: number | null;
+    avatarPath?: string | null;
+    /** Plain-text media (Novita) API key; empty string = clear stored key. */
+    mediaApiKey?: string;
+    /** Plain-text Anthropic API key; empty string = clear stored key */
+    anthropicApiKey?: string;
+    /** Persona ID to link; null = clear current persona assignment */
+    personaId?: string | null;
+  };
+
+  // Only pick known fields to avoid mass-assignment
+  const data: Record<string, unknown> = {};
+  if (body.enabled !== undefined) data.enabled = body.enabled;
+  if ("systemPrompt" in body) data.systemPrompt = body.systemPrompt ?? null;
+  if (typeof body.intensity === "number") data.intensity = Math.max(1, Math.min(5, Math.round(body.intensity)));
+  if (typeof body.moodScore === "number") { data.moodScore = Math.max(0, Math.min(100, Math.round(body.moodScore))); data.moodUpdatedAt = new Date(); }
+  // Nur die erlaubten Check-in-Stufen (0=aus / 3 / 6 / 12 / 24 Std) zulassen; sonst Standard 24.
+  if (typeof body.proactiveCheckinMinHours === "number") {
+    data.proactiveCheckinMinHours = [0, 3, 6, 12, 24].includes(body.proactiveCheckinMinHours) ? body.proactiveCheckinMinHours : 24;
+  }
+  if (typeof body.visionEnabled === "boolean") data.visionEnabled = body.visionEnabled;
+  if ("cronExpression" in body) data.cronExpression = body.cronExpression ?? null;
+  if ("randomIntervalMinMin" in body) data.randomIntervalMinMin = body.randomIntervalMinMin ?? null;
+  if ("randomIntervalMinMax" in body) data.randomIntervalMinMax = body.randomIntervalMinMax ?? null;
+  if (body.mediaEnabled !== undefined) data.mediaEnabled = body.mediaEnabled;
+  if ("mediaPromptTemplates" in body) data.mediaPromptTemplates = body.mediaPromptTemplates ?? null;
+  if ("mediaPersonaAnchor" in body) data.mediaPersonaAnchor = body.mediaPersonaAnchor ?? null;
+  if ("mediaSeed" in body) data.mediaSeed = (typeof body.mediaSeed === "number" && Number.isFinite(body.mediaSeed)) ? Math.trunc(body.mediaSeed) : null;
+  if ("avatarPath" in body) data.avatarPath = body.avatarPath ?? null;
+  if ("personaId" in body) data.currentPersonaId = body.personaId ?? null;
+
+
+  const config = await prisma.aiKeyholderConfig.upsert({
+    where: { userId },
+    create: { userId, ...data },
+    update: data,
+  });
+  if (typeof body.moodScore === "number") {
+    await prisma.moodEvent.create({ data: { userId, delta: 0, newScore: config.moodScore, reason: "manuell" } });
+  }
+
+  // Never return the encrypted keys
+  const { anthropicApiKeyEnc, mediaApiKeyEnc, ...safeConfig } = config;
+  return NextResponse.json({
+    config: { ...safeConfig, anthropicApiKeySet: !!anthropicApiKeyEnc, mediaApiKeySet: !!mediaApiKeyEnc },
+  });
+}

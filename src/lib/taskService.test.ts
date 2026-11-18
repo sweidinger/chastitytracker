@@ -82,8 +82,8 @@ beforeEach(() => {
   });
   taskUpdateMock.mockResolvedValue({ count: 1 });
   taskCountMock.mockResolvedValue(1);
-  devMock.mockResolvedValue([{ id: "d1", category: { isBuiltIn: false } }]);
-  catMock.mockResolvedValue([{ id: "c1", isBuiltIn: false }]);
+  devMock.mockResolvedValue([{ id: "d1", category: { slug: "toy" } }]);
+  catMock.mockResolvedValue([{ id: "c1", slug: "toy" }]);
 });
 afterEach(() => vi.useRealTimers());
 
@@ -120,7 +120,7 @@ describe("createTask", () => {
   });
 
   it("KG als Trage-Kategorie wird abgewiesen (dafür gibt es KG_LOCKED)", async () => {
-    catMock.mockResolvedValue([{ id: "kg", isBuiltIn: true }]);
+    catMock.mockResolvedValue([{ id: "kg", slug: "kg" }]);
     const res = await createTask({ ...base, requirements: [{ type: "WEAR", categoryId: "kg" }] }, "herrin");
 
     if (res.ok) throw new Error("erwartet: Fehler");
@@ -193,7 +193,7 @@ describe("createTask", () => {
   it("das KG-GERÄT lässt sich auch nicht über deviceId als Trage-Bedingung fordern", async () => {
     // Sonst liesse sich die Regel über das Gerät statt über die Kategorie umgehen — die Aufgabe wäre
     // unerfüllbar, weil ein WEAR_BEGIN auf ein KG-Gerät abgewiesen wird.
-    devMock.mockResolvedValue([{ id: "kgdev", category: { isBuiltIn: true } }]);
+    devMock.mockResolvedValue([{ id: "kgdev", category: { slug: "kg" } }]);
     const res = await createTask({ ...base, requirements: [{ type: "WEAR", deviceId: "kgdev" }] }, "herrin");
     if (res.ok) throw new Error("erwartet: Fehler");
     expect(res.error).toBe("TASK_REQUIREMENT_KG_CATEGORY");

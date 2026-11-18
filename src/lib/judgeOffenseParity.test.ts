@@ -154,6 +154,8 @@ const judgmentRow = (status: "PUNISHED" | "DISMISSED", reason: string | null) =>
   userId: USER_ID, offenseType: TYPE, refId: REF,
   status, reason, judgedBy: "admin", judgedByName: HERRIN,
   erledigtAt: null, bestraftDatum: NOW, taskId: null, reportedDoneAt: null,
+  // Fork-Extras der Erledigt-Meldung: ein neues Urteil fängt auch ohne sie an.
+  gemeldetAt: null, nachweisUrl: null, erledigungNotiz: null, ablehnungGrund: null,
 });
 
 /** Der Rückzug der Strafaufgabe, die am ersetzten Urteil hängt — über die BEZIEHUNG, nicht über
@@ -284,9 +286,9 @@ describe("Erledigt-Schalter der Strafe", () => {
     const res = await patch({ done: true });
 
     expect(res.status).toBe(200);
-    expect(mock(prisma.strafeRecord.update)).toHaveBeenCalledWith({
-      where: { refId: REF }, data: { erledigtAt: ERLEDIGT },
-    });
+    // Bereits erledigt: der Dienst schreibt gar nichts (statt denselben Zeitpunkt erneut) — und
+    // meldet dem Träger auch keine zweite Bestätigung (`bestaetigeErledigung`, Fork).
+    expect(mock(prisma.strafeRecord.update)).not.toHaveBeenCalled();
   });
 
   it("öffnet den Loop wieder", async () => {
@@ -297,7 +299,8 @@ describe("Erledigt-Schalter der Strafe", () => {
     expect(res.status).toBe(200);
     expect(mock(prisma.strafeRecord.update)).toHaveBeenCalledWith({
       // „Wieder offen" nimmt die Erledigt-Meldung des Trägers mit zurück.
-      where: { refId: REF }, data: { erledigtAt: null, reportedDoneAt: null },
+      // `gemeldetAt` ist das Fork-Altfeld derselben Meldung.
+      where: { refId: REF }, data: { erledigtAt: null, reportedDoneAt: null, gemeldetAt: null },
     });
   });
 

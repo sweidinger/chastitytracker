@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useLocale, useTranslations } from "next-intl";
 import { toDatetimeLocal, fromDatetimeLocal, formatDateTime, toDateLocale } from "@/lib/utils";
@@ -34,6 +34,11 @@ export interface LockRequestEditData {
   deviceId: string | null;
   cleaningAllowed: boolean;
   wirksamAb: string | null;
+  /** Fork: Toilette während der Sperre erlaubt. Fehlt es (ältere Route), bleibt der Wert beim
+   *  Bearbeiten unangetastet. */
+  toiletteErlaubt?: boolean;
+  /** Fork: vorgegebenes Airlock-Lock (5-stellige Nummer) oder null. Fehlt es, bleibt es unangetastet. */
+  airlockCode?: string | null;
 }
 
 /** Wie die Sperre nach dem Einschliessen endet: nach einer Dauer, zu einem Zeitpunkt, oder gar nicht. */
@@ -122,7 +127,23 @@ export default function VerschlussAnforderungFields({
       : toDatetimeLocal(new Date(nowBaseMs + 24 * 60 * 60 * 1000), tz)
   );
   const [deviceId, setDeviceId] = useState(existing?.deviceId ?? "");
+  // Fork — Airlock-NFC: optional ein bestimmtes Lock aus dem Pool des Subs vorgeben ("" = keine Vorgabe).
+  const [airlockCode, setAirlockCode] = useState(existing?.airlockCode ?? "");
+  // Der Pool wird selbst geladen (nur ANFORDERUNG) — so muss ihn kein Wrapper/Server-Parent durchreichen.
+  // Leere Liste (Airlock aus, kein Lock zugewiesen, oder Fehler) → das Dropdown bleibt einfach aus.
+  const [airlockLocks, setAirlockLocks] = useState<{ code: string }[]>([]);
+  useEffect(() => {
+    if (isLockPeriod) return;
+    let cancelled = false;
+    fetch(`/api/admin/airlock/assigned?userId=${encodeURIComponent(userId)}`)
+      .then((r) => (r.ok ? r.json() : { locks: [] }))
+      .then((d: { locks?: { code: string }[] }) => { if (!cancelled) setAirlockLocks(d.locks ?? []); })
+      .catch(() => { if (!cancelled) setAirlockLocks([]); });
+    return () => { cancelled = true; };
+  }, [userId, isLockPeriod]);
   const [cleaningAllowed, setCleaningAllowed] = useState(existing?.cleaningAllowed ?? false);
+  // Fork: Toilette während der Sperre erlaubt — neben der Reinigung.
+  const [toiletteErlaubt, setToiletteErlaubt] = useState(existing?.toiletteErlaubt ?? false);
   // Terminierung: sofort (default), relative Verzögerung, oder absoluter Zeitpunkt — dasselbe
   // Bauteil, das auch die Aufgabe verwendet. Beim Bearbeiten aus dem gespeicherten `wirksamAb`.
   const [schedule, setSchedule] = useState<ScheduleValue>(() =>
@@ -220,8 +241,12 @@ export default function VerschlussAnforderungFields({
     if (!isLockPeriod && deviceId) {
       payload.deviceId = deviceId;
     }
+    if (!isLockPeriod && airlockCode) {
+      payload.airlockCode = airlockCode;
+    }
     if (isLockPeriod || withMinDauer) {
       payload.cleaningAllowed = cleaningAllowed;
+      payload.toiletteErlaubt = toiletteErlaubt;
     }
     return payload;
   }
@@ -247,6 +272,10 @@ export default function VerschlussAnforderungFields({
       ...(withMinDauer ? lockSpec() : {}),
       deviceId: deviceId || null,
       cleaningAllowed,
+      // Fork-Felder nur, wenn die Bestandswerte mitkamen — sonst bliebe ein unbekannter Wert
+      // stillschweigend überschrieben.
+      ...(existing?.toiletteErlaubt !== undefined ? { toiletteErlaubt } : {}),
+      ...(existing?.airlockCode !== undefined ? { airlockCode: airlockCode || null } : {}),
       wirksamAb,
     };
   }
@@ -259,12 +288,20 @@ export default function VerschlussAnforderungFields({
   }
 
   const cleaningCheckbox = (
-    <Checkbox
-      label={t("reinigungErlaubtLabel")}
-      description={t("reinigungErlaubtHint")}
-      checked={cleaningAllowed}
-      onChange={(e) => setCleaningAllowed(e.target.checked)}
-    />
+    <>
+      <Checkbox
+        label={t("reinigungErlaubtLabel")}
+        description={t("reinigungErlaubtHint")}
+        checked={cleaningAllowed}
+        onChange={(e) => setCleaningAllowed(e.target.checked)}
+      />
+      <Checkbox
+        label={t("toiletteErlaubtLabel")}
+        description={t("toiletteErlaubtHint")}
+        checked={toiletteErlaubt}
+        onChange={(e) => setToiletteErlaubt(e.target.checked)}
+      />
+    </>
   );
 
   return (
@@ -364,6 +401,20 @@ export default function VerschlussAnforderungFields({
           ]}
           value={deviceId}
           onChange={(e) => setDeviceId(e.target.value)}
+        />
+      )}
+
+      {/* Fork — Airlock-NFC: ein bestimmtes zugewiesenes Lock vorgeben. Nur bei ANFORDERUNG und wenn
+          dem Sub mindestens ein Lock zugewiesen ist. Leer = keine Vorgabe (Sub wählt aus dem Pool). */}
+      {!isLockPeriod && airlockLocks.length > 0 && (
+        <Select
+          label={t("airlockMandateLabel")}
+          options={[
+            { value: "", label: t("airlockMandatePlaceholder") },
+            ...airlockLocks.map((l) => ({ value: l.code, label: `#${l.code}` })),
+          ]}
+          value={airlockCode}
+          onChange={(e) => setAirlockCode(e.target.value)}
         />
       )}
 

@@ -36,6 +36,8 @@ export interface EntryNotifyParams {
   /** Beginn der Session (nur bei OEFFNEN) — für die Tragedauer. */
   lockStartTime?: Date | null;
   deviceId?: string | null;
+  /** Fork: welches Gerät eine Pause betrifft ("CAGE" | "PLUG") — nur bei PAUSE_BEGIN/PAUSE_END. */
+  pauseDevice?: string | null;
   /** Die Auswahllisten des Trägers: seine eigenen Labels gewinnen, sonst greift die Übersetzung. */
   reasonConfig: { oeffnenGruendeConfig: string | null; orgasmusArtenConfig: string | null } | null;
 }
@@ -45,7 +47,9 @@ export interface EntryNotifyParams {
  *  deshalb hier und nicht mehr in `constants.ts`. */
 type EntryEventType =
   | "VERSCHLUSS" | "OEFFNUNG_IMMER" | "OEFFNUNG_VERBOTEN" | "ORGASMUS"
-  | "KONTROLLE_FREIWILLIG" | "KONTROLLE_ANGEFORDERT" | "WEAR_BEGIN_ANY" | "WEAR_END_ANY";
+  | "KONTROLLE_FREIWILLIG" | "KONTROLLE_ANGEFORDERT" | "WEAR_BEGIN_ANY" | "WEAR_END_ANY"
+  // Fork: Pausen (Reinigung/Toilette ohne Sperrbruch) von Käfig oder Plug.
+  | "PAUSE_BEGIN_ANY" | "PAUSE_END_ANY";
 
 /** Welche Ereignis-Arten dieser Eintrag auslöst. Leer = niemand wird gemeldet. */
 function eventTypesFor(p: EntryNotifyParams): EntryEventType[] {
@@ -56,6 +60,8 @@ function eventTypesFor(p: EntryNotifyParams): EntryEventType[] {
     case "PRUEFUNG": return [p.kontrollCode ? "KONTROLLE_ANGEFORDERT" : "KONTROLLE_FREIWILLIG"];
     case "WEAR_BEGIN": return ["WEAR_BEGIN_ANY"];
     case "WEAR_END": return ["WEAR_END_ANY"];
+    case "PAUSE_BEGIN": return ["PAUSE_BEGIN_ANY"];
+    case "PAUSE_END": return ["PAUSE_END_ANY"];
     default: return [];
   }
 }
@@ -119,6 +125,17 @@ function renderHeadline(
         pushBody: labels.device ? `${time} · ${labels.device}` : time,
       };
     }
+    // Fork: Pause von Käfig oder Plug — mit Grund (Reinigung/Toilette), wie bei der Öffnung.
+    case "PAUSE_BEGIN":
+    case "PAUSE_END": {
+      const device = t(p.pauseDevice === "PLUG" ? "entryPauseDevicePlug" : "entryPauseDeviceCage");
+      return {
+        title: p.type === "PAUSE_BEGIN"
+          ? t("entryPauseBeginTitle", { username, device })
+          : t("entryPauseEndTitle", { username, device }),
+        pushBody: [time, labels.grund && `${t("entryDetailReason")} ${labels.grund}`].filter(Boolean).join(" · "),
+      };
+    }
     default:
       return { title: t("entryLockedTitle", { username }), pushBody: time };
   }
@@ -133,7 +150,7 @@ function renderDetails(
   locale: string,
 ): string[] {
   const rows = [`<strong>${escHtml(t("entryDetailTime"))}</strong> ${escHtml(time)}`];
-  if (p.type === "OEFFNEN" && labels.grund) {
+  if ((p.type === "OEFFNEN" || p.type === "PAUSE_BEGIN" || p.type === "PAUSE_END") && labels.grund) {
     rows.push(`<strong>${escHtml(t("entryDetailReason"))}</strong> ${escHtml(labels.grund)}`);
   }
   const blocked = cleaningBlockText(p, t);

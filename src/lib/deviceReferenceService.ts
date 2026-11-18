@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "fs/promises";
 import { join, basename } from "path";
 import { prisma } from "@/lib/prisma";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 import { uploadsDirPath, generateUploadFilename, deleteUploadedFiles } from "@/lib/imageUtils";
 import { visionMaxRefsPerDevice } from "@/lib/constants";
 import type { DeviceReference } from "@/lib/detectDevice";
@@ -18,7 +19,7 @@ import { serviceFail, type ServiceResult } from "@/lib/serviceResult";
 export async function gatherDeviceReferences(userId: string): Promise<DeviceReference[]> {
   const MAX_REFS_PER_DEVICE = visionMaxRefsPerDevice();
   const devices = await prisma.device.findMany({
-    where: { userId, archivedAt: null, OR: [{ category: { isBuiltIn: true } }, { categoryId: null }] },
+    where: { userId, archivedAt: null, OR: [{ category: { slug: KG_BUILTIN_SLUG } }, { categoryId: null }] }, // KG-Geräte (Slug: Plug ist auch eingebaut)
     orderBy: { createdAt: "asc" },
     select: { id: true, name: true, imageUrl: true, material: true, bauform: true, description: true, lookalikeClusterId: true },
   });

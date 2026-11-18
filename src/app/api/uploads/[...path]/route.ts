@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { isCodePhotoRevealed } from "@/lib/queries";
 import { uploadViewableBy } from "@/lib/uploadOwnership";
+import { prisma } from "@/lib/prisma";
+import { isKeyholderOf } from "@/lib/keyholder";
 import { readFile } from "fs/promises";
 import { join, extname, resolve, sep } from "path";
 
@@ -12,7 +14,33 @@ const MIME: Record<string, string> = {
   ".gif": "image/gif",
   ".webp": "image/webp",
   ".heic": "image/heic",
+  // Fork: Session-Videos (`/api/upload-video`) und generierte Videos der KI-Keyholderin
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
 };
+
+/**
+ * Fork: Medien der KI-Keyholderin (generierte Bilder/Videos, Avatare) schreibt `mediaQueue.ts`
+ * serverseitig nach `ai-keyholder/<userId>/…`. Sie haben keine `Upload`-Zeile und passen als
+ * Unterordner-Pfad nicht auf `isValidImageUrl` — `uploadViewableBy` würde sie für niemanden
+ * freigeben, auch nicht für den Admin. Besitzer ist, wessen `GeneratedMedia`/`AiKeyholderConfig.avatarPath` auf den
+ * Pfad zeigt; Persona-Avatare (instanzweite Vorlagen) sieht nur ein globaler Admin. Gleiche Regel
+ * wie `uploadViewableBy`: Besitzer, globaler Admin oder Keyholder eines Besitzers.
+ */
+const FORK_AI_MEDIA_PATH = /^ai-keyholder\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
+async function aiMediaViewableBy(filePath: string, actor: { id: string; role?: string | null }): Promise<boolean> {
+  if (actor.role === "admin") return true;
+  const [media, configs] = await Promise.all([
+    prisma.generatedMedia.findMany({ where: { filePath }, select: { userId: true } }),
+    prisma.aiKeyholderConfig.findMany({ where: { avatarPath: filePath }, select: { userId: true } }),
+  ]);
+  const owners = new Set([...media.map((m) => m.userId), ...configs.map((c) => c.userId)]);
+  if (owners.has(actor.id)) return true;
+  const related = await Promise.all([...owners].map((ownerId) => isKeyholderOf(actor.id, ownerId)));
+  return related.some(Boolean);
+}
 
 export async function GET(
   req: NextRequest,
@@ -34,7 +62,9 @@ export async function GET(
   // Zugriff: Besitzer der Datei, globaler Admin ODER Keyholder eines Besitzers. Wer Besitzer ist,
   // sagt `uploadOwnership.ts` — der Hochlader und jeder, dessen Zeile auf die Datei verweist.
   const actorId = session.user.id;
-  const { allowed, codePhoto } = await uploadViewableBy(`/api/uploads/${filename}`, session.user);
+  const { allowed, codePhoto } = FORK_AI_MEDIA_PATH.test(filename)
+    ? { allowed: await aiMediaViewableBy(filename, session.user), codePhoto: null }
+    : await uploadViewableBy(`/api/uploads/${filename}`, session.user);
   if (!allowed) {
     return new NextResponse("Forbidden", { status: 403 });
   }

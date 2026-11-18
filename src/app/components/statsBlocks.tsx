@@ -45,6 +45,10 @@ import { canReadJournal } from "@/lib/keyholder";
 import { journalMoodSeries } from "@/lib/journalService";
 import { getWeightStatsProps } from "@/lib/weightStatsProps";
 import { ShieldAlert } from "lucide-react";
+import { deviceCategoriesEnabled } from "@/lib/constants";
+import TagesformHistoryCard from "./TagesformHistoryCard";
+import HistorieCard from "./HistorieCard";
+import WearStatsByCategory from "@/app/dashboard/stats/WearStatsByCategory";
 
 /**
  * **Die Blöcke der Statistik — je mit eigener Datenbeschaffung.**
@@ -483,6 +487,11 @@ export const STATS_BLOCK_TABLE: Record<StatsBlockId, StackBlock<StatsCtx>> = {
     ),
   }),
 
+  // Fork: Tagesform-Verlauf (14 Tage). Lädt sich selbst und rendert nichts ohne Einträge.
+  dailyFormHistory: async ({ userId, now, tz, t }) => (
+    <TagesformHistoryCard userId={userId} now={now} tz={tz} title={t("tagesformVerlaufTitle")} />
+  ),
+
   // Monatsübersicht — KG-Ziele, deshalb nur die KG-Vorgaben.
   //
   // Zählt je Monat nur ABGESCHLOSSENE Sessions und summiert sich damit nicht auf die „Tragezeiten"
@@ -537,6 +546,12 @@ export const STATS_BLOCK_TABLE: Record<StatsBlockId, StackBlock<StatsCtx>> = {
       </Section>
     ),
   }),
+
+  // Fork: Trage-Statistik je Geräte-Kategorie (heute/Woche/Monat + Rekorde). Nur mit Kategorien.
+  wearByCategory: async ({ userId }) => deviceCategoriesEnabled() && <WearStatsByCategory userId={userId} />,
+
+  // Fork: Belohnungs-/Straf-Historie (Kennzahlen, Guthaben-Verlauf, Zeitleiste).
+  rewardHistory: async ({ userId }) => <HistorieCard userId={userId} />,
 };
 
 

@@ -46,8 +46,13 @@ import {
 } from "@/lib/constants";
 import { clamp, randomInt, midnightAfterDays } from "@/lib/utils";
 import { goalCategoryKey } from "@/lib/vorgaben";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 import { goalDateFromInput } from "@/lib/vorgabeService";
 import { createManualOffense, validateManualOffenseInput, withdrawManualOffense } from "@/lib/manualOffenseService";
+// Fork: Belohnungs-Oekonomie und Straf-Aktionen kennt der Upstream nicht.
+import { grantBelohnung, grantGutschrift, computeBelohnbar } from "@/lib/belohnung";
+import type { PenaltyAction } from "@/lib/penaltyActions";
+import { isHealthHoldActive } from "@/lib/healthHold";
 import type { ServiceResult } from "@/lib/serviceResult";
 import { KEYHOLDER_LOCK_STATE_WORDING } from "@/lib/serviceErrorCodes";
 import en from "../../messages/en.json";
@@ -145,16 +150,17 @@ async function resolveDeviceId(userId: string, name: string): Promise<string> {
 }
 
 /** Resolves a category name to its id ("KG"/built-in or a user category). Throws if not found. */
-async function resolveCategory(userId: string, name: string): Promise<{ id: string; isBuiltIn: boolean }> {
+async function resolveCategory(userId: string, name: string): Promise<{ id: string; slug: string }> {
   const cats = await prisma.deviceCategory.findMany({
     where: { userId },
-    select: { id: true, name: true, isBuiltIn: true },
+    select: { id: true, name: true, slug: true },
   });
+  // KG über den Slug, nicht `isBuiltIn` (Fork: auch die Plug-Kategorie ist eingebaut).
   const match = (name.trim().toLowerCase() === "kg")
-    ? cats.find((c) => c.isBuiltIn)
+    ? cats.find((c) => c.slug === KG_BUILTIN_SLUG)
     : matchByNameCI(cats, name);
   if (!match) throw new Error(`Category not found: "${name}". Available: ${cats.map((c) => c.name).join(", ")}`);
-  return { id: match.id, isBuiltIn: match.isBuiltIn };
+  return { id: match.id, slug: match.slug };
 }
 
 async function resolveCategoryId(userId: string, name: string): Promise<string> {
@@ -479,6 +485,11 @@ export interface RequestOrgasmArgs {
   /** Terminierung — wie bei `request_lock`/`request_inspection`. */
   delayMinutes?: number;
   scheduledAt?: string;
+  /** Fork: nur bei art=ANWEISUNG sinnvoll — markiert die Anweisung als Strafe (z.B. ruinierter Orgasmus als
+   *  Pflicht). Wird sie ignoriert, greift die strengere Eskalation (ab 2× → schwer). */
+  asPenalty?: boolean;
+  /** Fork: Foto-Nachweis beim Erfassen erforderlich (sonst darf der Sub freiwillig eines anhängen). */
+  requirePhoto?: boolean;
   message?: string;
   dryRun?: boolean;
 }
@@ -514,6 +525,8 @@ export async function mcpRequestOrgasm(username: string, args: RequestOrgasmArgs
     openingAllowed: args.openingAllowed,
     delayMinutes: args.delayMinutes,
     wirksamAbAt: args.scheduledAt,
+    istStrafe: args.art === "ANWEISUNG" ? args.asPenalty : false,
+    fotoPflicht: args.requirePhoto,
   }, AI_AUTHOR));
   const kind = args.art === "ANWEISUNG" ? "mandatory directive" : "opportunity";
   if (data.scheduledFor) {
@@ -528,6 +541,117 @@ export async function mcpRequestOrgasm(username: string, args: RequestOrgasmArgs
     ok: true,
     id: data.id,
     message: `Orgasm ${kind} set (window ${iso(beginsAtDate)} – ${iso(endsAtDate)}); the user was notified by e-mail + push.`,
+  };
+}
+
+export interface RequestSessionArgs {
+  category: string;
+  deadlineHours?: number;
+  minMinuten?: number;
+  requireVideo?: boolean;
+  orgasmusZiel?: "KEINE" | "ERFORDERLICH" | "VERBOTEN";
+  orgasmusRuiniert?: boolean;
+  message?: string;
+  dryRun?: boolean;
+}
+
+/** Fordert eine Trainings-Session in einer Session-Kategorie an (SessionAnforderung). */
+export async function mcpRequestSession(username: string, args: RequestSessionArgs) {
+  const userId = await resolveTargetUserId(username);
+  const name = (args.category ?? "").trim();
+  if (!name) throw new Error("category (Session-Kategorie-Name) is required.");
+  const category = await prisma.deviceCategory.findFirst({
+    where: { userId, name, isSessionCategory: true },
+    select: { id: true, name: true, maxSessionMinutes: true },
+  });
+  if (!category) throw new Error(`No session category "${name}" found.`);
+  // Dieselbe Bremse wie bei jeder anderen Direktive (explain_model §6b): während eines
+  // Gesundheits-Halts erreicht den Sub keine neue Forderung.
+  if (await isHealthHoldActive(userId)) throw new Error(enErrorText("HEALTH_HOLD_ACTIVE"));
+  const endetAt = args.deadlineHours && args.deadlineHours > 0
+    ? new Date(Date.now() + args.deadlineHours * 60 * 60 * 1000) : null;
+  const minMin = args.minMinuten && args.minMinuten > 0
+    ? Math.min(Math.round(args.minMinuten), category.maxSessionMinutes) : null;
+  const ziel = args.orgasmusZiel && ["KEINE", "ERFORDERLICH", "VERBOTEN"].includes(args.orgasmusZiel) ? args.orgasmusZiel : "KEINE";
+  const ruiniert = ziel === "ERFORDERLICH" && Boolean(args.orgasmusRuiniert);
+  if (args.dryRun) {
+    // Die Schema-Zusage `dryRun` muss auch hier gelten — vorher legte ein dryRun die Anforderung an.
+    const iso = await isoForUser(userId);
+    return dryRunPreview("request_session", undefined, {
+      category: category.name, deadline: endetAt ? iso(endetAt) : null, minMinuten: minMin,
+      requireVideo: Boolean(args.requireVideo), orgasmusZiel: ziel, orgasmusRuiniert: ruiniert,
+      message: args.message?.trim() || null,
+    });
+  }
+  const anf = await prisma.sessionAnforderung.create({
+    data: {
+      userId, deviceCategoryId: category.id,
+      nachricht: args.message?.trim() || null,
+      endetAt, minMinuten: minMin,
+      requireVideo: Boolean(args.requireVideo),
+      orgasmusZiel: ziel, orgasmusRuiniert: ruiniert,
+    },
+  });
+  return { ok: true, id: anf.id, message: `Session request for "${category.name}" created${endetAt ? ` (deadline ${(await isoForUser(userId))(endetAt)})` : ""}.` };
+}
+
+export interface GrantRewardArgs {
+  windowHours?: number;
+  openAllowed?: boolean;
+  dryRun?: boolean;
+}
+
+/** Belohnungs-Fenster gewähren (Einlösen): reserviert 1 Guthaben (−1). */
+export async function mcpGrantReward(username: string, args: GrantRewardArgs) {
+  const userId = await resolveTargetUserId(username);
+  if (args.dryRun) {
+    // Best-Effort wie bei den übrigen dryRuns: nur das Guthaben, ohne den Fenster-Check des Services.
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { verdienteOrgasmen: true } });
+    const available = u?.verdienteOrgasmen ?? 0;
+    return dryRunPreview("grant_reward", available < 1 ? "REWARD_NO_CREDIT" : undefined, {
+      windowHours: args.windowHours ?? null, openAllowed: args.openAllowed !== false, availableCredit: available,
+    });
+  }
+  const data = unwrap(await grantBelohnung(userId, AI_AUTHOR, args.windowHours, args.openAllowed !== false));
+  return {
+    ok: true,
+    id: data.id,
+    message: `Reward window granted (reserved 1 credit). Remaining available credit: ${data.available}.`,
+  };
+}
+
+export interface CreditRewardArgs {
+  category?: string; // Filter nach Kategoriename (leer = KG); fehlt = alle Kategorien
+  all?: boolean;     // true = alle erreichten Ziele auf einmal; Standard = nur 1 (wie der manuelle Button)
+  dryRun?: boolean;
+}
+
+/** Schreibt Guthaben für erreichte (offene) Trainingsziele gut. Standard: 1 pro Aufruf (wie der Admin-Button);
+ *  `all=true` bucht alle erreichten Ziele auf einmal. Optional nach Kategoriename gefiltert. */
+export async function mcpCreditReward(username: string, args: CreditRewardArgs) {
+  const userId = await resolveTargetUserId(username);
+  const belohnbar = await computeBelohnbar(userId);
+  const filter = typeof args.category === "string" ? args.category.trim().toLowerCase() : null;
+  const matched = filter ? belohnbar.filter((b) => b.categoryName.toLowerCase() === filter) : belohnbar;
+  const targets = args.all ? matched : matched.slice(0, 1);
+  if (args.dryRun) {
+    return dryRunPreview("credit_reward", undefined, {
+      wouldCredit: targets.map((z) => ({ category: z.categoryName, periodType: z.periodType, periodKey: z.periodKey })),
+    });
+  }
+  if (targets.length === 0) {
+    return { ok: true, credited: 0, message: "No reached, uncredited goals right now — nothing credited." };
+  }
+  let credited = 0;
+  let available = 0;
+  for (const z of targets) {
+    const res = await grantGutschrift(userId, z.categoryId, z.periodType, z.periodKey);
+    if (res.ok) { credited++; available = res.data.available; }
+  }
+  return {
+    ok: true,
+    credited,
+    message: `Credited ${credited} reward(s) for reached goals. Available credit now: ${available}.`,
   };
 }
 
@@ -996,7 +1120,7 @@ export async function mcpListTrainingGoals(username: string, args: ListTrainingG
   // Entstehungsweg `categoryId: null` oder die id der eingebauten Kategorie, und ein Filter auf die
   // aufgelöste id liess die andere Hälfte lautlos weg — darunter das Ziel aus dem Vorfall 23.08.2026.
   const filterCat = args.category ? await resolveCategory(userId, args.category) : undefined;
-  const filterKey = filterCat && goalCategoryKey({ categoryId: filterCat.id, category: { isBuiltIn: filterCat.isBuiltIn } });
+  const filterKey = filterCat && goalCategoryKey({ categoryId: filterCat.id, category: { slug: filterCat.slug } });
   const timezone = await tzOf(userId);
   const iso = makeIso(timezone);
   const now = new Date();
@@ -2257,9 +2381,12 @@ export async function mcpEditLockRequest(username: string, args: EditLockRequest
 export interface JudgeOffenseArgs {
   /** Vergehens-ref aus get_offenses (das Feld `ref.id`). */
   ref: string;
-  action: "dismiss" | "punish" | "complete" | "reopen";
-  /** Freitext: die Strafe (bei punish, erforderlich — z.B. „20 Schläge") bzw. ein Grund (bei dismiss). */
+  action: "dismiss" | "punish" | "complete" | "reopen" | "reject_completion";
+  /** Freitext: die Strafe (bei punish, erforderlich — z.B. „20 Schläge"), ein Grund (bei dismiss)
+   *  bzw. die Begründung der Ablehnung (bei reject_completion, erforderlich). */
   text?: string;
+  /** Optionale Straf-Aktion (Fork, Phase 3): wird bei action="punish" direkt ausgefuehrt. */
+  penaltyAction?: PenaltyAction | null;
   dryRun?: boolean;
 }
 export async function mcpJudgeOffense(username: string, args: JudgeOffenseArgs) {
@@ -2311,6 +2438,8 @@ export async function mcpJudgeOffense(username: string, args: JudgeOffenseArgs) 
       : args.action === "reopen" ? Object.fromEntries(Object.keys(before).map((key) => [key, null]))
       // `complete` schliesst nur den Loop und lässt die Aufgabe, wie sie ist.
       : args.action === "complete" ? { status: existing!.status, reason: existing!.reason, judgedBy: existing!.judgedBy, erledigtAt: iso(existing!.erledigtAt ?? new Date()), penaltyTask: existing!.taskId }
+      // Fork: `reject_completion` lässt das Urteil stehen und öffnet nur die Strafe wieder.
+      : args.action === "reject_completion" ? { status: existing!.status, reason: existing!.reason, judgedBy: existing!.judgedBy, erledigtAt: null, penaltyTask: existing!.taskId }
       // punish/dismiss über den FREITEXT-Weg löst eine bestehende Strafaufgabe und zieht sie zurück.
       : { status: judgmentStatus(args.action), reason: args.text?.trim() || null, judgedBy: AI_AUTHOR, erledigtAt: null, penaltyTask: null };
     return dryRunPreview("judge_offense", problem ?? undefined, { ref: args.ref, action: args.action, text: args.text ?? null }, after ? diffFields(before, after) : undefined);
@@ -2320,12 +2449,15 @@ export async function mcpJudgeOffense(username: string, args: JudgeOffenseArgs) 
     refId: args.ref,
     action: args.action,
     text: args.text,
+    penaltyAction: args.penaltyAction ?? null,
   }, AI_AUTHOR));
+  const actionSuffix = r.actionMessage ? ` Aktion: ${r.actionMessage}` : r.actionError ? ` Aktion FEHLGESCHLAGEN: ${r.actionError}` : "";
   const message =
     args.action === "complete" ? "Penalty marked as completed."
+    : args.action === "reject_completion" ? "Completion report rejected — the penalty is open again; the user was told why."
     : r.status === "dismissed" ? "Offense dismissed (no penalty)."
     : r.status === "open" ? "Judgment reopened — the offense is open again."
-    : "Offense punished — the penalty was recorded; the user was notified by e-mail + push.";
+    : `Offense punished — the penalty was recorded; the user was notified by e-mail + push.${actionSuffix}`;
   return { ok: true, status: r.status, done: r.done, message };
 }
 

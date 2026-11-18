@@ -10,6 +10,7 @@ import Checkbox from "@/app/components/Checkbox";
 import DurationInput from "@/app/components/DurationInput";
 import Select from "@/app/components/Select";
 import Textarea from "@/app/components/Textarea";
+import Toggle from "@/app/components/Toggle";
 import { parseApiErrorCode } from "@/lib/apiClient";
 import { INSPECTION_DEADLINE_DEFAULT_H, durationHoursOr, type DurationUnit } from "@/lib/constants";
 import { useApiError } from "@/app/hooks/useApiError";
@@ -50,6 +51,9 @@ export default function KontrolleFields({
   const [targets, setTargets] = useState<InspectionTargetOption[]>(initialTargets ?? []);
   const [targetValue, setTargetValue] = useState<string>(defaultTargetValue(initialTargets ?? []));
   const [pinDevice, setPinDevice] = useState(false);
+  // Fork: Code-Verifikation je Anforderung abschaltbar (nur Foto als Trage-Nachweis). Kann die
+  // Code-Pflicht des Geräts (`requireInspectionCode`) nur aufheben, nie erzwingen.
+  const [requireCode, setRequireCode] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -88,6 +92,7 @@ export default function KontrolleFields({
           // Nur wenn ausdrücklich verlangt: ohne Pin erfüllt jedes Gerät der Kategorie, mit Pin
           // genau dieses — und ein Gerätewechsel macht die Kontrolle unerfüllbar.
           deviceId: pinDevice ? selectedTarget?.deviceId ?? undefined : undefined,
+          requireCode,
         }),
       });
       if (res.ok) onSuccess();
@@ -102,7 +107,8 @@ export default function KontrolleFields({
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       {/* Ziel-Auswahl nur, wenn es überhaupt etwas zu wählen gibt — trägt der Sub nichts ausser
-          dem KG, wäre ein Select mit einer Option nur Rauschen. */}
+          dem KG, wäre ein Select mit einer Option nur Rauschen. Ersetzt den Cage/Plug-Umschalter
+          des Forks: der Plug ist hier eine Trage-Kategorie wie jede andere. */}
       {targets.length > 1 && (
         <Select
           label={t("kontrolleTarget")}
@@ -139,6 +145,12 @@ export default function KontrolleFields({
       />
 
       <PhotoAnalysisRequestHint />
+
+      <Toggle
+        label={t("kontrolleRequireCode")}
+        checked={requireCode}
+        onChange={setRequireCode}
+      />
 
       <FormError message={error} variant="compact" />
 

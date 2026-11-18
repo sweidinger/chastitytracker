@@ -28,6 +28,10 @@ export const OFFENSE_TYPE_I18N_KEYS: Record<OffenseCanonicalType, string> = {
   missed_weight_report: "missedWeightReport",
   box_photo_missing: "boxPhotoMissing",
   manual_offense: "manualOffense",
+  missed_session: "missedSession",
+  erektion: "erektion",
+  pause_overage: "pauseOverage",
+  orgasm_over_budget: "orgasmOverBudget",
 };
 
 /** Der i18n-Schlüssel des ANZEIGENAMENS einer Art, fertig zusammengesetzt — damit das `.name` nicht
@@ -122,10 +126,14 @@ export const OFFENSE_TYPE_ORDER = [
   "missed_orgasm",
   "wrong_orgasm_type",
   "wrong_device",
+  "missed_session",
+  "pause_overage",
+  "erektion",
   "box_photo_missing",
   "unfulfilled_task",
   "missed_weight_report",
   "unauthorized_orgasm",
+  "orgasm_over_budget",
   "manual_offense",
   "admin_password_change",
 ] as const satisfies readonly OffenseCanonicalType[];

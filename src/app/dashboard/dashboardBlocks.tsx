@@ -56,6 +56,9 @@ import WeightReleaseCard from "./WeightReleaseCard";
 import DashboardBlock from "@/app/components/DashboardBlock";
 import OrgasmFreeSection from "@/app/components/OrgasmFreeSection";
 import { getOffenseRules } from "@/lib/offenseRulesService";
+import {
+  FORK_SUB_DASHBOARD_BLOCK_TABLE, cagePauseDataCached, forkWearSessionExtras, plugCardOnScreen, plugSessionDataCached,
+} from "./forkDashboardBlocks";
 
 /**
  * **Die Blöcke des Träger-Dashboards — jeder mit seiner eigenen Datenbeschaffung.**
@@ -227,6 +230,9 @@ const hasPrimaryRequest = async ({ userId, nowMs }: SubDashboardCtx) => {
 };
 
 export const SUB_DASHBOARD_BLOCK_TABLE: Record<SubDashboardBlockId, StackBlock<SubDashboardCtx>> = {
+  // Fork-Blöcke (Plug-Karte, Pausen, Belohnungen, Denial-Zähler …) — `forkDashboardBlocks.tsx`.
+  ...FORK_SUB_DASHBOARD_BLOCK_TABLE,
+
   // Anforderungen mit Frist vor allem anderen — auch vor der Box-Karte.
   alerts: block({
     load: async ({ userId, nowMs }) => {
@@ -439,7 +445,7 @@ export const SUB_DASHBOARD_BLOCK_TABLE: Record<SubDashboardBlockId, StackBlock<S
         const [open, yieldPrimary] = await Promise.all([openStateData(ctx), hasPrimaryRequest(ctx)]);
         return open && ({ open, yieldPrimary } as const);
       }
-      const [activeLockPeriod, user, activeVorgabe, hours, deviceCount, offenseRules, kgVorgaben, kgPairs, pendingOpen] = await Promise.all([
+      const [activeLockPeriod, user, activeVorgabe, hours, deviceCount, offenseRules, kgVorgaben, kgPairs, pendingOpen, cagePause] = await Promise.all([
         subLockPeriodCached(userId), userRowCached(userId), activeVorgabeCached(userId, nowMs),
         wearingHoursCached(userId, nowMs, tz), deviceCountCached(userId),
         // Für die Folge-Zeile unter der Sperrzeit: OB ein früheres Öffnen geahndet wird, ist je Sub
@@ -450,12 +456,14 @@ export const SUB_DASHBOARD_BLOCK_TABLE: Record<SubDashboardBlockId, StackBlock<S
         // Die Öffnung, die bei der LockMeBox noch auf „Riegel offen" wartet — der Held zeigt sie samt
         // „Aufruf zurücknehmen", solange der Träger noch als verschlossen gilt.
         pendingOpenCached(userId),
+        // Fork: laufende Cage-Pause + heutiges Rest-Kontingent (Reinigung/Toilette).
+        cagePauseDataCached(userId, nowMs, tz),
       ]);
       const { goal, actualH } = resolveGoalRow(activeVorgabe, kgVorgaben, kgPairs, now, tz);
       // `open: null` als Unterscheidungsmerkmal — mit `"open" in data` müsste jede Verwendung
       // darunter noch einmal auf `undefined` prüfen, obwohl der Zweig sie ausschliesst.
       return {
-        open: null, ...running, activeLockPeriod, user, deviceCount, offenseRules,
+        open: null, ...running, activeLockPeriod, user, deviceCount, offenseRules, cagePause,
         openCall: pendingOpen ? { id: pendingOpen.id } : null,
         goalTargets: activeVorgabe ? goal : null,
         hours: { ...hours, ...segmentHours(actualH) },
@@ -526,6 +534,10 @@ export const SUB_DASHBOARD_BLOCK_TABLE: Record<SubDashboardBlockId, StackBlock<S
           jahrH={data.hours.jahrH}
           tz={tz}
           userHasDevices={data.deviceCount > 0}
+          // Fork: Gerätename des getragenen KG, Pause-Knopf und Rest-Kontingent.
+          deviceName={data.activePair.verschluss.device?.name ?? null}
+          activeCagePauseSince={data.cagePause.activeCagePauseSince}
+          pauseQuota={data.cagePause.pauseQuota}
         />
       </DashboardBlock>
       )
@@ -533,27 +545,35 @@ export const SUB_DASHBOARD_BLOCK_TABLE: Record<SubDashboardBlockId, StackBlock<S
   }),
 
   activeWearSessions: block({
-    load: async ({ userId, nowMs, now, tTasks }) => {
-      const [sessions, evaluated] = await Promise.all([
+    load: async (ctx) => {
+      const { userId, nowMs, now, tTasks } = ctx;
+      const [sessions, evaluated, fork] = await Promise.all([
         activeWearSessionsCached(userId),
         evaluatedTasksCached(userId, nowMs, tTasks("requirementKgLocked"), "sub"),
+        // Fork: Plug-Zeile entfällt, wenn seine grosse Karte steht; Pause-Knöpfe am Plug;
+        // Sessions der Session-Kategorien als eigene Zeilen.
+        forkWearSessionExtras(ctx),
       ]);
       // Die Trage-Karte ist vollflächig ein Link aufs Ablege-Formular — ohne Markierung sähe eine
       // gebundene Session aus wie jede andere. Gefragt wird je Session (Kategorie UND Gerät) über
       // `isHeldByTask`, also mit demselben Prädikat wie die Warnung im Formular: eine Bedingung auf
       // ein bestimmtes Gerät darf nicht die ganze Kategorie markieren, vor der danach niemand warnt.
-      return sessions.map((s) => ({
-        categoryId: s.categoryId,
-        categoryName: s.categoryName,
-        categoryColor: s.categoryColor,
-        categoryIcon: s.categoryIcon,
-        deviceName: s.deviceName,
-        since: s.since.toISOString(),
-        heldReason: isHeldByTask(evaluated, { categoryId: s.categoryId, deviceId: s.deviceId }, now)
-          ? tTasks("heldByTask")
-          : null,
-        imageUrl: s.imageUrl,
-      }));
+      return [
+        ...sessions.filter((s) => s.categoryId !== fork.hiddenCategoryId).map((s) => ({
+          categoryId: s.categoryId,
+          categoryName: s.categoryName,
+          categoryColor: s.categoryColor,
+          categoryIcon: s.categoryIcon,
+          deviceName: s.deviceName,
+          since: s.since.toISOString(),
+          heldReason: isHeldByTask(evaluated, { categoryId: s.categoryId, deviceId: s.deviceId }, now)
+            ? tTasks("heldByTask")
+            : null,
+          imageUrl: s.imageUrl,
+          ...fork.rowExtras(s.categoryId),
+        })),
+        ...fork.sessionRows,
+      ];
     },
     render: (sessions, { now }) => <ActiveWearSessions sessions={sessions} serverNow={now.toISOString()} />,
   }),
@@ -583,10 +603,12 @@ export const SUB_DASHBOARD_BLOCK_TABLE: Record<SubDashboardBlockId, StackBlock<S
   categoryGoals: block({
     load: async (ctx) => {
       const { userId, nowMs, now, tz } = ctx;
-      const [wearSessions, entries, activeVorgabe, hours, sessionCard, kgVorgaben, kgPairs] = await Promise.all([
+      const [wearSessions, entries, activeVorgabe, hours, sessionCard, kgVorgaben, kgPairs, plugCard] = await Promise.all([
         activeWearSessionsCached(userId), entriesCached(userId), activeVorgabeCached(userId, nowMs),
         wearingHoursCached(userId, nowMs, tz), sessionCardOnScreen(ctx),
         kgVorgabenCached(userId), kgWearPairsCached(userId, nowMs),
+        // Fork: steht die grosse Plug-Karte, trägt SIE das Plug-Ziel — hier nicht doppelt.
+        plugCardOnScreen(ctx).then(async (on) => on ? plugSessionDataCached(userId, nowMs, tz, ctx.dl) : null),
       ]);
       // Das KG-Ziel steht während einer Sperre in der grünen Session-Karte (LaufendeSessionCard).
       // Steht die nicht — weil keine Sperre läuft ODER weil der Träger den Block ausgeblendet hat —
@@ -594,9 +616,9 @@ export const SUB_DASHBOARD_BLOCK_TABLE: Record<SubDashboardBlockId, StackBlock<S
       // „Trainingsvorgaben"-Karte (derselben, die die Kategorie-Ziele trägt). Dieselbe Herleitung
       // nimmt die Admin-Übersicht — so zeigen beide Sichten dieselbe Zeile.
       const kgGoal = buildKgGoalRow(activeVorgabe, kgVorgaben, kgPairs, hours, now, tz, !!sessionCard);
-      return { wearSessions, entries, kgGoal };
+      return { wearSessions, entries, kgGoal, excludeCategoryIds: plugCard ? [plugCard.plugCatId] : [] };
     },
-    render: ({ wearSessions, entries, kgGoal }, { userId, tz, collapseDefault }) => (
+    render: ({ wearSessions, entries, kgGoal, excludeCategoryIds }, { userId, tz, collapseDefault }) => (
       <CategoryGoalsToday
         userId={userId}
         tz={tz}
@@ -605,6 +627,7 @@ export const SUB_DASHBOARD_BLOCK_TABLE: Record<SubDashboardBlockId, StackBlock<S
         entries={entries}
         includeCategories={deviceCategoriesEnabled()}
         kgGoal={kgGoal}
+        excludeCategoryIds={excludeCategoryIds}
       />
     ),
   }),

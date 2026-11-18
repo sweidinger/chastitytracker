@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { KG_PAIR, WEAR_PAIR, type PairTypes } from "@/lib/utils";
 import { entryGuardError } from "@/lib/entryErrors";
 import { getEntryNeighbors } from "@/lib/queries";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 import { validOeffnenCodes } from "@/lib/reasonsService";
 import { isPendingEntry, isPendingLock } from "@/lib/lockPending";
 import { clearBoxCommandForUser } from "@/lib/boxCommand";
@@ -199,12 +200,14 @@ async function deviceProblem(
 
   const device = await prisma.device.findFirst({
     where: { id: deviceId, userId },
-    select: { categoryId: true, category: { select: { isBuiltIn: true } } },
+    select: { categoryId: true, category: { select: { slug: true } } },
   });
   if (!device) return "INVALID_DEVICE";
-  if (!isWear) return device.category?.isBuiltIn ? null : "INVALID_DEVICE";
+  // KG über den Slug, nicht `isBuiltIn`: im Fork ist auch die Plug-Kategorie eingebaut (WEAR-Gerät).
+  const isKg = device.category?.slug === KG_BUILTIN_SLUG;
+  if (!isWear) return isKg ? null : "INVALID_DEVICE";
   if (!device.categoryId) return "WEAR_DEVICE_NO_CATEGORY";
-  return device.category?.isBuiltIn ? "WEAR_DEVICE_KG" : null;
+  return isKg ? "WEAR_DEVICE_KG" : null;
 }
 
 /**

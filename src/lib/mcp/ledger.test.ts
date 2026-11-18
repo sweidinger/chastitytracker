@@ -36,6 +36,8 @@ function strafbuchWithOneOfEach() {
     ref: { type, id },
     judgment: "open" as const,
     penalty: null, done: false, doneAt: null, reason: null, judgedBy: null, judgedByName: null, judgedAt: null,
+    // Fork: jede Offense traegt eine Schwere (Basis + ggf. eskaliert).
+    severity: "mittel" as const, baseSeverity: "mittel" as const, escalated: false,
   });
   return {
     unauthorizedOpenings: [{ ...j("unauthorized_opening", "o1"), time: "t", note: null, lockPeriodEndedAt: null, lockPeriodIndefinite: false }],
@@ -46,7 +48,7 @@ function strafbuchWithOneOfEach() {
     wrongDeviceViolations: [{ ...j("wrong_device", "e2"), time: "t", note: null, deviceName: "Käfig A" }],
     missedOrgasmInstructions: [{ ...j("missed_orgasm", "m1"), windowEndedAt: "t", message: null, requiredType: null }],
     wrongOrgasmTypes: [{ ...j("wrong_orgasm_type", "m2"), windowEndedAt: "t", message: null, requiredType: "Orgasmus – durch Technik", reportedType: "Orgasmus – durch andere Person" }],
-    lateLocks: [{ ...j("late_lock", "v1"), deadline: "d", fulfilledAt: null, message: null }],
+    lateLocks: [{ ...j("late_lock", "v1"), deadline: "d", fulfilledAt: null, message: null, categoryName: null }],
     cleaningNotRelocked: [{ ...j("cleaning_not_relocked", "relock:e1"), time: "t", deadline: "d", relockedAt: null, note: null }],
     unfulfilledTasks: [{ ...j("unfulfilled_task", "t1"), title: "Staubsaugen", holdUntil: "d", state: "aborted", failedAt: "t" }],
     adminPasswordChanges: [{ ...j("admin_password_change", "p1"), time: "t", adminUsername: "Admin", via: "reset_token", lockPeriodEndedAt: null }],
@@ -54,7 +56,11 @@ function strafbuchWithOneOfEach() {
     missedWeightReports: [{ ...j("missed_weight_report", "weight-missed:2026-08-22"), time: "t", day: "2026-08-22", days: 3 }],
     boxPhotoMissing: [{ ...j("box_photo_missing", "boxphoto:e2"), time: "t", boltClosedAt: "d", entryId: "e2" }],
     manualOffenses: [{ ...j("manual_offense", "n1"), time: "t", title: "Abmachung gebrochen", description: null, recordedBy: "Admin" }],
-    detectedOffenseCount: 15, openOffenseCount: 15, pendingPenaltyCount: 0,
+    missedSessions: [{ ...j("missed_session", "s1"), windowEndedAt: "t", message: null, categoryName: null }],
+    erektionViolations: [{ ...j("erektion", "e3"), time: "t", oeffnenGrund: null, note: null }],
+    pauseOverageViolations: [{ ...j("pause_overage", "e4"), time: "t", device: null, grund: null, dauerMin: 30, maxMin: 15 }],
+    orgasmOverBudgetViolations: [{ ...j("orgasm_over_budget", "og1"), time: "t", orgasmusArt: null, used: 3, limit: 2 }],
+    detectedOffenseCount: 19, openOffenseCount: 19, pendingPenaltyCount: 0,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 }
@@ -79,6 +85,11 @@ function rawStrafbuchWithOneOfEach() {
     missedWeightReports: [{ dayKey: "2026-08-22", at: null, days: 3 }],
     boxPhotoMissing: [{ entryId: "e2", dueAt: null, at: null }],
     manualOffenses: [{ id: "n1", occurredAt: null, title: "Abmachung gebrochen" }],
+    // Fork-Kategorien — zaehlen genauso mit und muessen im Ledger eine Zeile bekommen.
+    missedSessions: [{ id: "s1", ...one }],
+    erektionViolations: [{ entryId: "e3", ...one }],
+    pauseOverageViolations: [{ entryId: "e4", ...one }],
+    orgasmOverBudgetViolations: [{ entryId: "og1", ...one }],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 }
@@ -124,7 +135,8 @@ describe("buildOffenseRows — Zähler und Ausgabe dürfen nicht auseinanderlauf
 // K-14 (MCP-Restliste 2026-07-17): get_offenses wächst monoton — filterOffenses grenzt ein.
 describe("filterOffenses — K-14", () => {
   const row = (over: Partial<OffenseRow>): OffenseRow => ({
-    id: "x", type: "late_control", detectedAt: "2026-07-10T10:00:00+02:00", status: "judged",
+    id: "x", type: "late_control", severity: "mittel", baseSeverity: "mittel", escalated: false,
+    detectedAt: "2026-07-10T10:00:00+02:00", status: "judged",
     judgment: "dismissed", consequence: null, dismissReason: null, judgedBy: null, judgedByName: null, judgedAt: null,
     context: {}, statement: null, notes: [], ...over,
   });

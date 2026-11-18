@@ -1,0 +1,865 @@
+import { prisma } from "@/lib/prisma";
+import {
+  buildPairs, interruptionPauseMs, summarizeSessions, completedPairsFrom,
+  formatDateTime, isTimeCorrected, APP_TZ, buildKgWearPairs, wearHoursOfPairs,
+  type CleaningPauseAllowance,
+} from "@/lib/utils";
+import { getActiveVorgabe, getActiveLockPeriod, getActiveWearSessions, getActiveOrgasmusAnforderung, subVisibleKontrolleWhere, getKgVorgabeSegments } from "@/lib/queries";
+import { cleaningUsedToday as cleaningUsedTodayOf, buildCleaningView, CLEANING_USER_SELECT, type CleaningView, type CleaningUserFields } from "@/lib/cleaningService";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
+import { buildToiletteView, type ToiletteView, type ToiletteUserFields, toiletteVerbrauchtHeute } from "@/lib/toiletteService";
+import { getAllActiveSessionAnforderungen } from "@/lib/sessionService";
+import { effectiveOrgasmusArten } from "@/lib/reasonsService";
+import { autoKontrolleSettingsFromUser, AUTO_KONTROLLE_SETTINGS_SELECT, type AutoKontrolleSettings } from "@/lib/autoKontrolleService";
+import { buildCategoryWearGoals, hasAnyGoal } from "@/lib/categoryGoals";
+import { resolveGoalRow } from "@/lib/goalSegments";
+import { buildStrafbuch, type StrafbuchControlOffense } from "@/lib/strafbuch";
+import { getBelohnungState, computeBelohnbar, autoGrantReachedGoals } from "@/lib/belohnung";
+import { getActiveHealthHold } from "@/lib/healthHoldService";
+import { buildTagesformView, type TagesformView } from "@/lib/tagesformService";
+import { collectDetectedOffenses, computeSeverities, OFFENSE_SEVERITY, type OffenseSeverity } from "@/lib/strafurteilService";
+import { pct, isoWithOffset } from "@/lib/mcp/format";
+import { relativeTimeLabel } from "@/lib/relativeTime";
+import { round1, msToHours } from "@/lib/utils";
+
+/** Zeitformat der MCP-Ausgabe: V1-Tools nutzen das Instanz-lokale Human-Format (bewusster V1-
+ *  Vertrag), V2-Composer (dashboard, ledger) ziehen via opts.iso ISO-8601 mit Offset.
+ *  TODO(altitude): langfristig roh-Date zurückgeben + am Tool-Rand formatieren, sobald der V1-
+ *  Vertrag versioniert wird — dann entfällt dieser Interim-Schalter im V1-Aggregat. */
+/** Formatiert in der ZEITZONE des Ziel-Subs: ISO-8601 mit Offset (iso:true, für V2-Composer) oder
+ *  das Instanz-lokale Human-Format (V1-Vertrag). Ohne tz greift APP_TZ (byte-identisch für Bestands-User). */
+const pickFmt = (iso?: boolean, tz: string = APP_TZ, now: Date = new Date()) =>
+  iso
+    ? (d: Date) => isoWithOffset(d, tz)!
+    // Menschliches Format MIT fertiger Spanne in Klammern. Einziger Leser dieses Aggregats ist der
+    // Prompt der KI-Keyholderin — und die verrechnet blanke Datumsangaben nachweislich falsch
+    // (hielt einen Eintrag von HEUTE fuer "gestern"). Die Klammer nimmt ihr das Rechnen ab; die
+    // ISO-Variante bleibt unberuehrt, damit maschinelle Leser exakt bleiben.
+    : (d: Date) => `${formatDateTime(d, undefined, tz)} (${relativeTimeLabel(d, now, tz)})`;
+export interface McpFormatOptions { iso?: boolean }
+
+/** Read-only overview snapshot for the MCP `get_overview` tool.
+ *  Timestamps are human strings in the instance timezone (see `timezone`) — NOT UTC,
+ *  so a consuming LLM reads wall-clock time directly. Durations are hours (1 decimal). */
+/** Period training-goal targets with progress percentages. Shared by KG + per-category goals. */
+export interface GoalProgress {
+  minPerDayH: number | null; todayPct: number | null;
+  minPerWeekH: number | null; weekPct: number | null;
+  minPerMonthH: number | null; monthPct: number | null;
+}
+
+export interface TrackerOverview {
+  schemaVersion: 1;
+  user: string;
+  generatedAt: string;
+  timezone: string;
+  /** Free-text rules the human keyholder set for the AI keyholder. Write tools MUST respect these (soft guidance). */
+  keyholderInstructions: string | null;
+  lock: {
+    isLocked: boolean;
+    since: string | null;
+    currentDurationHours: number | null;
+    deviceName: string | null;
+    /** true = aktiver VERSCHLUSS-Eintrag hat eine Siegel-Nummer eingetragen */
+    hasKontrollCode: boolean;
+  };
+  wearingHoursKg: { today: number; week: number; month: number };
+  trainingGoalKg: (GoalProgress & { note: string | null }) | null;
+  /** Cleaning-pause rules (shared shape, see CleaningView).
+   *  - windows: allowed daily TIME WINDOWS (HH:MM, CH local time). EMPTY = NOT time-bound (any time of day).
+   *  - windowOpenNow: the currently open window (until = its end HH:MM), or null if outside all windows.
+   *  - maxPausesPerDay = max cleaning OPENINGS per day (a COUNT, not minutes; null = unlimited).
+   *  - usedToday = openings already used today (resets at CH midnight). maxMinutesPerBreak = max minutes per opening.
+   *  A DEVICE CHANGE runs through this same cleaning path and consumes one opening. */
+  reinigung: CleaningView;
+  /** Toilet-pause rules for KG — when the user may briefly open the cage for toilet use without penalty. */
+  toilette: ToiletteView;
+  /** Cleaning rules for non-KG devices (Plug, etc.) — mirror of reinigung but for WEAR_END/WEAR_BEGIN cycles. */
+  plugReinigung: { allowed: boolean; maxMinutesPerBreak: number; maxPausesPerDay: number | null };
+  /** Toilet rules for non-KG devices — mirror of toilette but for Plug/Collar wear sessions. */
+  plugToilette: { allowed: boolean; maxMinutesPerBreak: number; maxPausesPerDay: number | null };
+  /** Automatische Kontrollen: das System sendet selbsttätig pro Tag eine ZUFÄLLIGE Anzahl Kontrollen —
+   *  gewürfelt aus [perDayMin, perDayMax] (perDayMin==perDayMax ⇒ fixe Anzahl), zufällig über den Tag
+   *  verteilt (Frist nie im Schlaf-Fenster ruheVon–ruheBis, Erfüllungsdauer zufällig fristVon–fristBis
+   *  Min). aktiv=false → keine Auto-Kontrollen. Geplante, noch nicht ausgelöste sind absichtlich
+   *  unsichtbar (auch hier). */
+  autoKontrolle: { aktiv: boolean; perDayMin: number; perDayMax: number; ruheVon: string; ruheBis: string; fristVon: number; fristBis: number };
+  /** Non-KG tracking categories (Plug, Collar, …) — wearing hours + their training goal (null if none). */
+  categories: {
+    name: string;
+    wearingHours: { today: number; week: number; month: number };
+    goal: GoalProgress | null;
+  }[];
+  /** Aktuell OFFENE Kontrolle (noch nicht eingereicht). null bedeutet NICHT "ausgelaufen": eine
+   *  eingereichte Kontrolle ist nicht mehr offen (→ lastKontrolle), eine überfällige bleibt offen
+   *  mit overdue:true. Kontrollen verschwinden nie automatisch. */
+  openKontrolle: { code: string | null; deadline: string; overdue: boolean; remainingMinutes: number; comment: string | null } | null;
+  /** Die zuletzt eingereichte Kontrolle (jüngste PRUEFUNG) — Code-Verifikation + Geräte-Check.
+   *  Damit ist erkennbar, dass/wann zuletzt etwas eingereicht & verifiziert wurde. null = nie. */
+  lastKontrolle: {
+    time: string;
+    code: string | null;
+    verifikationStatus: string | null;
+    deviceCheck: { status: string; detected: string | null; expected: string | null } | null;
+  } | null;
+  /** reinigungErlaubt/toiletteErlaubt: ob die Sperrzeit Reinigungs-/Toiletten-Öffnungen explizit erlaubt (bricht Sperre nicht). */
+  activeSperrzeit: { endetAt: string | null; indefinite: boolean; remainingMinutes: number | null; message: string | null; reinigungErlaubt: boolean; toiletteErlaubt: boolean; deviceName: string | null } | null;
+  /** deviceName: das von der Anforderung verlangte Gerät (null = beliebig). reinigungErlaubt wird auf die erzeugte Sperrzeit vererbt. */
+  openVerschlussAnforderung: { endetAt: string | null; overdue: boolean; remainingMinutes: number | null; message: string | null; dauerH: number | null; reinigungErlaubt: boolean; deviceName: string | null } | null;
+  /** Open keyholder orgasm directive (request/opportunity) whose window has not yet ended. */
+  openOrgasmusAnforderung: { art: string; beginntAt: string; endetAt: string; active: boolean; requiredType: string | null; message: string | null; remainingMinutes: number } | null;
+  /** Open session directives from admin/AI keyholder (deadline not passed, not fulfilled/withdrawn). */
+  openSessionAnforderungen: { categoryName: string; nachricht: string | null; endetAt: string | null; overdue: boolean; remainingMinutes: number | null }[];
+  /** Effective orgasm type codes valid for this user (built-ins + any custom types). Used to validate create_orgasmus vorgegebeneArt. */
+  orgasmusArten: string[];
+  sessionSummary: {
+    totalSessions: number; totalHours: number; avgHours: number;
+    longestHours: number; shortestHours: number;
+    lastOrgasmAt: string | null; orgasmFreeHours: number | null;
+  } | null;
+  /** punishedCount: admin-confirmed punishments (StrafeRecord rows).
+   *  Distinct from detectedOffenseCount in get_strafbuch which counts system-detected offenses. */
+  penalties: { punishedCount: number };
+  activeWearSessions: { category: string; deviceName: string; since: string; durationHours: number }[];
+  /** Jüngste private Keyholder-Notizen (Beobachtungen zum Trageverhalten je KG/Kategorie).
+   *  Volle Historie über list_keyholder_notes. Nur über den MCP sichtbar. */
+  keyholderNotes: { id: string; kg: string | null; kategorie: string | null; text: string; at: string }[];
+  /** Belohnungs-Ökonomie: verdiente Orgasmen (verfügbar/vorgemerkt) + erreichte, noch nicht
+   *  gutgeschriebene Trainingsziele. Grant via grant_reward, credit via credit_reward. */
+  belohnung: {
+    available: number;
+    reserved: number;
+    activeWindowEndsAt: string | null;
+    rewardableGoals: { category: string; period: string; hours: number; targetHours: number }[];
+  };
+  /** Gesundheits-Stopp: vom Sub selbst gesetztes Fürsorge-Signal. Ist er aktiv, dürfen KEINE neuen
+   *  Anforderungen/Strafen gestellt werden (wird serverseitig zusätzlich hart blockiert). */
+  healthHold: { active: boolean; reason: string; since: string } | null;
+  /** Selbsteinschätzung des Subs der letzten Tage (Erregung/Körper/Headspace, je 1–5) samt der
+   *  daraus folgenden Verhaltensregeln. eintraege=[] ⇒ nichts erfasst; nur dann darf danach
+   *  gefragt werden. */
+  tagesform: TagesformView;
+}
+
+/** Geräte-Check eines Eintrags ins MCP-Format (status/detected/expected) oder null. */
+function mapDeviceCheck(e: { deviceCheck: string | null; deviceCheckNote: string | null; deviceCheckExpected: string | null }) {
+  return e.deviceCheck ? { status: e.deviceCheck, detected: e.deviceCheckNote, expected: e.deviceCheckExpected } : null;
+}
+
+/** Builds the shared 6-field goal-progress shape from actual hours + period targets. */
+const goalProgress = (
+  tagH: number, wocheH: number, monatH: number,
+  dayH: number | null, weekH: number | null, monthH: number | null,
+): GoalProgress => ({
+  minPerDayH: dayH, todayPct: pct(tagH, dayH),
+  minPerWeekH: weekH, weekPct: pct(wocheH, weekH),
+  minPerMonthH: monthH, monthPct: pct(monatH, monthH),
+});
+
+/** Resolves a username to its id and Reinigung settings. Throws if the user does not exist.
+ *  `reinigungUser` / `toiletteUser` / `plugUser` tragen die rohen User-Felder für die jeweiligen View-Builder. */
+async function loadUserContext(username: string) {
+  const user = await prisma.user.findUnique({
+    where: { username },
+    select: {
+      ...AUTO_KONTROLLE_SETTINGS_SELECT, // id, timezone + alle Auto-Kontroll-Felder (Upstream-Select)
+      ...CLEANING_USER_SELECT,
+      mcpKeyholderInstructions: true,
+      // Toilette (KG)
+      toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true,
+      // Plug-Reinigung + Plug-Toilette (Toilette immer erlaubt/unbegrenzt → nur Max.-Dauer)
+      plugReinigungErlaubt: true, plugReinigungMaxMinuten: true, plugReinigungMaxProTag: true,
+      plugToiletteMaxMinuten: true,
+      // Custom Orgasmus-Arten
+      orgasmusArtenConfig: true,
+    },
+  });
+  if (!user) throw new Error(`User not found: ${username}`);
+  return {
+    userId: user.id,
+    timezone: user.timezone ?? APP_TZ,
+    reinigung: { allowed: user.cleaningAllowed ?? false, maxMinutes: user.cleaningMaxMinutes ?? 15 } as CleaningPauseAllowance,
+    reinigungUser: user as CleaningUserFields,
+    toiletteUser: user as ToiletteUserFields,
+    plugUser: {
+      plugReinigungErlaubt: user.plugReinigungErlaubt,
+      plugReinigungMaxMinuten: user.plugReinigungMaxMinuten,
+      plugReinigungMaxProTag: user.plugReinigungMaxProTag,
+      plugToiletteMaxMinuten: user.plugToiletteMaxMinuten,
+    },
+    orgasmusArtenConfig: user.orgasmusArtenConfig,
+    keyholderInstructions: user.mcpKeyholderInstructions ?? null,
+    autoKontrolle: autoKontrolleSettingsFromUser(user),
+  };
+}
+
+/** Builds the overview for a user identified by username. Throws if the user does not exist. */
+export async function buildOverview(username: string, opts: McpFormatOptions = {}): Promise<TrackerOverview> {
+  const { userId, timezone, reinigung, reinigungUser, toiletteUser, plugUser, orgasmusArtenConfig, keyholderInstructions, autoKontrolle } = await loadUserContext(username);
+  const now = new Date();
+  const fmt = pickFmt(opts.iso, timezone, now);
+  const minutesUntil = (d: Date) => Math.round((d.getTime() - now.getTime()) / 60_000);
+
+  const [entries, openKontrolle, activeVorgabe, activeSperrzeit, openAnf, activeWear, punishedCount, recentNotes, openOrgasmusAnf, cleaningUsedToday, toiletteUsedToday, openSessionAnfs, kgSegments] = await Promise.all([
+    prisma.entry.findMany({
+      where: { userId },
+      orderBy: { startTime: "desc" },
+      include: { device: { select: { name: true, categoryId: true } } },
+    }),
+    prisma.kontrollAnforderung.findFirst({
+      // geplante (noch nicht ausgelöste) Kontrollen sind auch im get_overview unsichtbar
+      where: { userId, entryId: null, withdrawnAt: null, ...subVisibleKontrolleWhere(now) },
+      orderBy: { createdAt: "desc" },
+    }),
+    getActiveVorgabe(userId, now),
+    getActiveLockPeriod(userId),
+    prisma.verschlussAnforderung.findFirst({
+      // KG-Sicht: Plug-Anforderungen (deviceCategoryId gesetzt) laufen ueber die Session-Logik
+      where: { userId, art: "ANFORDERUNG", fulfilledAt: null, withdrawnAt: null, deviceCategoryId: null },
+      include: { device: { select: { name: true } } },
+    }),
+    getActiveWearSessions(userId),
+    prisma.strafeRecord.count({ where: { userId, status: "PUNISHED" } }),
+    prisma.keyholderNote.findMany({ where: { userId }, orderBy: { createdAt: "desc" }, take: 8 }),
+    getActiveOrgasmusAnforderung(userId, now),
+    cleaningUsedTodayOf(userId, now, timezone),
+    toiletteVerbrauchtHeute(userId, now, timezone),
+    getAllActiveSessionAnforderungen(userId),
+    getKgVorgabeSegments(userId),
+  ]);
+
+  // Reuse the already-loaded entries for per-category wear hours (no second entries scan).
+  const categoryGoals = await buildCategoryWearGoals(userId, now, entries, timezone);
+
+  // ── Lock state ──
+  const latest = entries.find((e) => e.type === "VERSCHLUSS" || e.type === "OEFFNEN") ?? null;
+  const isLocked = latest?.type === "VERSCHLUSS";
+
+  const pairs = buildPairs(entries, [], reinigung);
+  const activePair = pairs.find((p) => p.active) ?? null;
+  const currentDurationHours = isLocked && activePair
+    ? msToHours(now.getTime() - activePair.verschluss.startTime.getTime() - interruptionPauseMs(activePair.interruptions))
+    : null;
+  // Currently worn device = newest re-lock of the session (the lock following the last
+  // REINIGUNG pause), falling back to the session-start lock. A device swap during a
+  // cleaning pause does not change the session head, so reading activePair.verschluss
+  // alone would report the pre-pause device.
+  const currentLockId = activePair
+    ? (activePair.interruptions.at(-1)?.verschluss ?? activePair.verschluss).id
+    : null;
+  const currentLock = currentLockId ? entries.find((e) => e.id === currentLockId) ?? null : null;
+
+  // ── Completed sessions ──
+  const summary = summarizeSessions(completedPairsFrom(pairs));
+
+  const lastOrgasmus = entries.find((e) => e.type === "ORGASMUS") ?? null;
+
+  // ── Wearing hours + KG training goal ──
+  const kgPairs = buildKgWearPairs(entries, now);
+  const { tagH, wocheH, monatH } = wearHoursOfPairs(kgPairs, now, timezone);
+
+  // ── Belohnungs-Ökonomie + Gesundheits-Stopp + Tagesform ──
+  // Erreichte Trainingsziele in Guthaben verbuchen, BEVOR der Belohnungs-Stand gelesen wird — so
+  // sieht die Keyholderin (und jeder, der ueber den Overview schaut) immer den aktuellen Zaehler,
+  // auch zwischen den Cron-Laeufen. Idempotent (Unique-Index), daher gefahrlos bei jedem Abruf.
+  await autoGrantReachedGoals(userId, now).catch(() => { /* non-fatal: Overview darf nicht kippen */ });
+  const [belohnungState, belohnbar, healthHold, tagesform] = await Promise.all([
+    getBelohnungState(userId, now),
+    computeBelohnbar(userId, now),
+    getActiveHealthHold(userId),
+    buildTagesformView(userId, timezone, undefined, now),
+  ]);
+
+  return {
+    schemaVersion: 1 as const,
+    user: username,
+    generatedAt: formatDateTime(now, undefined, timezone), // Bezugspunkt selbst — ohne Spanne
+    timezone,
+    keyholderInstructions,
+    lock: {
+      isLocked,
+      since: latest ? fmt(latest.startTime) : null,
+      currentDurationHours,
+      deviceName: isLocked ? (currentLock?.device?.name ?? null) : null,
+      /** true = VERSCHLUSS-Eintrag hat einen kontrollCode → Kontrolle kann angefordert werden */
+      hasKontrollCode: isLocked ? !!latest?.kontrollCode : false,
+    },
+    wearingHoursKg: { today: round1(tagH), week: round1(wocheH), month: round1(monatH) },
+    trainingGoalKg: activeVorgabe ? (() => {
+      // Ziele wie die Kategorie-Ziele aus buildCategoryWearGoals über die Segmente (goalSegments.ts):
+      // Woche/Monat kommen samt ihren Ist-Werten aus der Segment-Summe, der Tag aus dem aktiven Ziel.
+      const { goal, actualH } = resolveGoalRow(activeVorgabe, kgSegments, kgPairs, now, timezone);
+      return { ...goalProgress(tagH, actualH.week, actualH.month, goal.targetH.day, goal.targetH.week, goal.targetH.month), note: activeVorgabe.notiz };
+    })() : null,
+    reinigung: buildCleaningView(reinigungUser, cleaningUsedToday, now, timezone),
+    toilette: buildToiletteView(toiletteUser, toiletteUsedToday),
+    plugReinigung: {
+      allowed: plugUser.plugReinigungErlaubt ?? false,
+      maxMinutesPerBreak: plugUser.plugReinigungMaxMinuten ?? 15,
+      maxPausesPerDay: (plugUser.plugReinigungMaxProTag ?? 0) > 0 ? (plugUser.plugReinigungMaxProTag ?? 0) : null,
+    },
+    plugToilette: {
+      allowed: true, // Plug-Toilette ist immer erlaubt
+      maxMinutesPerBreak: plugUser.plugToiletteMaxMinuten ?? 15,
+      maxPausesPerDay: null, // unbegrenzt
+    },
+    autoKontrolle: {
+      aktiv: autoKontrolle.aktiv,
+      perDayMin: autoKontrolle.perDayMin,
+      perDayMax: autoKontrolle.perDayMax,
+      ruheVon: autoKontrolle.ruheVon,
+      ruheBis: autoKontrolle.ruheBis,
+      fristVon: autoKontrolle.fristVon,
+      fristBis: autoKontrolle.fristBis,
+    },
+    categories: categoryGoals.map((c) => ({
+      name: c.name,
+      wearingHours: { today: round1(c.tagH), week: round1(c.wocheH), month: round1(c.monatH) },
+      goal: hasAnyGoal(c) ? goalProgress(c.tagH, c.wocheH, c.monatH, c.goal.targetH.day, c.goal.targetH.week, c.goal.targetH.month) : null,
+    })),
+    openKontrolle: openKontrolle ? {
+      code: openKontrolle.code,
+      deadline: fmt(openKontrolle.deadline),
+      overdue: openKontrolle.deadline < now,
+      remainingMinutes: minutesUntil(openKontrolle.deadline),
+      comment: openKontrolle.kommentar,
+    } : null,
+    lastKontrolle: (() => {
+      // Jüngste eingereichte Kontrolle (PRUEFUNG) aus den bereits geladenen entries — kein Extra-Query.
+      const p = entries.find((e) => e.type === "PRUEFUNG");
+      return p ? {
+        time: fmt(p.startTime),
+        code: p.kontrollCode,
+        verifikationStatus: p.verifikationStatus,
+        deviceCheck: mapDeviceCheck(p),
+      } : null;
+    })(),
+    activeSperrzeit: activeSperrzeit ? {
+      endetAt: activeSperrzeit.endsAt ? fmt(activeSperrzeit.endsAt) : null,
+      indefinite: activeSperrzeit.endsAt === null,
+      remainingMinutes: activeSperrzeit.endsAt ? minutesUntil(activeSperrzeit.endsAt) : null,
+      message: activeSperrzeit.message,
+      reinigungErlaubt: activeSperrzeit.cleaningAllowed,
+      toiletteErlaubt: activeSperrzeit.toiletteErlaubt,
+      deviceName: activeSperrzeit.device?.name ?? null,
+    } : null,
+    openVerschlussAnforderung: openAnf ? {
+      endetAt: openAnf.endsAt ? fmt(openAnf.endsAt) : null,
+      overdue: openAnf.endsAt ? openAnf.endsAt < now : false,
+      remainingMinutes: openAnf.endsAt ? minutesUntil(openAnf.endsAt) : null,
+      message: openAnf.message,
+      dauerH: openAnf.minDurationHours,
+      reinigungErlaubt: openAnf.cleaningAllowed,
+      deviceName: openAnf.device?.name ?? null,
+    } : null,
+    openOrgasmusAnforderung: openOrgasmusAnf ? {
+      art: openOrgasmusAnf.art,
+      beginntAt: fmt(openOrgasmusAnf.beginsAt),
+      endetAt: fmt(openOrgasmusAnf.endsAt),
+      active: openOrgasmusAnf.beginsAt <= now,
+      requiredType: openOrgasmusAnf.requiredType,
+      message: openOrgasmusAnf.message,
+      remainingMinutes: minutesUntil(openOrgasmusAnf.endsAt),
+    } : null,
+    sessionSummary: summary.count > 0 ? {
+      totalSessions: summary.count,
+      totalHours: msToHours(summary.totalMs),
+      avgHours: msToHours(summary.avgMs),
+      longestHours: msToHours(summary.longest?.durationMs ?? 0),
+      shortestHours: msToHours(summary.shortest?.durationMs ?? 0),
+      lastOrgasmAt: lastOrgasmus ? fmt(lastOrgasmus.startTime) : null,
+      orgasmFreeHours: lastOrgasmus ? msToHours(now.getTime() - lastOrgasmus.startTime.getTime()) : null,
+    } : null,
+    openSessionAnforderungen: openSessionAnfs.map((s) => ({
+      categoryName: s.deviceCategory?.name ?? "?",
+      nachricht: s.nachricht,
+      endetAt: s.endetAt ? fmt(s.endetAt) : null,
+      overdue: s.endetAt ? s.endetAt < now : false,
+      remainingMinutes: s.endetAt ? minutesUntil(s.endetAt) : null,
+    })),
+    orgasmusArten: effectiveOrgasmusArten(orgasmusArtenConfig).map((e) => e.code),
+    penalties: { punishedCount },
+    activeWearSessions: activeWear.map((s) => ({
+      category: s.categoryName,
+      deviceName: s.deviceName,
+      since: fmt(s.since),
+      durationHours: msToHours(now.getTime() - s.since.getTime()),
+    })),
+    keyholderNotes: recentNotes.map((n) => ({
+      id: n.id, kg: n.kg, kategorie: n.kategorie, text: n.text, at: fmt(n.createdAt),
+    })),
+    belohnung: {
+      available: belohnungState.available,
+      reserved: belohnungState.reserved,
+      activeWindowEndsAt: belohnungState.activeWindow ? fmt(belohnungState.activeWindow.endsAt) : null,
+      rewardableGoals: belohnbar.map((b) => ({
+        category: b.categoryName, period: b.periodType, hours: round1(b.istH), targetHours: round1(b.sollH),
+      })),
+    },
+    healthHold: healthHold ? { active: true, reason: healthHold.reason, since: fmt(healthHold.since) } : null,
+    tagesform,
+  };
+}
+
+/** One completed session for the MCP `list_sessions` tool. */
+export interface SessionRow {
+  category: string;
+  deviceName: string | null;
+  start: string;
+  end: string;
+  durationHours: number;
+}
+
+export interface SessionList {
+  schemaVersion: 1;
+  sessions: SessionRow[];
+}
+
+export interface ListSessionsOptions {
+  /** "KG" or a category name (case-insensitive). Omit for all categories. */
+  category?: string;
+  /** Max rows (default 20, clamped to 1..100). */
+  limit?: number;
+}
+
+type RawSession = { category: string; deviceName: string | null; start: Date; end: Date; durationMs: number };
+
+/** Pairs WEAR_BEGIN→WEAR_END entries of one category, keeping the device name and
+ *  yielding completed sessions only. `buildWearPairs` is not reused here because it
+ *  deliberately drops the device and includes the still-open session. */
+function completedWearSessions(
+  entries: { type: string; startTime: Date; device?: { name?: string | null; categoryId?: string | null } | null }[],
+  categoryId: string,
+  categoryName: string,
+): RawSession[] {
+  const asc = entries
+    .filter((e) => (e.type === "WEAR_BEGIN" || e.type === "WEAR_END") && e.device?.categoryId === categoryId)
+    .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+  const out: RawSession[] = [];
+  let pending: typeof asc[number] | null = null;
+  for (const e of asc) {
+    if (e.type === "WEAR_BEGIN") pending = e;
+    else if (e.type === "WEAR_END" && pending) {
+      out.push({
+        category: categoryName,
+        deviceName: pending.device?.name ?? null,
+        start: pending.startTime,
+        end: e.startTime,
+        durationMs: e.startTime.getTime() - pending.startTime.getTime(),
+      });
+      pending = null;
+    }
+  }
+  return out;
+}
+
+/** Lists completed sessions (KG + non-KG wear), newest first. Throws if the user does not exist. */
+export async function listSessions(username: string, opts: ListSessionsOptions = {}): Promise<SessionList> {
+  const { userId, timezone, reinigung } = await loadUserContext(username);
+
+  const [entries, nonKgCategories] = await Promise.all([
+    prisma.entry.findMany({
+      where: { userId },
+      orderBy: { startTime: "desc" },
+      include: { device: { select: { name: true, categoryId: true } } },
+    }),
+    // All non-KG categories — including tracking-disabled ones, since their past sessions still count.
+    prisma.deviceCategory.findMany({ where: { userId, slug: { not: KG_BUILTIN_SLUG } }, select: { id: true, name: true } }),
+  ]);
+
+  // KG durationMs is interruption-adjusted (REINIGUNG pauses deducted) — keep that value.
+  const kg: RawSession[] = completedPairsFrom(buildPairs(entries, [], reinigung)).map((p) => ({
+    category: "KG",
+    deviceName: p.verschluss.device?.name ?? null,
+    start: p.verschluss.startTime,
+    end: p.oeffnen.startTime,
+    durationMs: p.durationMs,
+  }));
+  const wear = nonKgCategories.flatMap((c) => completedWearSessions(entries, c.id, c.name));
+
+  const filter = opts.category?.trim().toLowerCase();
+  const limit = Math.min(Math.max(1, opts.limit ?? 20), 100);
+
+  const sessions = [...kg, ...wear]
+    .filter((s) => s.durationMs > 0)
+    .filter((s) => !filter || s.category.toLowerCase() === filter)
+    .sort((a, b) => b.start.getTime() - a.start.getTime())
+    .slice(0, limit)
+    .map((s) => ({
+      category: s.category,
+      deviceName: s.deviceName,
+      start: formatDateTime(s.start, undefined, timezone),
+      end: formatDateTime(s.end, undefined, timezone),
+      durationHours: msToHours(s.durationMs),
+    }));
+  return { schemaVersion: 1 as const, sessions };
+}
+
+/** One raw entry for the MCP `list_entries` tool — every field a consuming LLM needs
+ *  to understand the full context. Timestamps are instance-timezone strings. Photos are
+ *  surfaced as metadata only (auth-protected files cannot be fetched by an MCP client). */
+export interface EntryRow {
+  /** One of VALID_TYPES: VERSCHLUSS | OEFFNEN | PRUEFUNG | ORGASMUS | WEAR_BEGIN | WEAR_END */
+  type: string;
+  time: string;
+  /** Free-text note / comment the user attached to the entry. */
+  note: string | null;
+  /** Opening reason for OEFFNEN entries (REINIGUNG | KEYHOLDER | NOTFALL | ANDERES). */
+  oeffnenGrund: string | null;
+  /** Orgasm type for ORGASMUS entries (e.g. "Orgasmus", "ruinierter Orgasmus", "feuchter Traum"). */
+  orgasmusArt: string | null;
+  kontrollCode: string | null;
+  verifikationStatus: string | null;
+  deviceName: string | null;
+  /** Geräte-Check aus dem Kontroll-Foto (nur PRUEFUNG, advisory): wurde das verschlossene Gerät
+   *  erkannt? status: "ok" = passendes Gerät · "wrong" = anderes/keins zugeordnet · "missing" = kein
+   *  Gerät sichtbar. detected = im Foto erkanntes Gerät, expected = das verschlossene (Soll-)Gerät.
+   *  null = nicht geprüft (z.B. nicht verschlossen oder keine Referenzfotos hinterlegt). */
+  deviceCheck: { status: string; detected: string | null; expected: string | null } | null;
+  hasImage: boolean;
+  imageExifTime: string | null;
+  /** True when the entered time differs from the creation time (back-/post-dated). */
+  timeCorrected: boolean;
+}
+
+export interface EntryList {
+  schemaVersion: 1;
+  user: string;
+  generatedAt: string;
+  timezone: string;
+  /** Total entries matching the filter, before the limit is applied. */
+  totalCount: number;
+  returnedCount: number;
+  entries: EntryRow[];
+}
+
+export interface ListEntriesOptions {
+  /** Filter by entry type (one of VALID_TYPES). Omit for all types. */
+  type?: string;
+  /** Max rows (default 50, clamped to 1..200). */
+  limit?: number;
+}
+
+/** Lists raw entries with full per-entry detail, newest first. Throws if the user does not exist. */
+export async function listEntries(username: string, opts: ListEntriesOptions = {}): Promise<EntryList> {
+  const { userId, timezone } = await loadUserContext(username);
+  const typeFilter = opts.type?.trim().toUpperCase();
+  const limit = Math.min(Math.max(1, opts.limit ?? 50), 200);
+  const where = { userId, ...(typeFilter ? { type: typeFilter } : {}) };
+
+  const [totalCount, entries] = await Promise.all([
+    prisma.entry.count({ where }),
+    prisma.entry.findMany({
+      where,
+      orderBy: { startTime: "desc" },
+      take: limit,
+      include: { device: { select: { name: true } } },
+    }),
+  ]);
+
+  return {
+    schemaVersion: 1 as const,
+    user: username,
+    generatedAt: formatDateTime(new Date(), undefined, timezone),
+    timezone,
+    totalCount,
+    returnedCount: entries.length,
+    entries: entries.map((e) => ({
+      type: e.type,
+      time: formatDateTime(e.startTime, undefined, timezone),
+      note: e.note,
+      oeffnenGrund: e.oeffnenGrund,
+      orgasmusArt: e.orgasmusArt,
+      kontrollCode: e.kontrollCode,
+      verifikationStatus: e.verifikationStatus,
+      deviceName: e.device?.name ?? null,
+      deviceCheck: mapDeviceCheck(e),
+      hasImage: !!e.imageUrl,
+      imageExifTime: e.imageExifTime ? formatDateTime(e.imageExifTime, undefined, timezone) : null,
+      timeCorrected: isTimeCorrected(e.startTime, e.createdAt),
+    })),
+  };
+}
+
+/** One device for the MCP `list_devices` tool — inventory metadata. */
+export interface DeviceRow {
+  name: string;
+  /** Free-text notes/description the user stored for this device. */
+  description: string | null;
+  category: string;
+  isKg: boolean;
+  purchasePrice: number | null;
+  currency: string | null;
+  hasImage: boolean;
+  archived: boolean;
+  createdAt: string;
+}
+
+export interface DeviceList {
+  schemaVersion: 1;
+  devices: DeviceRow[];
+}
+
+/** Lists the user's devices (KG + non-KG categories), active first then archived. Throws if the user does not exist. */
+export async function listDevices(username: string): Promise<DeviceList> {
+  const { userId, timezone } = await loadUserContext(username);
+  const devices = await prisma.device.findMany({
+    where: { userId },
+    orderBy: [{ archivedAt: "asc" }, { createdAt: "asc" }],
+    include: { category: { select: { name: true, slug: true } } },
+  });
+  return {
+    schemaVersion: 1 as const,
+    devices: devices.map((d) => ({
+      name: d.name,
+      description: d.description,
+      category: d.category?.name ?? "—",
+      isKg: d.category?.slug === KG_BUILTIN_SLUG,
+      purchasePrice: d.purchasePrice,
+      currency: d.currency,
+      hasImage: !!d.imageUrl,
+      archived: d.archivedAt !== null,
+      createdAt: formatDateTime(d.createdAt, undefined, timezone),
+    })),
+  };
+}
+
+/** Urteil über ein Vergehen: erkannt → (verworfen | bestraft → erledigt). Relevant ("offen") =
+ *  unbeurteilt ODER bestraft-aber-nicht-erledigt. `ref` ist die Eingabe für das MCP-Tool judge_offense. */
+export interface OffenseJudgment {
+  judgment: "open" | "dismissed" | "punished";
+  /** Strafe (Freitext) bei judgment="punished". */
+  penalty: string | null;
+  /** Grund bei judgment="dismissed". */
+  reason: string | null;
+  judgedBy: string | null;
+  judgedAt: string | null;
+  /** Bei judgment="punished": ob die Strafe bereits erledigt ist. */
+  done: boolean;
+  doneAt: string | null;
+  /** Der Sub hat die Erledigung gemeldet und wartet auf Prüfung (bestätigen/ablehnen). */
+  completionReport: { reportedAt: string; note: string | null; proofUrl: string | null } | null;
+  /** Begründung der letzten abgelehnten Erledigungs-Meldung (Strafe ist wieder offen). */
+  completionRejected: string | null;
+  ref: { type: string; id: string };
+  /** Effektive Schwere (inkl. Wiederholungs-Eskalation) — Orientierung fürs Strafmaß. */
+  severity: OffenseSeverity;
+  /** Basis-Schwere ohne Eskalation. */
+  baseSeverity: OffenseSeverity;
+  /** true = durch Wiederholung hochgestuft. */
+  escalated: boolean;
+}
+
+/** A Kontroll-based offense formatted for the MCP `get_strafbuch` tool. */
+export interface StrafbuchControlRow extends OffenseJudgment {
+  code: string | null;
+  deadline: string;
+  fulfilledAt: string | null;
+  entryTime: string | null;
+  backdated: boolean;
+  comment: string | null;
+  entryNote: string | null;
+}
+
+/** Strafbuch snapshot for the MCP `get_strafbuch` tool. Timestamps in the instance timezone. */
+export interface StrafbuchOverview {
+  schemaVersion: 1;
+  user: string;
+  generatedAt: string;
+  timezone: string;
+  /** Total number of system-detected offenses across all categories.
+   *  Distinct from penalties.punishedCount in get_overview which counts admin-confirmed punishments. */
+  detectedOffenseCount: number;
+  /** Relevante Vergehen = unbeurteilt ODER bestraft-aber-nicht-erledigt — genau die, die deine
+   *  Aufmerksamkeit brauchen (judge_offense bzw. action="complete"). */
+  openOffenseCount: number;
+  /** Bestrafte Vergehen, deren Strafe noch nicht als erledigt markiert ist. */
+  pendingPenaltyCount: number;
+  /** Strafen, deren Erledigung der Sub gemeldet hat und die auf DEINE Prüfung warten
+   *  (judge_offense action="complete" = bestätigen, "reject_completion" = ablehnen). */
+  completionReportCount: number;
+  /** Die gemeldeten Erledigungen selbst — inkl. Strafen ohne erkanntes Vergehen (z.B. AI-verhängte). */
+  completionReports: {
+    ref: string;
+    penalty: string | null;
+    reportedAt: string;
+    note: string | null;
+    proofUrl: string | null;
+  }[];
+  unauthorizedOpenings: ({
+    time: string; note: string | null;
+    lockPeriodEndedAt: string | null; lockPeriodIndefinite: boolean;
+  } & OffenseJudgment)[];
+  lateControls: StrafbuchControlRow[];
+  rejectedControls: StrafbuchControlRow[];
+  lateLocks: ({ windowEndedAt: string; message: string | null; categoryName: string | null } & OffenseJudgment)[];
+  /** Lock entries where a different device than the Anforderung specified was worn. */
+  wrongDeviceViolations: ({ time: string | null; note: string | null; deviceName: string | null } & OffenseJudgment)[];
+  /** Mandatory orgasm directives (ANWEISUNG) whose window ended without a matching orgasm. */
+  missedOrgasmInstructions: ({ windowEndedAt: string; message: string | null; requiredType: string | null } & OffenseJudgment)[];
+  /** Session-Anforderungen deren Frist ohne erfüllende Session ablief. */
+  missedSessions: ({ windowEndedAt: string; message: string | null; categoryName: string | null } & OffenseJudgment)[];
+  /** Openings (Reinigung or Toilette) where an erection was reported. */
+  erektionViolations: ({ time: string | null; oeffnenGrund: string | null; note: string | null } & OffenseJudgment)[];
+  /** Completed pauses that exceeded the configured max duration. */
+  pauseOverageViolations: ({ time: string | null; device: string | null; grund: string | null; dauerMin: number; maxMin: number } & OffenseJudgment)[];
+  /** Orgasmen ueber dem Orgasmus-Budget des laufenden Zeitraums. */
+  orgasmOverBudgetViolations: ({ time: string | null; orgasmusArt: string | null; used: number; limit: number } & OffenseJudgment)[];
+}
+
+/** Builds the Strafbuch snapshot for the user. Throws if the user does not exist. */
+export async function mcpStrafbuch(username: string, opts: McpFormatOptions = {}): Promise<StrafbuchOverview> {
+  const { userId, timezone } = await loadUserContext(username);
+  const now = new Date();
+  const fmt = pickFmt(opts.iso, timezone, now);
+  const sb = await buildStrafbuch(userId, now);
+
+  // Urteil pro Vergehen (per refId aufgelöst).
+  const judgmentByRef = new Map(sb.strafeRecords.map((r) => [r.refId, r]));
+  const detected = collectDetectedOffenses(sb);
+  const sevMap = computeSeverities(sb, now);
+
+  // Relevanz in einem Durchlauf: pending-penalty ⊂ open (= unbeurteilt ODER bestraft-nicht-erledigt).
+  let openOffenseCount = 0;
+  let pendingPenaltyCount = 0;
+  for (const o of detected) {
+    const rec = judgmentByRef.get(o.refId);
+    const pendingPenalty = rec?.status === "PUNISHED" && rec.erledigtAt == null;
+    if (!rec || pendingPenalty) openOffenseCount++;
+    if (pendingPenalty) pendingPenaltyCount++;
+  }
+
+  // Gemeldete Erledigungen direkt aus den Straf-Records — so sind auch Strafen ohne erkanntes
+  // Vergehen (z.B. von der AI im Chat verhängte, offenseType AI_KEYHOLDER) dabei.
+  // `reportedDoneAt` trägt im Strafbuch bereits den Rückfall auf das Fork-Altfeld `gemeldetAt`
+  // (`buildStrafbuch`), hier also nicht noch einmal.
+  const completionReports = sb.strafeRecords
+    .filter((r) => r.status === "PUNISHED" && r.erledigtAt == null && r.reportedDoneAt != null)
+    .map((r) => ({
+      ref: r.refId,
+      penalty: r.reason ?? r.notiz,
+      reportedAt: fmt(r.reportedDoneAt as Date),
+      note: r.erledigungNotiz,
+      proofUrl: r.nachweisUrl,
+    }));
+
+  const judge = (canonicalType: string, refId: string): OffenseJudgment => {
+    const rec = judgmentByRef.get(refId);
+    const judgment = rec ? (rec.status === "PUNISHED" ? "punished" : "dismissed") : "open";
+    const sev = sevMap.get(refId);
+    const base = sev?.base ?? OFFENSE_SEVERITY[canonicalType as keyof typeof OFFENSE_SEVERITY] ?? "mittel";
+    return {
+      judgment,
+      penalty: judgment === "punished" ? (rec?.reason ?? null) : null,
+      reason: judgment === "dismissed" ? (rec?.reason ?? null) : null,
+      judgedBy: rec?.judgedBy ?? null,
+      judgedAt: rec ? fmt(rec.bestraftDatum) : null,
+      done: judgment === "punished" ? rec?.erledigtAt != null : false,
+      doneAt: rec?.erledigtAt ? fmt(rec.erledigtAt) : null,
+      completionReport: rec?.reportedDoneAt && !rec.erledigtAt
+        ? { reportedAt: fmt(rec.reportedDoneAt), note: rec.erledigungNotiz, proofUrl: rec.nachweisUrl }
+        : null,
+      completionRejected: rec?.ablehnungGrund ?? null,
+      ref: { type: canonicalType, id: refId },
+      severity: sev?.severity ?? base,
+      baseSeverity: base,
+      escalated: sev?.escalated ?? false,
+    };
+  };
+
+  const toControlRow = (canonicalType: string) => (k: StrafbuchControlOffense): StrafbuchControlRow => ({
+    code: k.code,
+    deadline: fmt(k.deadline),
+    fulfilledAt: k.fulfilledAt ? fmt(k.fulfilledAt) : null,
+    entryTime: k.entryStartTime ? fmt(k.entryStartTime) : null,
+    backdated: k.backdated,
+    comment: k.kommentar,
+    entryNote: k.entryNote,
+    ...judge(canonicalType, k.id),
+  });
+
+  return {
+    schemaVersion: 1 as const,
+    user: username,
+    generatedAt: formatDateTime(now, undefined, timezone), // Bezugspunkt selbst — ohne Spanne
+    timezone,
+    detectedOffenseCount: detected.length,
+    openOffenseCount,
+    pendingPenaltyCount,
+    completionReportCount: completionReports.length,
+    completionReports,
+    unauthorizedOpenings: sb.unauthorizedOpenings.map((o) => ({
+      time: fmt(o.startTime),
+      note: o.note,
+      lockPeriodEndedAt: o.lockPeriodEndsAt ? fmt(o.lockPeriodEndsAt) : null,
+      lockPeriodIndefinite: o.lockPeriodIndefinite,
+      ...judge("unauthorized_opening", o.id),
+    })),
+    lateControls: sb.lateControls.map(toControlRow("late_control")),
+    rejectedControls: sb.rejectedControls.map(toControlRow("rejected_control")),
+    lateLocks: sb.lateLocks.map((m) => ({
+      windowEndedAt: fmt(m.endsAt),
+      message: m.message,
+      categoryName: m.categoryName,
+      ...judge("late_lock", m.id),
+    })),
+    wrongDeviceViolations: sb.wrongDeviceViolations.map((v) => ({
+      time: v.startTime ? fmt(v.startTime) : null,
+      note: v.note,
+      deviceName: v.deviceName,
+      ...judge("wrong_device", v.entryId),
+    })),
+    missedOrgasmInstructions: sb.missedOrgasmInstructions.map((m) => ({
+      windowEndedAt: fmt(m.endsAt),
+      message: m.message,
+      requiredType: m.requiredType,
+      ...judge("missed_orgasm", m.id),
+    })),
+    missedSessions: sb.missedSessions.map((m) => ({
+      windowEndedAt: fmt(m.endetAt),
+      message: m.nachricht,
+      categoryName: m.categoryName,
+      ...judge("missed_session", m.id),
+    })),
+    erektionViolations: sb.erektionViolations.map((v) => ({
+      time: v.startTime ? fmt(v.startTime) : null,
+      oeffnenGrund: v.oeffnenGrund,
+      note: v.note,
+      ...judge("erektion", v.entryId),
+    })),
+    pauseOverageViolations: sb.pauseOverageViolations.map((v) => ({
+      time: v.startTime ? fmt(v.startTime) : null,
+      device: v.device,
+      grund: v.grund,
+      dauerMin: v.dauerMin,
+      maxMin: v.maxMin,
+      ...judge("pause_overage", v.entryId),
+    })),
+    orgasmOverBudgetViolations: sb.orgasmOverBudgetViolations.map((v) => ({
+      time: v.startTime ? fmt(v.startTime) : null,
+      orgasmusArt: v.orgasmusArt,
+      used: v.used,
+      limit: v.limit,
+      ...judge("orgasm_over_budget", v.entryId),
+    })),
+  };
+}
+
+export interface ListNotesOptions { kg?: string; kategorie?: string; limit?: number }
+
+/** Volle Keyholder-Notiz-Historie (Beobachtungen zum Trageverhalten), optional nach KG/Kategorie
+ *  gefiltert. Read-only Gegenstück zu add/delete; get_overview zeigt nur die jüngsten 8. */
+export async function listKeyholderNotes(username: string, opts: ListNotesOptions = {}) {
+  const { userId, timezone } = await loadUserContext(username);
+  const fmt = (d: Date) => formatDateTime(d, undefined, timezone);
+  const notes = await prisma.keyholderNote.findMany({
+    where: { userId, ...(opts.kg ? { kg: opts.kg } : {}), ...(opts.kategorie ? { kategorie: opts.kategorie } : {}) },
+    orderBy: { createdAt: "desc" },
+    take: Math.min(opts.limit ?? 50, 200),
+  });
+  return {
+    schemaVersion: 1 as const,
+    user: username,
+    notes: notes.map((n) => ({ id: n.id, kg: n.kg, kategorie: n.kategorie, text: n.text, at: fmt(n.createdAt) })),
+  };
+}

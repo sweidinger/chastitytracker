@@ -41,7 +41,7 @@ export function mailReaches(email: string | null | undefined, blocked = false): 
 }
 
 export async function sendMail(to: string, subject: string, html: string) {
-  // Ohne konfiguriertes SMTP still übersprungen statt geworfen — eine fehlende Mail-Config darf
+  // Ohne konfiguriertes SMTP still uebersprungen statt geworfen — eine fehlende Mail-Config darf
   // keinen Business-Flow (Reset, Kontrolle, Benachrichtigung) mit einem 500 abbrechen.
   if (!mailConfigured()) {
     structuredLog("mail", "skipped_no_smtp", { to, subject });

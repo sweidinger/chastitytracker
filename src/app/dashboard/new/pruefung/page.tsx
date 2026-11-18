@@ -2,6 +2,7 @@ import { EntryActionFormShell } from "@/app/components/AdminActionFormShell";
 import { actionSign } from "@/app/entries/actionSign";
 import PruefungForm from "../../PruefungForm";
 import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import { sealRequiredForCode, inspectionCodeRequired } from "@/lib/kontrolleService";
 import { generateKontrollCode } from "@/lib/utils";
 import { getBoxFormContext, getOpenKontrollen, getMobileDesktopMode } from "@/lib/queries";
@@ -9,8 +10,9 @@ import { resolveInspectionTarget, isKgTarget, inspectionTargetLabel } from "@/li
 import { getTranslations } from "next-intl/server";
 import { nowDatetimeLocal, APP_TZ } from "@/lib/utils";
 
-export default async function NewPruefungPage({ searchParams }: { searchParams: Promise<{ code?: string; kommentar?: string; cat?: string }> }) {
-  const [{ code, kommentar, cat }, session] = await Promise.all([searchParams, auth()]);
+// `device` (Fork): CAGE|PLUG aus dem Link einer gerätebezogenen Kontrolle — nur für die Überschrift.
+export default async function NewPruefungPage({ searchParams }: { searchParams: Promise<{ code?: string; kommentar?: string; cat?: string; device?: string }> }) {
+  const [{ code, kommentar, cat, device }, session] = await Promise.all([searchParams, auth()]);
   const userId = session?.user?.id;
   const tz = session?.user?.timezone ?? APP_TZ;
 
@@ -43,14 +45,27 @@ export default async function NewPruefungPage({ searchParams }: { searchParams: 
   // Selbstkontrolle KEINER gewürfelt — das Formular fragte sonst nach einer Zahl, die die
   // Anforderung nicht hat und die niemand prüft.
   const codeRequired = await inspectionCodeRequired(target?.activeDeviceId ?? null);
-  const effectiveCode = codeRequired ? (code || (target?.active ? generateKontrollCode() : undefined)) : undefined;
+  // Fork: beim KG würfelt die Selbstkontrolle nur, wenn der aktive Verschluss eine Siegel-Nummer
+  // (`kontrollCode`) trägt — ohne Siegel gibt es nichts zu verifizieren. Trage-Ziele unverändert.
+  const selfCodeAllowed = wearTarget ? true : !!target?.lockEntry?.kontrollCode;
+  const effectiveCode = codeRequired
+    ? (code || (target?.active && selfCodeAllowed ? generateKontrollCode() : undefined))
+    : undefined;
   // Bei aktivem Siegel prüft die Verifikation die Siegel-Nummer zusätzlich (server-seitig). Sie
   // beweist, dass die Schlüsselbox unberührt ist — reine KG-Semantik; eine Trage-Kontrolle hat
   // keine Box, und `lockEntry` ist dort null.
   const sealRequired = sealRequiredForCode(effectiveCode, target?.lockEntry ?? null, codeRequired);
+  // Airlock-Kontrolle (Fork): der aktive KG-Verschluss trägt eine gebundene Airlock-UID → NFC statt
+  // Code. `lockEntry` ist dieselbe Zeile, die den Lock-Zustand bestimmt; `airlockUid` steht nicht in
+  // ihrem schmalen `select`, deshalb hier gezielt nachgeladen.
+  const lockEntry = wearTarget ? null : target?.lockEntry ?? null;
+  const airlockControl = lockEntry?.type === "VERSCHLUSS"
+    && !!(await prisma.entry.findUnique({ where: { id: lockEntry.id }, select: { airlockUid: true } }))?.airlockUid;
   const tf = await getTranslations("inspectionForm");
+  const tdash = await getTranslations("dashboard");
+  const deviceLabel = device === "PLUG" ? tdash("deviceLabelPlug") : device === "CAGE" ? tdash("deviceLabelCage") : null;
   return (
-    <EntryActionFormShell {...actionSign("PRUEFUNG")} title={tf("title")}>
+    <EntryActionFormShell {...actionSign("PRUEFUNG")} title={deviceLabel ? `${tf("title")} · ${deviceLabel}` : tf("title")}>
       <PruefungForm
         tz={tz}
         nowDefault={nowDatetimeLocal(tz)}
@@ -72,6 +87,7 @@ export default async function NewPruefungPage({ searchParams }: { searchParams: 
            Herleitung hier. Ohne Anforderung (freiwillige Selbstkontrolle) gibt es nichts zu
            erzwingen: sie erfüllt keine, und der Server weist deshalb auch nichts ab. */
         boxPhotoRequired={requested?.requireBoxPhoto ?? false}
+        airlockControl={airlockControl}
       />
     </EntryActionFormShell>
   );

@@ -22,13 +22,16 @@ CREATE TABLE "new_KontrollAnforderung" (
     "autoMarkedEntryId" TEXT,
     "cleaningRelock" BOOLEAN NOT NULL DEFAULT false,
     "postLock" BOOLEAN NOT NULL DEFAULT false,
+    -- Fork-Spalten (sweidinger): beim Tabellen-Neuaufbau mitnehmen, sonst gehen sie verloren
+    "requireCode" BOOLEAN NOT NULL DEFAULT true,
+    "device" TEXT,
     CONSTRAINT "KontrollAnforderung_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "KontrollAnforderung_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "DeviceCategory" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "KontrollAnforderung_deviceId_fkey" FOREIGN KEY ("deviceId") REFERENCES "Device" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "KontrollAnforderung_entryId_fkey" FOREIGN KEY ("entryId") REFERENCES "Entry" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "KontrollAnforderung_autoMarkedEntryId_fkey" FOREIGN KEY ("autoMarkedEntryId") REFERENCES "Entry" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
-INSERT INTO "new_KontrollAnforderung" ("auto", "autoMarkedEntryId", "autoMarkedRemovedAt", "benachrichtigtAt", "benachrichtigtReminderAt", "categoryId", "cleaningRelock", "code", "createdAt", "createdBy", "deadline", "deviceId", "entryId", "fulfilledAt", "id", "kommentar", "userId", "wirksamAb", "withdrawnAt") SELECT "auto", "autoMarkedEntryId", "autoMarkedRemovedAt", "benachrichtigtAt", "benachrichtigtReminderAt", "categoryId", "cleaningRelock", "code", "createdAt", "createdBy", "deadline", "deviceId", "entryId", "fulfilledAt", "id", "kommentar", "userId", "wirksamAb", "withdrawnAt" FROM "KontrollAnforderung";
+INSERT INTO "new_KontrollAnforderung" ("auto", "autoMarkedEntryId", "autoMarkedRemovedAt", "benachrichtigtAt", "benachrichtigtReminderAt", "categoryId", "cleaningRelock", "code", "createdAt", "createdBy", "deadline", "deviceId", "entryId", "fulfilledAt", "id", "kommentar", "userId", "wirksamAb", "withdrawnAt", "requireCode", "device") SELECT "auto", "autoMarkedEntryId", "autoMarkedRemovedAt", "benachrichtigtAt", "benachrichtigtReminderAt", "categoryId", "cleaningRelock", "code", "createdAt", "createdBy", "deadline", "deviceId", "entryId", "fulfilledAt", "id", "kommentar", "userId", "wirksamAb", "withdrawnAt", "requireCode", "device" FROM "KontrollAnforderung";
 DROP TABLE "KontrollAnforderung";
 ALTER TABLE "new_KontrollAnforderung" RENAME TO "KontrollAnforderung";
 CREATE UNIQUE INDEX "KontrollAnforderung_entryId_key" ON "KontrollAnforderung"("entryId");
@@ -89,9 +92,23 @@ CREATE TABLE "new_User" (
     "targetWeightKeyholderSetAt" DATETIME,
     "weighingWindows" TEXT,
     "weightReminderMark" TEXT,
-    "lockRequiresBolt" BOOLEAN NOT NULL DEFAULT false
+    "lockRequiresBolt" BOOLEAN NOT NULL DEFAULT false,
+    -- Fork-Spalten (sweidinger): beim Tabellen-Neuaufbau mitnehmen, sonst gehen sie verloren
+    "toiletteErlaubt" BOOLEAN NOT NULL DEFAULT false,
+    "toiletteMaxMinuten" INTEGER NOT NULL DEFAULT 15,
+    "toiletteMaxProTag" INTEGER NOT NULL DEFAULT 0,
+    "plugReinigungErlaubt" BOOLEAN NOT NULL DEFAULT false,
+    "plugReinigungMaxMinuten" INTEGER NOT NULL DEFAULT 15,
+    "plugReinigungMaxProTag" INTEGER NOT NULL DEFAULT 0,
+    "plugReinigungsFenster" TEXT,
+    "plugToiletteMaxMinuten" INTEGER NOT NULL DEFAULT 15,
+    "orgasmBudget" INTEGER,
+    "orgasmBudgetPeriode" TEXT NOT NULL DEFAULT 'WOCHE',
+    "orgasmBudgetSetAt" DATETIME,
+    "verdienteOrgasmen" INTEGER NOT NULL DEFAULT 0,
+    "denialRecordDays" INTEGER NOT NULL DEFAULT 0
 );
-INSERT INTO "new_User" ("autoInspectionPlannedFor", "autoKontrolleAktiv", "autoKontrolleDayRules", "autoKontrolleDays", "autoKontrolleFensterBis", "autoKontrolleFensterVon", "autoKontrolleFristBis", "autoKontrolleFristVon", "autoKontrolleNurBeiSperre", "autoKontrollePerDayMax", "autoKontrollePerDayMin", "autoKontrolleRuheBis", "autoKontrolleRuheVon", "createdAt", "dashboardLayout", "email", "heightCm", "hideOwnTracker", "id", "inspectionAutoMarkDelayMinutes", "inspectionAutoMarkEnabled", "inspectionReminderDelayMinutes", "inspectionReminderEnabled", "locale", "lockRequiresBolt", "mcpKeyholderInstructions", "mobileDesktopUpload", "noticeSeenVersion", "oeffnenGruendeConfig", "orgasmusArtenConfig", "passwordHash", "reinigungErlaubt", "reinigungMaxMinuten", "reinigungMaxProTag", "reinigungsFenster", "role", "startPage", "targetWeightKeyholderKg", "targetWeightKeyholderSetAt", "targetWeightKg", "targetWeightSetAt", "timezone", "unitSystem", "username", "weighingWindows", "weightReminderMark", "weightTrackingEnabled") SELECT "autoInspectionPlannedFor", "autoKontrolleAktiv", "autoKontrolleDayRules", "autoKontrolleDays", "autoKontrolleFensterBis", "autoKontrolleFensterVon", "autoKontrolleFristBis", "autoKontrolleFristVon", "autoKontrolleNurBeiSperre", "autoKontrollePerDayMax", "autoKontrollePerDayMin", "autoKontrolleRuheBis", "autoKontrolleRuheVon", "createdAt", "dashboardLayout", "email", "heightCm", "hideOwnTracker", "id", "inspectionAutoMarkDelayMinutes", "inspectionAutoMarkEnabled", "inspectionReminderDelayMinutes", "inspectionReminderEnabled", "locale", "lockRequiresBolt", "mcpKeyholderInstructions", "mobileDesktopUpload", "noticeSeenVersion", "oeffnenGruendeConfig", "orgasmusArtenConfig", "passwordHash", "reinigungErlaubt", "reinigungMaxMinuten", "reinigungMaxProTag", "reinigungsFenster", "role", "startPage", "targetWeightKeyholderKg", "targetWeightKeyholderSetAt", "targetWeightKg", "targetWeightSetAt", "timezone", "unitSystem", "username", "weighingWindows", "weightReminderMark", "weightTrackingEnabled" FROM "User";
+INSERT INTO "new_User" ("autoInspectionPlannedFor", "autoKontrolleAktiv", "autoKontrolleDayRules", "autoKontrolleDays", "autoKontrolleFensterBis", "autoKontrolleFensterVon", "autoKontrolleFristBis", "autoKontrolleFristVon", "autoKontrolleNurBeiSperre", "autoKontrollePerDayMax", "autoKontrollePerDayMin", "autoKontrolleRuheBis", "autoKontrolleRuheVon", "createdAt", "dashboardLayout", "email", "heightCm", "hideOwnTracker", "id", "inspectionAutoMarkDelayMinutes", "inspectionAutoMarkEnabled", "inspectionReminderDelayMinutes", "inspectionReminderEnabled", "locale", "lockRequiresBolt", "mcpKeyholderInstructions", "mobileDesktopUpload", "noticeSeenVersion", "oeffnenGruendeConfig", "orgasmusArtenConfig", "passwordHash", "reinigungErlaubt", "reinigungMaxMinuten", "reinigungMaxProTag", "reinigungsFenster", "role", "startPage", "targetWeightKeyholderKg", "targetWeightKeyholderSetAt", "targetWeightKg", "targetWeightSetAt", "timezone", "unitSystem", "username", "weighingWindows", "weightReminderMark", "weightTrackingEnabled", "toiletteErlaubt", "toiletteMaxMinuten", "toiletteMaxProTag", "plugReinigungErlaubt", "plugReinigungMaxMinuten", "plugReinigungMaxProTag", "plugReinigungsFenster", "plugToiletteMaxMinuten", "orgasmBudget", "orgasmBudgetPeriode", "orgasmBudgetSetAt", "verdienteOrgasmen", "denialRecordDays") SELECT "autoInspectionPlannedFor", "autoKontrolleAktiv", "autoKontrolleDayRules", "autoKontrolleDays", "autoKontrolleFensterBis", "autoKontrolleFensterVon", "autoKontrolleFristBis", "autoKontrolleFristVon", "autoKontrolleNurBeiSperre", "autoKontrollePerDayMax", "autoKontrollePerDayMin", "autoKontrolleRuheBis", "autoKontrolleRuheVon", "createdAt", "dashboardLayout", "email", "heightCm", "hideOwnTracker", "id", "inspectionAutoMarkDelayMinutes", "inspectionAutoMarkEnabled", "inspectionReminderDelayMinutes", "inspectionReminderEnabled", "locale", "lockRequiresBolt", "mcpKeyholderInstructions", "mobileDesktopUpload", "noticeSeenVersion", "oeffnenGruendeConfig", "orgasmusArtenConfig", "passwordHash", "reinigungErlaubt", "reinigungMaxMinuten", "reinigungMaxProTag", "reinigungsFenster", "role", "startPage", "targetWeightKeyholderKg", "targetWeightKeyholderSetAt", "targetWeightKg", "targetWeightSetAt", "timezone", "unitSystem", "username", "weighingWindows", "weightReminderMark", "weightTrackingEnabled", "toiletteErlaubt", "toiletteMaxMinuten", "toiletteMaxProTag", "plugReinigungErlaubt", "plugReinigungMaxMinuten", "plugReinigungMaxProTag", "plugReinigungsFenster", "plugToiletteMaxMinuten", "orgasmBudget", "orgasmBudgetPeriode", "orgasmBudgetSetAt", "verdienteOrgasmen", "denialRecordDays" FROM "User";
 DROP TABLE "User";
 ALTER TABLE "new_User" RENAME TO "User";
 CREATE UNIQUE INDEX "User_username_key" ON "User"("username");

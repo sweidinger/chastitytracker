@@ -86,6 +86,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (purchasePrice !== undefined) data.purchasePrice = purchasePrice ?? null;
   if (currency !== undefined) data.currency = currency || null;
   if (categoryId !== undefined) data.categoryId = categoryId || null;
+  if (body.sortOrder !== undefined && Number.isFinite(Number(body.sortOrder))) data.sortOrder = Math.trunc(Number(body.sortOrder));
 
   // Die Kontroll-Code-Pflicht ist KEIN Selbst-Feld: sie abzuschalten schwächt eine Kontrolle, und ein
   // Sub, der das an seinem eigenen Gerät darf, kontrolliert sich nicht mehr. Nur ein Keyholder/Admin

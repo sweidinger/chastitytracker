@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ClipboardList, Droplets, Camera, Play, Square } from "lucide-react";
+import { Camera, Pause, Play } from "lucide-react";
 import { formatDateTime, formatTime, APP_TZ } from "@/lib/utils";
 import { TYPE_STATS_KEYS } from "@/lib/constants";
 import { FullscreenImageModal } from "@/app/components/ImageViewer";
@@ -26,8 +26,15 @@ import type { KontrollePill } from "@/lib/kontrollePills";
  * Genau so laufen zwei Tabellen für dieselbe Frage auseinander — unbemerkt, weil beide für sich
  * plausibel aussehen.
  */
+/** Die Pausen-Einträge (Reinigung/Toilette eines Geräts) haben (noch) kein Zeichen in `actionSign` —
+ *  bis sie dort einziehen, stehen sie hier als Rückfall. Pause = unterbrochen, Ende = es läuft weiter. */
+const PAUSE_ICONS: Record<string, typeof Pause> = {
+  PAUSE_BEGIN: Pause,
+  PAUSE_END: Play,
+};
+
 function typeIcon(type: string, size: number): ReactNode {
-  const Icon = actionIcon(type);
+  const Icon = actionIcon(type) ?? PAUSE_ICONS[type];
   return Icon ? <Icon size={size} /> : null;
 }
 
@@ -43,6 +50,8 @@ interface Entry {
   oeffnenGrund?: string | null;
   /** Offline erfasst: der Träger hat den Eintrag ohne Netz gestellt. Kleine Notiz „offline erfasst". */
   capturedOffline?: boolean;
+  /** Pause device ("CAGE" | "PLUG") for PAUSE_BEGIN/PAUSE_END entries. */
+  pauseDevice?: string | null;
   /** Category info for WEAR_BEGIN/WEAR_END entries — derived via Entry.device.category. */
   category?: { name: string; color: string; icon: string } | null;
 }
@@ -95,6 +104,10 @@ export default function EntryRow({ entry: e, locale, tz = APP_TZ, orgasmusLabel,
   const startTime = e.startTime instanceof Date ? e.startTime : new Date(e.startTime);
 
   const isWear = e.type === "WEAR_BEGIN" || e.type === "WEAR_END";
+  const isPause = e.type === "PAUSE_BEGIN" || e.type === "PAUSE_END";
+  const pauseDeviceLabel = isPause && e.pauseDevice
+    ? tStats(e.pauseDevice === "PLUG" ? "devicePlugShort" : "deviceCageShort")
+    : null;
   const wearActionLabel = isWear ? tStats(e.type === "WEAR_BEGIN" ? "wearBeginShort" : "wearEndShort") : "";
   const wearLabel = isWear && e.category
     ? `${e.category.name} · ${wearActionLabel}`
@@ -169,6 +182,13 @@ export default function EntryRow({ entry: e, locale, tz = APP_TZ, orgasmusLabel,
             )}
           </span>
 
+          {/* Pause: welches Gerät (KG/Plug) und warum (Reinigung/Toilette) — sonst stünde nur
+              „Pause" da, und zwei Pausen am selben Tag wären nicht zu unterscheiden. */}
+          {isPause && (pauseDeviceLabel || openingLabel) && (
+            <span className="text-neben text-foreground-faint whitespace-nowrap">
+              {[pauseDeviceLabel, openingLabel].filter(Boolean).join(" · ")}
+            </span>
+          )}
           {e.imageUrl && (
             <Camera size={12} className="text-foreground-faint flex-shrink-0" />
           )}
@@ -236,6 +256,7 @@ export default function EntryRow({ entry: e, locale, tz = APP_TZ, orgasmusLabel,
                 inspectionPill={inspectionPill}
                 capturedOffline={e.capturedOffline}
                 note={e.note}
+                entryId={e.id}
               />
               {inspectionReview && <InspectionReviewButtons {...inspectionReview} />}
             </div>

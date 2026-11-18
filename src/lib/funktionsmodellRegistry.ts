@@ -27,7 +27,9 @@ export type FmTarget =
   | "Sperrzeit" | "Reinigung" | "Kontrollen" | "Auto-Kontrollen" | "Box" | "Strafbuch"
   | "Aufgaben" | "Trainingsziele" | "Orgasmus" | "Geräte" | "Einträge" | "Sessions/Statistik"
   | "Benachrichtigungen" | "Nachrichten" | "MCP" | "Oberfläche" | "Zugang" | "Bildersafe" | "Gewicht"
-  | "Tagebuch";
+  | "Tagebuch"
+  // Fork (sweidinger)
+  | "Zufall" | "KI-Keyholderin";
 
 /**
  * Wie lange ein Wert gilt. Die Unterscheidung ist load-bearing: `User.cleaningAllowed` ist ein
@@ -1546,4 +1548,163 @@ export const FM_REGISTRY: FmEntry[] = [
     retroactive: "Einen Stichtag zurückzudatieren beurteilt Vergehen vor diesem Datum neu und kann sie nachträglich melden.",
   }),
   x("runtime", "AppMeta", "updatedAt", "Letzte Änderung. Das Portal liest daraus die Aktivität der Instanz."),
+
+  // ══ Fork (sweidinger) ══════════════════════════════════════════════════════════════════════
+  // ── User: Toilette (analog Reinigung, ohne Zeitfenster) ────────────────────────────────────
+  s({
+    model: "User", field: "toiletteErlaubt", domain: "cleaning", scope: "standing",
+    effect: "Ob Toiletten-Öffnungen erlaubt sind — eine erlaubte Toiletten-Pause bricht die Tragezeit nicht. Wie bei der Reinigung muss eine aktive Sperrzeit es zusätzlich erlauben.",
+    writers: ["admin"], affects: ["Reinigung", "Sperrzeit", "Strafbuch"],
+  }),
+  s({
+    model: "User", field: "toiletteMaxMinuten", domain: "cleaning", scope: "standing",
+    effect: "Höchstdauer EINER Toiletten-Pause; darüber wird sie zum erkannten Vergehen.",
+    writers: ["admin"], affects: ["Reinigung", "Strafbuch", "Sessions/Statistik"],
+  }),
+  s({
+    model: "User", field: "toiletteMaxProTag", domain: "cleaning", scope: "standing",
+    effect: "Anzahl Toiletten-Öffnungen pro Kalendertag. 0 = unbegrenzt.",
+    writers: ["admin"], affects: ["Reinigung", "Strafbuch"],
+  }),
+  // ── User: Plug (Reinigung + Toilette getrennt vom KG) ──────────────────────────────────────
+  s({
+    model: "User", field: "plugReinigungErlaubt", domain: "cleaning", scope: "standing",
+    effect: "Ob Reinigungspausen des Plugs erlaubt sind — getrennt vom KG.",
+    writers: ["admin"], affects: ["Reinigung", "Strafbuch", "Geräte"],
+  }),
+  s({
+    model: "User", field: "plugReinigungMaxMinuten", domain: "cleaning", scope: "standing",
+    effect: "Höchstdauer EINER Plug-Reinigungspause.",
+    writers: ["admin"], affects: ["Reinigung", "Strafbuch", "Sessions/Statistik"],
+  }),
+  s({
+    model: "User", field: "plugReinigungMaxProTag", domain: "cleaning", scope: "standing",
+    effect: "Anzahl Plug-Reinigungen pro Kalendertag. 0 = unbegrenzt.",
+    writers: ["admin"], affects: ["Reinigung", "Strafbuch"],
+  }),
+  s({
+    model: "User", field: "plugReinigungsFenster", domain: "cleaning", scope: "standing",
+    effect: "Tages-Zeitfenster der Plug-Reinigung (JSON-Liste), analog `cleaningWindows`. Leer = nicht zeitgebunden.",
+    writers: ["admin"], affects: ["Reinigung"],
+  }),
+  s({
+    model: "User", field: "plugToiletteMaxMinuten", domain: "cleaning", scope: "standing",
+    effect: "Höchstdauer einer Plug-Toiletten-Pause. Die Pause selbst ist immer erlaubt und unbegrenzt oft.",
+    writers: ["admin"], affects: ["Reinigung", "Strafbuch", "Sessions/Statistik"],
+  }),
+  // ── User: Orgasmus-Budget und Belohnungen ──────────────────────────────────────────────────
+  s({
+    model: "User", field: "orgasmBudget", domain: "orgasmus", scope: "standing",
+    effect: "Höchstzahl zählbarer Orgasmen je Zeitraum — echte Orgasmen ausserhalb einer erfüllten Anweisung. `null` = kein Budget.",
+    writers: ["admin"], affects: ["Orgasmus", "Strafbuch"],
+  }),
+  s({
+    model: "User", field: "orgasmBudgetPeriode", domain: "orgasmus", scope: "standing",
+    effect: "Zeitraum des Budgets: WOCHE oder MONAT.",
+    writers: ["admin"], affects: ["Orgasmus", "Strafbuch"],
+  }),
+  x("audit", "User", "orgasmBudgetSetAt", "Wann das Budget zuletzt gesetzt wurde — ab da wird gezählt."),
+  x("runtime", "User", "verdienteOrgasmen",
+    "Belohnungs-Guthaben (nie negativ). Ein Kontostand, keine Einstellung: Gutschrift über erreichte Trainingsziele, Abbuchung beim Gewähren eines Belohnungs-Fensters; jede Buchung steht in `BelohnungEvent`."),
+  x("runtime", "User", "denialRecordDays", "Zuletzt gemeldeter Verzichts-Rekord in Tagen — nur die Drossel des Meilenstein-Pushs."),
+
+  // ── Entry ──────────────────────────────────────────────────────────────────────────────────
+  s({
+    model: "Entry", field: "erektionGemeldet", domain: "eintraege", scope: "entry",
+    effect: "Beim Öffnen (Reinigung/Toilette) gemeldet: es lag eine Erektion vor. Erscheint im Strafbuch, ohne automatisches Urteil.",
+    writers: ["sub"], affects: ["Strafbuch"],
+  }),
+  s({
+    model: "Entry", field: "falschesGeraet", domain: "eintraege", scope: "entry",
+    effect: "Beim Verschluss: ein anderes Gerät als das von der Anforderung vorgegebene. Erscheint im Strafbuch, ohne automatisches Urteil.",
+    writers: ["sub", "system"], affects: ["Strafbuch", "Sperrzeit"],
+  }),
+  s({
+    model: "Entry", field: "sessionGoalAchieved", domain: "eintraege", scope: "entry",
+    effect: "Beim Session-Ende: Ziel der Session erreicht? Entscheidet mit über die Erfüllung einer Session-Anforderung.",
+    writers: ["sub"], affects: ["Sessions/Statistik"],
+  }),
+  x("record", "Entry", "videoUrl", "Video-Nachweis des Session-Endes (Pflicht, wenn Kategorie oder Anforderung ihn verlangen)."),
+  x("record", "Entry", "pauseDevice", "Bei Pausen-Einträgen: welches Gerät pausiert (CAGE oder PLUG)."),
+  x("record", "Entry", "airlockCode", "Airlock-NFC beim Verschluss: die gescannte 5-stellige Lock-Nummer."),
+  x("record", "Entry", "airlockUid", "Airlock-NFC beim Verschluss: die vom Airlock-Dienst bestätigte Tag-UID."),
+
+  // ── Geräte ─────────────────────────────────────────────────────────────────────────────────
+  s({
+    model: "Device", field: "sortOrder", domain: "geraete", scope: "standing",
+    effect: "Reihenfolge der Geräte in Listen und Auswahlfeldern (auch die Grössenfolge für „nächstgrösserer Plug\").",
+    writers: ["sub", "admin"], affects: ["Oberfläche", "Geräte"],
+  }),
+  s({
+    model: "DeviceCategory", field: "isSessionCategory", domain: "geraete", scope: "standing",
+    effect: "Session-Kategorie: statt Tragezeit (Beginn/Ende) zeitlich begrenzte Sessions. Nicht für die eingebaute KG-Kategorie.",
+    writers: ["sub", "admin"], affects: ["Geräte", "Einträge", "Sessions/Statistik"],
+  }),
+  s({
+    model: "DeviceCategory", field: "maxSessionMinutes", domain: "geraete", scope: "standing",
+    effect: "Höchstdauer einer Session dieser Kategorie.",
+    writers: ["sub", "admin"], affects: ["Sessions/Statistik"],
+  }),
+  s({
+    model: "DeviceCategory", field: "requiresVideo", domain: "geraete", scope: "standing",
+    effect: "Das Session-Ende dieser Kategorie braucht einen Video-Nachweis.",
+    writers: ["sub", "admin"], affects: ["Einträge"],
+  }),
+  s({
+    model: "DeviceCategory", field: "orgasmusZiel", domain: "geraete", scope: "standing",
+    effect: "Standard-Orgasmus-Ziel einer Session: KEINE, ERFORDERLICH oder VERBOTEN. Eine Session-Anforderung kann es überschreiben.",
+    writers: ["sub", "admin"], affects: ["Sessions/Statistik", "Orgasmus"],
+  }),
+  s({
+    model: "DeviceCategory", field: "region", domain: "geraete", scope: "standing",
+    effect: "Körperregion: zwei aktive Geräte derselben Region (ausser `other`) schliessen sich aus.",
+    writers: ["sub", "admin"], affects: ["Geräte", "Einträge"],
+  }),
+
+  // ── Direktiven ─────────────────────────────────────────────────────────────────────────────
+  s({
+    model: "VerschlussAnforderung", field: "deviceCategoryId", domain: "sperrzeit", scope: "directive",
+    effect: "Für welche Geräte-Kategorie die Anforderung gilt. `null` = KG.",
+    writers: ["admin", "mcp"], affects: ["Sperrzeit", "Geräte"],
+  }),
+  s({
+    model: "VerschlussAnforderung", field: "airlockCode", domain: "sperrzeit", scope: "directive",
+    effect: "Vorgegebenes Airlock-Lock aus dem Pool des Subs; der Verschluss muss genau dieses Lock per NFC nachweisen.",
+    writers: ["admin"], affects: ["Sperrzeit", "Einträge"],
+  }),
+  s({
+    model: "VerschlussAnforderung", field: "fotoPflicht", domain: "sperrzeit", scope: "directive",
+    effect: "Foto-Pflicht beim Verschluss für genau diese Anforderung. `null` = Standard der Kategorie.",
+    writers: ["admin", "mcp"], affects: ["Einträge"],
+  }),
+  s({
+    model: "VerschlussAnforderung", field: "toiletteErlaubt", domain: "sperrzeit", scope: "directive",
+    effect: "Ob eine Toiletten-Öffnung die Sperrzeit NICHT bricht; gilt für genau diese Sperrzeit und wird bei einer Anforderung mit Mindestdauer vererbt.",
+    writers: ["admin", "mcp"], affects: ["Sperrzeit", "Reinigung"],
+  }),
+  s({
+    model: "KontrollAnforderung", field: "requireCode", domain: "kontrollen", scope: "directive",
+    effect: "Ob die Kontrolle einen frischen handgeschriebenen Code im Foto verlangt. `false` = nur Foto (ggf. mit Siegel).",
+    writers: ["admin", "mcp"], affects: ["Kontrollen"],
+  }),
+  x("record", "KontrollAnforderung", "deviceKind",
+    "Fork-Altfeld (CAGE/PLUG, Spalte `device`) aus der Zeit vor `categoryId`/`deviceId` — nur noch für Bestands-Zeilen gelesen."),
+  s({
+    model: "OrgasmusAnforderung", field: "istStrafe", domain: "orgasmus", scope: "directive",
+    effect: "Als Strafe angeordnet — Nicht-Erfüllung eskaliert strenger.",
+    writers: ["admin", "mcp"], affects: ["Orgasmus", "Strafbuch"],
+  }),
+  x("record", "OrgasmusAnforderung", "istBelohnung",
+    "Als Belohnungs-Fenster gewährt — 1 Guthaben ist dafür vorgemerkt und wird bei einem Rückzug im laufenden Fenster erstattet."),
+  s({
+    model: "OrgasmusAnforderung", field: "fotoPflicht", domain: "orgasmus", scope: "directive",
+    effect: "Foto-Nachweis beim Erfassen des Orgasmus erforderlich.",
+    writers: ["admin", "mcp"], affects: ["Orgasmus", "Einträge"],
+  }),
+
+  // ── StrafeRecord: Erledigungs-Meldung des Subs ─────────────────────────────────────────────
+  x("runtime", "StrafeRecord", "gemeldetAt", "Der Sub hat die Strafe als erledigt gemeldet; wartet auf Bestätigung oder Ablehnung."),
+  x("record", "StrafeRecord", "nachweisUrl", "Optionales Nachweis-Foto zur Meldung."),
+  x("record", "StrafeRecord", "erledigungNotiz", "Optionale Notiz des Subs zur Meldung."),
+  x("record", "StrafeRecord", "ablehnungGrund", "Grund einer abgelehnten Meldung; die Meldung selbst wird dabei geleert."),
 ];

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
-import { ListChecks } from "lucide-react";
+import { ListChecks, Pause, Play } from "lucide-react";
 import Card from "@/app/components/Card";
 import RowAction from "@/app/components/RowAction";
 import { formatElapsedMs } from "@/lib/utils";
@@ -26,6 +26,14 @@ export interface ActiveWearSessionRow {
   /** Foto vom Trage-Beginn; ohne eines bleibt das Kategorie-Icon stehen. Nicht optional — sonst
    *  liesse ein dritter Aufrufer das Feld stillschweigend weg, siehe `ActiveWearSession`. */
   imageUrl: string | null;
+  /** Override the default wear-end href (e.g. session-end for session categories). */
+  endHref?: string;
+  /** ISO string of active pause start; null/undefined = not paused. When set, the timer freezes and a ▶ button is shown. */
+  activePauseSince?: string | null;
+  /** Pause-start URL (⏸ button). When provided, a pause button is shown in the row. */
+  pauseStartHref?: string;
+  /** Pause-end URL (▶ button). */
+  pauseEndHref?: string;
 }
 
 interface Props {
@@ -34,8 +42,7 @@ interface Props {
   serverNow: string;
   /** Keyholder-Sicht: die Karte gehört zu DIESEM Sub und muss auf die Admin-Route zeigen.
    *  Ohne das führte sie den Keyholder auf `/dashboard/…`, wo `proxy.ts` ihn nach `/admin`
-   *  zurückwirft — die Karte war für ihn schlicht ein toter Link. Gleiche Unterscheidung wie
-   *  `adminUserId` in `WearForm`. */
+   *  zurückwirft — die Karte war für ihn schlicht ein toter Link. */
   adminUserId?: string;
 }
 
@@ -60,45 +67,76 @@ export default function ActiveWearSessions({ sessions, serverNow, adminUserId }:
       <ul className="flex flex-col gap-2">
         {sessions.map((s) => {
           const style = categoryStyle(s.categoryColor);
-          const elapsedMs = Math.max(0, now - Date.parse(s.since));
-          const endHref = wearActionHref({ categoryId: s.categoryId, active: true, adminUserId });
+          const pauseStartMs = s.activePauseSince ? Date.parse(s.activePauseSince) : null;
+          const isPaused = !!pauseStartMs;
+          // Timer freezes at pause-start when paused; grows normally otherwise
+          const frozenAt = pauseStartMs ?? now;
+          const elapsedMs = Math.max(0, frozenAt - Date.parse(s.since));
+          const pauseElapsedMs = pauseStartMs ? Math.max(0, now - pauseStartMs) : 0;
+          const endHref = s.endHref ?? wearActionHref({ categoryId: s.categoryId, active: true, adminUserId });
+          const hasPause = !!(s.pauseStartHref || s.pauseEndHref);
+
           return (
             <li key={s.categoryId}>
               <Card>
-                <Link
-                  href={endHref}
-                  className="flex items-center gap-3 p-3 hover:bg-surface-raised active:bg-background-subtle transition border-l-[3px]"
+                <div
+                  className="flex items-center gap-3 p-3 border-l-[3px]"
                   style={{ borderLeftColor: style.borderColor }}
                 >
-                  {/* Das beim Einsetzen aufgenommene Foto steht dort, wo sonst das Kategorie-Symbol
-                      sitzt — der Keyholder sieht auf der Übersicht, WAS getragen wird, statt nur
-                      dass etwas getragen wird. Ohne `onClick`: die ganze Karte ist ein Link. */}
-                  <CategoryPhotoThumb
-                    imageUrl={s.imageUrl}
-                    categoryColor={s.categoryColor}
-                    categoryIcon={s.categoryIcon}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-foreground truncate">
-                      {s.categoryName}
-                    </p>
-                    <p className="text-xs text-foreground-muted truncate">{s.deviceName}</p>
-                  </div>
-                  <span className="font-mono text-base font-semibold tabular-nums text-foreground shrink-0">
-                    {formatElapsedMs(elapsedMs, locale, false)}
-                  </span>
-                  {/* Die gebundene Session darf nicht dieselbe harmlose Ein-Tap-Affordanz zeigen wie
-                      eine freie — das Formular warnt zwar, aber die Karte soll es vorher sagen. */}
-                  {s.heldReason && (
-                    <ListChecks size={14} className="text-warn shrink-0 ml-1" aria-label={s.heldReason} />
+                  <Link href={endHref} className="flex items-center gap-3 flex-1 min-w-0 hover:opacity-90 active:opacity-70 transition">
+                    {/* Das beim Einsetzen aufgenommene Foto steht dort, wo sonst das Kategorie-Symbol
+                        sitzt — der Keyholder sieht auf der Übersicht, WAS getragen wird, statt nur
+                        dass etwas getragen wird. */}
+                    <CategoryPhotoThumb
+                      imageUrl={s.imageUrl}
+                      categoryColor={s.categoryColor}
+                      categoryIcon={s.categoryIcon}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {s.categoryName}
+                      </p>
+                      <p className="text-xs text-foreground-muted truncate">{s.deviceName}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <span className="font-mono text-base font-semibold tabular-nums text-foreground" suppressHydrationWarning>
+                        {formatElapsedMs(elapsedMs, locale, false)}
+                      </span>
+                      {/* Fork: laufende Pause — der Timer steht, darunter die Pausendauer. */}
+                      {isPaused && (
+                        <p className="text-xs text-foreground-muted tabular-nums font-mono" suppressHydrationWarning>
+                          ⏸ {formatElapsedMs(pauseElapsedMs, locale, false)}
+                        </p>
+                      )}
+                    </div>
+                    {/* Die gebundene Session darf nicht dieselbe harmlose Ein-Tap-Affordanz zeigen wie
+                        eine freie — das Formular warnt zwar, aber die Karte soll es vorher sagen. */}
+                    {s.heldReason && (
+                      <ListChecks size={14} className="text-warn shrink-0 ml-1" aria-label={s.heldReason} />
+                    )}
+                    {/* Über `RowAction`, damit die Zeile denselben Chevron trägt wie jede andere
+                        antippbare Zeile — „Beenden" allein las sich wie eine Beschriftung des Timers
+                        davor, nicht wie die Handlung, die ein Tap auslöst. Mit Pause-Knopf daneben
+                        entfällt er (Fork), sonst stünden zwei Handlungen nebeneinander. */}
+                    {!hasPause && (
+                      <span className="ml-1">
+                        <RowAction label={t("endShort")} />
+                      </span>
+                    )}
+                  </Link>
+                  {/* Fork: Pause-Knopf — eigener Link neben dem Zeilen-Link (kein verschachteltes <a>). */}
+                  {hasPause && (
+                    <Link
+                      href={isPaused ? (s.pauseEndHref ?? "#") : (s.pauseStartHref ?? "#")}
+                      className="shrink-0 size-9 rounded-lg flex items-center justify-center bg-background-subtle hover:bg-background-hover active:bg-background-active transition"
+                      aria-label={isPaused ? t("pauseEnd") : t("pauseStart")}
+                    >
+                      {isPaused
+                        ? <Play size={18} className="text-foreground" fill="currentColor" />
+                        : <Pause size={18} className="text-foreground" />}
+                    </Link>
                   )}
-                  {/* Über `RowAction`, damit die Zeile denselben Chevron trägt wie jede andere
-                      antippbare Zeile — „Beenden" allein las sich wie eine Beschriftung des Timers
-                      davor, nicht wie die Handlung, die ein Tap auslöst. */}
-                  <span className="ml-1">
-                    <RowAction label={t("endShort")} />
-                  </span>
-                </Link>
+                </div>
               </Card>
             </li>
           );

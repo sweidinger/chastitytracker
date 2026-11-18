@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 import { structuredLog } from "@/lib/serverLog";
 import { visionConfigured } from "@/lib/vision";
 import { embedAvailable, embedModel, embedImages, bytesToVector, vectorToBytes, cosine } from "@/lib/embed";
@@ -31,7 +32,7 @@ export async function detectDeviceByEmbedding(queryImageUrl: string, userId: str
   const model = embedModel();
 
   const devices = await prisma.device.findMany({
-    where: { userId, archivedAt: null, OR: [{ category: { isBuiltIn: true } }, { categoryId: null }] },
+    where: { userId, archivedAt: null, OR: [{ category: { slug: KG_BUILTIN_SLUG } }, { categoryId: null }] }, // KG-Geräte (Slug: Plug ist auch eingebaut)
     select: {
       id: true,
       name: true,

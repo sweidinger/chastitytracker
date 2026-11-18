@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Multi-User Web-App zur Erfassung von Keuschheitsgürtel-Einschlusszeiten. Benutzer werden in der DB mit bcrypt-Passwort gespeichert. Admins verwalten Benutzer, setzen Trainingsvorgaben und sehen Statistiken. Jeder Benutzer kann Einschlüsse (VERSCHLUSS/OEFFNEN), Prüfungen (PRUEFUNG) und Orgasmen (ORGASMUS) mit Zeitstempel, Foto und Notiz erfassen.
 
+### Externe Features
+
+- **Airlock-NFC** (`docs/AIRLOCK_NFC.md`) – Lese-/Verifikationsseite für den NFC-Echtheits-/Kopierschutz der 3D-druckbaren AirLocks aus dem separaten `Airlock3DSTLGenerator`. Der KG-Tracker ist reines Frontend + Backend-Proxy (Weg A): liest UID + NDEF, ruft die Airlock-`verify`-API auf, hält keine Krypto/Registry. Siehe die Datei für Architektur, API-Contract und offene To-dos.
+
 ## Commands
 
 ```bash
@@ -182,6 +186,21 @@ Der Instanzname `trublue` ist **nicht** schützenswert — es ist der Name des R
 
 Nach dem Dispatch mit `gh run watch <run-id> --exit-status` oder `gh run view <run-id>` prüfen, ob `typecheck`, `build-and-push` und `deploy` grün sind.
 
+### Beta-Instanz auf dem NAS (lokaler Build, getrennt vom GHCR-Flow)
+
+Neben dem GHCR-Workflow oben läuft eine **`kg-tracker-beta`-Instanz auf dem NAS** (`Stefan@10.0.1.9`, SSH per Key), die ihr Image **lokal** baut — **nicht** über GitHub Actions. Wer nur die Beta aktualisieren will, nutzt diesen Weg statt `docker.yml`.
+
+- Build-Verzeichnis: `/volume1/docker/chastitytracker-beta` — ein **Git-Checkout von `main`**.
+- Erreichbar unter `http://10.0.1.9:3003`. Das Compose startet zusätzlich `aikh-cron` (autonomer KI-Keyholder-Lauf).
+- Deploy:
+  ```bash
+  cd /volume1/docker/chastitytracker-beta
+  git pull
+  docker compose -f docker-compose.beta.yml up -d --build
+  ```
+- **Git-ignoriert und bei `git pull` geschützt:** `.env` (aktive Config), `data/` (enthält `prod.db`!), `docker-compose.beta.yml` (beta-spezifisch). Niemals überschreiben.
+- Verifikation: `docker exec kg-tracker-beta wget -qO- http://127.0.0.1:3000/api/version` und Startup-Log auf saubere Migrationen prüfen.
+
 ## Architecture
 
 **Stack:** Next.js 16 (App Router) · React 19 · NextAuth.js v5 (Credentials) · Prisma 5 + SQLite · Tailwind CSS v4 · next-intl v4
@@ -278,6 +297,8 @@ WEBAUTHN_RP_ID=<hostname>          # default: localhost
 WEBAUTHN_RP_ORIGIN=<origin-url>    # default: http://localhost:3000
 PORTAL_SHARED_SECRET=<secret>      # optional: Portal-Login JWT-Secret
 USE_ADMIN_RELATIONSHIPS=true       # optional: Admin↔User n:m Zuordnung aktivieren
+DB_ENCRYPTION_KEY=<64-hex-chars>   # optional: AES-256 Key für verschlüsselte DB-Felder (Anthropic API-Key)
+                                   # Generieren: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 BUILD_DATE=<iso-date>              # optional: wird beim Build gesetzt
 ALLOW_ENTRY_GAP=true               # optional: schaltet den Nachtrag von Pausen UND Tragezeiten frei (Admin-Formulare + MCP `add_missed_break` / `add_missed_session`). Standard aus.
 # Update-Check / anonyme Deployment-Zählung (siehe docs/update-check.md):
@@ -637,3 +658,13 @@ Alle UI-Elemente MÜSSEN auf den gemeinsamen Shared Primitives basieren. Erfinde
 - Kernfunktionalität modifiziert oder gelöscht wird
 - Kritische Geschäftslogik angepasst wird
 - Das erwartete Ergebnis nicht explizit angegeben ist
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

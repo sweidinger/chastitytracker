@@ -17,6 +17,7 @@ import { resolveInspectionTarget, inspectionPreconditionProblem, inspectionTarge
 import { inspectionHref } from "@/lib/entryFormRoute";
 import { extendInspectionProblem, inspectionDeadlineWrite } from "@/lib/inspectionDeadline";
 import { jokerOffer, type InspectionJokerOffer } from "@/lib/inspectionJoker";
+import { plugCategoryId } from "@/lib/deviceCategories";
 
 export type KontrolleAction = "withdraw" | "manuallyVerify" | "reject";
 
@@ -326,6 +327,17 @@ export interface RequestKontrolleParams {
    *  Siehe {@link resolveInspectionTarget}. */
   categoryId?: string | null;
   deviceId?: string | null;
+  /**
+   * Fork: true (default): frischer Zufallscode wird generiert, per E-Mail gesendet und muss im Foto
+   * erkennbar sein (Frische-Beweis). false: kein Code — der Sub macht einfach ein Foto zum Nachweis
+   * des Tragens; nur das Siegel (falls vorhanden) wird verifiziert. Wirkt ZUSÄTZLICH zur
+   * Geräte-Einstellung `requireInspectionCode` (Upstream): ein Code entsteht nur, wenn beide ihn
+   * verlangen.
+   */
+  requireCode?: boolean;
+  /** Fork-Legacy-Alias für das Ziel: "PLUG" = die eingebaute Plug-Kategorie (wenn weder
+   *  `categoryId` noch `deviceId` gesetzt ist), "CAGE"/null = KG. Neue Aufrufer nutzen `categoryId`/`deviceId`. */
+  device?: "CAGE" | "PLUG" | null;
 }
 
 /**
@@ -348,12 +360,15 @@ export interface RequestKontrolleParams {
  * Daneben stehend ist das strukturell unmöglich — dieselbe Form wie bei allen übrigen Diensten.
  * Der Wert wandert in `KontrollAnforderung.createdBy` und von dort an die Meldung, auch wenn der
  * Poller sie erst Stunden später zustellt (siehe Schema).
+ *
+ * Fork: `requireCode: false` stellt eine Kontrolle ohne Frische-Code (nur Foto); `device: "PLUG"`
+ * ist der Alt-Weg zur Plug-Kategorie (siehe {@link RequestKontrolleParams}).
  */
 export async function requestKontrolle(
   params: RequestKontrolleParams,
   actor: MessageActor,
 ): Promise<ServiceResult<{ code: string | null; deadline: string; scheduledFor: string | null }>> {
-  const { userId, kommentar, deadlineH, delayMinutes } = params;
+  const { userId, kommentar, deadlineH, delayMinutes, requireCode = true, device = null } = params;
   if (!userId) return serviceFail(400, "USER_ID_REQUIRED");
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -394,7 +409,11 @@ export async function requestKontrolle(
       // dass keine kommen.
       if (await isHealthHoldActive(userId, tx)) throw fail("HEALTH_HOLD_ACTIVE");
 
-      const resolved = await resolveInspectionTarget(userId, params, tx);
+      // Fork-Alias `device: "PLUG"` → Plug-Kategorie, solange kein explizites Ziel genannt ist.
+      const targetInput = device === "PLUG" && !params.categoryId && !params.deviceId
+        ? { categoryId: plugCategoryId(userId), deviceId: null }
+        : params;
+      const resolved = await resolveInspectionTarget(userId, targetInput, tx);
       if (!resolved.ok) throw fail("INSPECTION_TARGET_INVALID");
       const target = resolved.target;
 
@@ -428,7 +447,10 @@ export async function requestKontrolle(
       // Die Siegel-Nummer gibt es nur beim KG — sie beweist, dass die Schlüsselbox unberührt ist,
       // und zu einer Trage-Kontrolle gehört keine Box (`lockEntry` ist dort null).
       const seal = deriveSealCode(target.lockEntry);
-      const c = (await inspectionCodeRequired(target.activeDeviceId, tx)) ? generateKontrollCode() : null;
+      //
+      // Fork: `requireCode: false` beim Anfordern verzichtet zusätzlich auf den Code (strikt
+      // `!== false`, die Route reicht den rohen Body durch).
+      const c = requireCode !== false && (await inspectionCodeRequired(target.activeDeviceId, tx)) ? generateKontrollCode() : null;
 
       const ka = await tx.kontrollAnforderung.create({
         data: {
@@ -439,6 +461,10 @@ export async function requestKontrolle(
           deadline,
           kommentar: kommentarTrimmed || null,
           createdBy: actorColumn(actor),
+          // Fork-Spalten: `requireCode` hält fest, ob ein Code verlangt wurde; `deviceKind` bleibt für
+          // Bestandsleser befüllt ("CAGE" = KG, "PLUG" = Plug-Kategorie, sonst null).
+          requireCode: c !== null,
+          deviceKind: target.categoryId === null ? "CAGE" : target.categoryId === plugCategoryId(userId) ? "PLUG" : null,
           wirksamAb,
           benachrichtigtAt, // sofort = jetzt benachrichtigt; geplant = Poller
         },
@@ -469,6 +495,7 @@ export async function requestKontrolle(
   }
 
   return { ok: true, data: { code, deadline: deadline.toISOString(), scheduledFor: wirksamAb?.toISOString() ?? null } };
+
 }
 
 /**
@@ -552,7 +579,7 @@ function buildInspectionMail(o: {
       {
         buttonColor: EMAIL_BUTTON_COLORS.inspection,
         buttonHref: link,
-        // Link-Fallback + Hilfe-Footer stehen NACH dem Button — dafür gibt es den afterHtml-Slot.
+        // Link-Fallback + Hilfe-Footer stehen NACH dem Button — dafuer gibt es den afterHtml-Slot.
         afterHtml:
           `<p style="color:#94a3b8;font-size:12px">${escHtml(t("inspectionLinkFallback", { link }))}</p>` +
           `<p style="color:#64748b;font-size:13px;margin-top:20px;border-top:1px solid #f1f5f9;padding-top:16px">${escHtml(t("inspectionHelpText"))} <a href="${helpUrl}" style="color:${EMAIL_BUTTON_COLORS.default}">${escHtml(t("inspectionHelpLink"))}</a></p>`,

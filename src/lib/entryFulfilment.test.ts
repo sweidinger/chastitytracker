@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 const txMock = {
   kontrollAnforderung: { findFirst: vi.fn(), update: vi.fn() },
   verschlussAnforderung: { findMany: vi.fn(), updateMany: vi.fn(), createMany: vi.fn() },
-  orgasmusAnforderung: { findFirst: vi.fn(), update: vi.fn() },
+  orgasmusAnforderung: { findMany: vi.fn(), update: vi.fn() },
 };
 vi.mock("@/lib/prisma", () => ({ prisma: { strafeRecord: { create: vi.fn() } } }));
 
@@ -46,7 +46,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   txMock.verschlussAnforderung.findMany.mockResolvedValue([]);
   txMock.kontrollAnforderung.findFirst.mockResolvedValue(null);
-  txMock.orgasmusAnforderung.findFirst.mockResolvedValue(null);
+  txMock.orgasmusAnforderung.findMany.mockResolvedValue([]);
 });
 
 /** Die eine offene Anordnung mit Frist 20:00 und 24 h Sperre. */
@@ -237,7 +237,7 @@ describe("Kontrolle mit Nachweis-Zwang", () => {
 
 describe("Orgasmus-Anforderung", () => {
   it("das FENSTER prüft immer die Eintrags-Zeit, der Stempel folgt `at`", async () => {
-    txMock.orgasmusAnforderung.findFirst.mockResolvedValue({ id: "o1", requiredType: null });
+    txMock.orgasmusAnforderung.findMany.mockResolvedValue([{ id: "o1", requiredType: null }]);
     await applyEntryFulfilment(
       txMock as never,
       entry({ type: "ORGASMUS", startTime: ON_TIME }),
@@ -245,7 +245,7 @@ describe("Orgasmus-Anforderung", () => {
       RECORDED_LATER,
     );
 
-    const { where } = txMock.orgasmusAnforderung.findFirst.mock.calls[0][0] as {
+    const { where } = txMock.orgasmusAnforderung.findMany.mock.calls[0][0] as {
       where: { beginsAt: { lte: Date }; endsAt: { gte: Date } };
     };
     expect(where.beginsAt.lte).toEqual(ON_TIME);
@@ -255,7 +255,7 @@ describe("Orgasmus-Anforderung", () => {
   });
 
   it("passt die vorgegebene Art nicht, bleibt die Anforderung offen", async () => {
-    txMock.orgasmusAnforderung.findFirst.mockResolvedValue({ id: "o1", requiredType: "RUINIERT" });
+    txMock.orgasmusAnforderung.findMany.mockResolvedValue([{ id: "o1", requiredType: "RUINIERT" }]);
     await applyEntryFulfilment(
       txMock as never,
       entry({ type: "ORGASMUS", orgasmusArt: "VOLL" }),
@@ -268,7 +268,7 @@ describe("Orgasmus-Anforderung", () => {
   it("eine Vorgabe als voller Kombi-Code erfüllt sich bei exakt dieser Unterart", async () => {
     // Vorfall 05.09.2026: Vorgabe UND Eintrag waren „Orgasmus – Masturbation", der Vergleich nur
     // gegen die Basis („Orgasmus") schlug fehl und die Anweisung lief unerfüllbar aus.
-    txMock.orgasmusAnforderung.findFirst.mockResolvedValue({ id: "o1", requiredType: "Orgasmus – Masturbation" });
+    txMock.orgasmusAnforderung.findMany.mockResolvedValue([{ id: "o1", requiredType: "Orgasmus – Masturbation" }]);
     await applyEntryFulfilment(
       txMock as never,
       entry({ type: "ORGASMUS", orgasmusArt: "Orgasmus – Masturbation" }),
@@ -281,7 +281,7 @@ describe("Orgasmus-Anforderung", () => {
   });
 
   it("eine Unterart-Vorgabe zählt eine andere Unterart NICHT", async () => {
-    txMock.orgasmusAnforderung.findFirst.mockResolvedValue({ id: "o1", requiredType: "Orgasmus – Masturbation" });
+    txMock.orgasmusAnforderung.findMany.mockResolvedValue([{ id: "o1", requiredType: "Orgasmus – Masturbation" }]);
     await applyEntryFulfilment(
       txMock as never,
       entry({ type: "ORGASMUS", orgasmusArt: "Orgasmus – Geschlechtsverkehr" }),
@@ -291,8 +291,24 @@ describe("Orgasmus-Anforderung", () => {
     expect(txMock.orgasmusAnforderung.update).not.toHaveBeenCalled();
   });
 
+  it("Fork: Straf- und Belohnungs-Fenster gleichzeitig offen — erfüllt wird das, dessen Art passt", async () => {
+    // Neuestes zuerst (orderBy createdAt desc): die Belohnung ist jünger, der Eintrag ist aber ruiniert.
+    txMock.orgasmusAnforderung.findMany.mockResolvedValue([
+      { id: "reward", requiredType: "Belohnung" },
+      { id: "penalty", requiredType: "ruinierter Orgasmus" },
+    ]);
+    await applyEntryFulfilment(
+      txMock as never,
+      entry({ type: "ORGASMUS", orgasmusArt: "ruinierter Orgasmus" }),
+      NO_INSPECTION,
+      ON_TIME,
+    );
+    expect(txMock.orgasmusAnforderung.update).toHaveBeenCalledTimes(1);
+    expect(txMock.orgasmusAnforderung.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "penalty" } }));
+  });
+
   it("eine Hauptart-Vorgabe wird von jeder Unterart erfüllt", async () => {
-    txMock.orgasmusAnforderung.findFirst.mockResolvedValue({ id: "o1", requiredType: "Orgasmus" });
+    txMock.orgasmusAnforderung.findMany.mockResolvedValue([{ id: "o1", requiredType: "Orgasmus" }]);
     await applyEntryFulfilment(
       txMock as never,
       entry({ type: "ORGASMUS", orgasmusArt: "Orgasmus – Masturbation" }),
@@ -308,14 +324,14 @@ describe("Typ-Trennung", () => {
     openLockRequest();
     await applyEntryFulfilment(txMock as never, entry(), NO_INSPECTION, ON_TIME);
     expect(txMock.kontrollAnforderung.findFirst).not.toHaveBeenCalled();
-    expect(txMock.orgasmusAnforderung.findFirst).not.toHaveBeenCalled();
+    expect(txMock.orgasmusAnforderung.findMany).not.toHaveBeenCalled();
   });
 
   it("eine Öffnung erfüllt gar nichts", async () => {
     await applyEntryFulfilment(txMock as never, entry({ type: "OEFFNEN" }), NO_INSPECTION, ON_TIME);
     expect(txMock.verschlussAnforderung.findMany).not.toHaveBeenCalled();
     expect(txMock.kontrollAnforderung.findFirst).not.toHaveBeenCalled();
-    expect(txMock.orgasmusAnforderung.findFirst).not.toHaveBeenCalled();
+    expect(txMock.orgasmusAnforderung.findMany).not.toHaveBeenCalled();
   });
 });
 

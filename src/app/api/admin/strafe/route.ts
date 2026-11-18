@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireKeyholderOrAdminActor, sessionActor } from "@/lib/authGuards";
 import { errorResponse, serviceFailure } from "@/lib/serviceResult";
 import { judgeOffense, type StoredOffenseType } from "@/lib/strafurteilService";
+import type { PenaltyAction } from "@/lib/penaltyActions";
 
 /**
  * Der Browser-Rand des Urteils — dieselbe Geschäftslogik wie der MCP (`judge_offense`), weil beide
@@ -16,7 +17,11 @@ import { judgeOffense, type StoredOffenseType } from "@/lib/strafurteilService";
  * Body, und darf über dieses Vergehen überhaupt (noch einmal) geurteilt werden.
  */
 export async function POST(req: Request) {
-  const { userId, offenseType, refId, status, reason } = await req.json();
+  const body = await req.json();
+  const { userId, offenseType, refId, status, reason } = body;
+  // Fork (Phase 3): optionale Straf-Aktion, die der Service beim Bestrafen gleich mit ausführt.
+  const penaltyAction: PenaltyAction | null =
+    body.action && typeof body.action === "object" && typeof body.action.type === "string" ? body.action : null;
   // action: "punish" (bestraft, default) | "dismiss" (verworfen / keine Strafe)
   const action: "punish" | "dismiss" = status === "DISMISSED" ? "dismiss" : "punish";
 
@@ -58,12 +63,18 @@ export async function POST(req: Request) {
     userId, refId, action, text: reason,
     offenseType: offenseType as StoredOffenseType,
     allowRevision: false,
+    penaltyAction,
   }, sessionActor(session));
   if (!result.ok) return serviceFailure(result);
   // 201 wie bisher — das Urteil ist neu (ein bestehendes hätte der 409 des Service abgefangen). Der
   // Body ist nicht mehr die rohe Datenbank-Zeile: gelesen hat sie nie jemand, und der Service gibt
   // sie bewusst nicht heraus.
-  return NextResponse.json({ ok: true }, { status: 201 });
+  // Fork: Ergebnis der mitgegebenen Straf-Aktion — ein Fehler dort bricht das Urteil NICHT ab, wird
+  // aber zurückgemeldet.
+  return NextResponse.json(
+    { ok: true, actionMessage: result.data.actionMessage ?? null, actionError: result.data.actionError ?? null },
+    { status: 201 },
+  );
 }
 
 export async function DELETE(req: Request) {
@@ -98,9 +109,12 @@ export async function DELETE(req: Request) {
  * Der `findUnique` bleibt: die Berechtigung hängt am TRÄGER der Zeile, und den kennt die Route erst,
  * wenn sie ihn gelesen hat. Die inhaltlichen Schranken („gibt es ein Urteil", „ist es eine Strafe")
  * prüft dagegen der Service — hier steht nur noch, was ohne Träger-Id nicht zu beantworten wäre.
+ *
+ * Fork: dazu die Prüfung einer vom Träger GEMELDETEN Erledigung — `action: "confirm"` (abhaken, wie
+ * `done: true`) oder `action: "reject"` mit `grund` (Meldung abgelehnt, Strafe bleibt offen).
  */
 export async function PATCH(req: Request) {
-  const { refId, done } = await req.json();
+  const { refId, done, action, grund } = await req.json();
   if (!refId) return errorResponse(400, "OFFENSE_REF_REQUIRED");
 
   const record = await prisma.strafeRecord.findUnique({ where: { refId }, select: { userId: true } });
@@ -110,7 +124,11 @@ export async function PATCH(req: Request) {
   if (session instanceof NextResponse) return session;
 
   const result = await judgeOffense(
-    { userId: record.userId, refId, action: done === false ? "uncomplete" : "complete" },
+    {
+      userId: record.userId, refId,
+      action: action === "reject" ? "reject_completion" : action === "confirm" || done !== false ? "complete" : "uncomplete",
+      text: action === "reject" && typeof grund === "string" ? grund : undefined,
+    },
     sessionActor(session),
   );
   if (!result.ok) return serviceFailure(result);

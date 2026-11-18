@@ -21,7 +21,7 @@ type Row = {
   gueltigBis: Date | null;
   validUntilManual: boolean;
   /** Wie aus dem `include` der Abfrage — `null` für Zeilen ohne Kategorie. */
-  category?: { isBuiltIn: boolean } | null;
+  category?: { slug: string } | null;
 };
 
 function setRows(rows: Row[]) {
@@ -48,15 +48,15 @@ const MANUAL_END = new Date("2026-07-04T00:00:00Z");
 describe("reorderVorgabenDates — manuelles Enddatum schützen", () => {
   it("einzige Vorgabe mit validUntilManual behält ihr Enddatum (kein Update)", async () => {
     // Regression: einzige Vorgabe galt als „neueste" → wurde zwangsweise auf offen (null) gesetzt.
-    setRows([{ id: "a", categoryId: "c1", category: { isBuiltIn: false }, gueltigAb: AB1, gueltigBis: MANUAL_END, validUntilManual: true }]);
+    setRows([{ id: "a", categoryId: "c1", category: { slug: "toy" }, gueltigAb: AB1, gueltigBis: MANUAL_END, validUntilManual: true }]);
     await reorderVorgabenDates("u1");
     expect(updateMock).not.toHaveBeenCalled();
   });
 
   it("manuelles Ende bleibt auch mit späterer Vorgabe unangetastet", async () => {
     setRows([
-      { id: "a", categoryId: "c1", category: { isBuiltIn: false }, gueltigAb: AB1, gueltigBis: MANUAL_END, validUntilManual: true },
-      { id: "b", categoryId: "c1", category: { isBuiltIn: false }, gueltigAb: AB2, gueltigBis: null, validUntilManual: false },
+      { id: "a", categoryId: "c1", category: { slug: "toy" }, gueltigAb: AB1, gueltigBis: MANUAL_END, validUntilManual: true },
+      { id: "b", categoryId: "c1", category: { slug: "toy" }, gueltigAb: AB2, gueltigBis: null, validUntilManual: false },
     ]);
     await reorderVorgabenDates("u1");
     // a wird übersprungen (manuell), b ist letzte & bereits offen → gar kein Update.
@@ -65,8 +65,8 @@ describe("reorderVorgabenDates — manuelles Enddatum schützen", () => {
 
   it("nicht-manuelle Vorgaben werden weiterhin verkettet (Vorgänger endet am Start der nächsten)", async () => {
     setRows([
-      { id: "a", categoryId: "c1", category: { isBuiltIn: false }, gueltigAb: AB1, gueltigBis: null, validUntilManual: false },
-      { id: "b", categoryId: "c1", category: { isBuiltIn: false }, gueltigAb: AB2, gueltigBis: null, validUntilManual: false },
+      { id: "a", categoryId: "c1", category: { slug: "toy" }, gueltigAb: AB1, gueltigBis: null, validUntilManual: false },
+      { id: "b", categoryId: "c1", category: { slug: "toy" }, gueltigAb: AB2, gueltigBis: null, validUntilManual: false },
     ]);
     await reorderVorgabenDates("u1");
     const updated = updatedBisById();
@@ -76,7 +76,7 @@ describe("reorderVorgabenDates — manuelles Enddatum schützen", () => {
 
   it("nach Löschen der Folge-Vorgabe geht eine nicht-manuelle Vorgabe wieder auf", async () => {
     // a hatte via Verkettung ein Enddatum (manuell=false); b existiert nicht mehr → a muss offen werden.
-    setRows([{ id: "a", categoryId: "c1", category: { isBuiltIn: false }, gueltigAb: AB1, gueltigBis: AB2, validUntilManual: false }]);
+    setRows([{ id: "a", categoryId: "c1", category: { slug: "toy" }, gueltigAb: AB1, gueltigBis: AB2, validUntilManual: false }]);
     await reorderVorgabenDates("u1");
     expect(updatedBisById().a).toBeNull();
   });
@@ -89,7 +89,7 @@ describe("reorderVorgabenDates — KG ist EINE Kategorie, in beiden Schreibweise
     // Getrennt gruppiert blieben BEIDE offen — list_training_goals zeigte zwei aktive KG-Ziele.
     setRows([
       { id: "alt", categoryId: null, gueltigAb: AB1, gueltigBis: null, validUntilManual: false },
-      { id: "neu", categoryId: KG_ID, category: { isBuiltIn: true }, gueltigAb: AB2, gueltigBis: null, validUntilManual: false },
+      { id: "neu", categoryId: KG_ID, category: { slug: "kg" }, gueltigAb: AB2, gueltigBis: null, validUntilManual: false },
     ]);
     await reorderVorgabenDates("u1");
     expect(updatedBisById().alt).toEqual(AB2);
@@ -97,7 +97,7 @@ describe("reorderVorgabenDates — KG ist EINE Kategorie, in beiden Schreibweise
 
   it("und umgekehrt: das ältere Ziel trägt die Kategorie-id, das neue nicht", async () => {
     setRows([
-      { id: "alt", categoryId: KG_ID, category: { isBuiltIn: true }, gueltigAb: AB1, gueltigBis: null, validUntilManual: false },
+      { id: "alt", categoryId: KG_ID, category: { slug: "kg" }, gueltigAb: AB1, gueltigBis: null, validUntilManual: false },
       { id: "neu", categoryId: null, gueltigAb: AB2, gueltigBis: null, validUntilManual: false },
     ]);
     await reorderVorgabenDates("u1");
@@ -108,7 +108,7 @@ describe("reorderVorgabenDates — KG ist EINE Kategorie, in beiden Schreibweise
     // Die Zusammenlegung darf nicht ZU viel greifen: Plug und KG sind verschiedene Ketten.
     setRows([
       { id: "kg", categoryId: null, gueltigAb: AB1, gueltigBis: null, validUntilManual: false },
-      { id: "plug", categoryId: "c1", category: { isBuiltIn: false }, gueltigAb: AB2, gueltigBis: null, validUntilManual: false },
+      { id: "plug", categoryId: "c1", category: { slug: "toy" }, gueltigAb: AB2, gueltigBis: null, validUntilManual: false },
     ]);
     await reorderVorgabenDates("u1");
     expect(updateMock).not.toHaveBeenCalled();
@@ -118,21 +118,25 @@ describe("reorderVorgabenDates — KG ist EINE Kategorie, in beiden Schreibweise
 describe("goalCategoryKey — die kanonische Kategorie-Kennung", () => {
   it("beide KG-Schreibweisen ergeben denselben Schlüssel", () => {
     expect(goalCategoryKey({ categoryId: null })).toBeNull();
-    expect(goalCategoryKey({ categoryId: KG_ID, category: { isBuiltIn: true } })).toBeNull();
+    expect(goalCategoryKey({ categoryId: KG_ID, category: { slug: "kg" } })).toBeNull();
   });
 
   it("eine gewöhnliche Kategorie behält ihre id", () => {
-    expect(goalCategoryKey({ categoryId: "c1", category: { isBuiltIn: false } })).toBe("c1");
+    expect(goalCategoryKey({ categoryId: "c1", category: { slug: "toy" } })).toBe("c1");
+  });
+
+  it("eine andere EINGEBAUTE Kategorie (Fork: Plug) ist kein KG — massgeblich ist der Slug", () => {
+    expect(goalCategoryKey({ categoryId: "plugcat_u1", category: { slug: "plug" } })).toBe("plugcat_u1");
   });
 
   it("darauf beruht der Filter von list_training_goals", () => {
     // `resolveCategory("KG")` liefert die id der eingebauten Kategorie; ein Vergleich gegen die
     // rohe categoryId hätte das Ziel mit `categoryId: null` lautlos weggelassen.
-    const filterKey = goalCategoryKey({ categoryId: KG_ID, category: { isBuiltIn: true } });
+    const filterKey = goalCategoryKey({ categoryId: KG_ID, category: { slug: "kg" } });
     const ziele = [
       { categoryId: null },
-      { categoryId: KG_ID, category: { isBuiltIn: true } },
-      { categoryId: "c1", category: { isBuiltIn: false } },
+      { categoryId: KG_ID, category: { slug: "kg" } },
+      { categoryId: "c1", category: { slug: "toy" } },
     ];
     expect(ziele.filter((g) => goalCategoryKey(g) === filterKey)).toHaveLength(2);
   });

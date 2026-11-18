@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 import { resolveUserContext, makeIso, buildEnvelope, notesForEntities, entityKey, matchByNameCI, parseStringArray, tzOf, type Iso, type NoteDTO, type Envelope } from "@/lib/mcp/common";
 import { assertVersionRequiresId, diffFields, occEdit, type WriteDef, type TxClient } from "@/lib/mcp/writeFramework";
 import { listCategoryViews, type CategoryView } from "@/lib/mcp/categories";
@@ -79,7 +80,7 @@ const deviceViewSelect = {
   purchasePrice: true, currency: true, categoryId: true, requireInspectionCode: true,
   securityLevel: true, lookalikeClusterId: true, pullOffRisk: true,
   material: true, bauform: true, healthFlags: true, retentionNotes: true, version: true,
-  category: { select: { name: true, isBuiltIn: true, trackingEnabled: true } },
+  category: { select: { name: true, slug: true, trackingEnabled: true } },
   _count: { select: { referenceImages: true } },
 } as const;
 
@@ -89,7 +90,7 @@ type DeviceViewRow = {
   securityLevel: string | null; lookalikeClusterId: string | null; pullOffRisk: boolean | null;
   material: string | null; bauform: string | null; healthFlags: string | null; retentionNotes: string | null;
   version: number;
-  category: { name: string; isBuiltIn: boolean; trackingEnabled: boolean } | null;
+  category: { name: string; slug: string; trackingEnabled: boolean } | null;
   _count: { referenceImages: number };
 };
 
@@ -100,7 +101,8 @@ function toDeviceMetaView(d: DeviceViewRow, notes: NoteDTO[], iso: Iso): DeviceM
     name: d.name,
     category: d.category?.name ?? "—",
     categoryId: d.categoryId,
-    isKg: d.category?.isBuiltIn ?? false,
+    // KG über den Slug, nicht `isBuiltIn` (Fork: auch die Plug-Kategorie ist eingebaut).
+    isKg: d.category?.slug === KG_BUILTIN_SLUG,
     trackingEnabled: d.category?.trackingEnabled ?? true,
     archived: d.archivedAt !== null,
     description: d.description,

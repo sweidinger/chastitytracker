@@ -4,6 +4,7 @@ import { buildKgWearPairs, wearingHoursFromPairs, getWeekStart } from "@/lib/uti
 import { buildWearSessions, isLiveOpenSession, wearHourPairsByCategory } from "@/lib/sessionModel";
 import { deviceCategoriesEnabled } from "@/lib/constants";
 import { categoryNeedsDevice } from "@/lib/categoryConstants";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 import type { CategoryRow } from "@/app/dashboard/categories/CategoriesClient";
 import type { NewEntryCategoryRow } from "@/app/components/NewEntrySheet";
 
@@ -56,7 +57,8 @@ export async function buildCategoryRows(userId: string, now: Date): Promise<Cate
 
   return categories.map((c) => {
     // KG: VERSCHLUSS/OEFFNEN (kein Kategorie-Filter — alle V/O-Einträge sind per Definition KG).
-    const pairs = c.isBuiltIn ? kgPairs : wearPairsByCategory.get(c.id) ?? [];
+    // KG über den Slug (nicht `isBuiltIn`): die Fork-Plug-Kategorie ist eingebaut, aber eine Trage-Kategorie.
+    const pairs = c.slug === KG_BUILTIN_SLUG ? kgPairs : wearPairsByCategory.get(c.id) ?? [];
     return {
       id: c.id,
       name: c.name,
@@ -67,6 +69,11 @@ export async function buildCategoryRows(userId: string, now: Date): Promise<Cate
       trackingEnabled: c.trackingEnabled,
       requirePhoto: c.requirePhoto,
       allowVorgaben: c.allowVorgaben,
+      isSessionCategory: c.isSessionCategory,
+      maxSessionMinutes: c.maxSessionMinutes,
+      requiresVideo: c.requiresVideo,
+      orgasmusZiel: c.orgasmusZiel,
+      region: c.region,
       sortOrder: c.sortOrder,
       createdAt: c.createdAt.toISOString(),
       deviceCount: c._count.devices,

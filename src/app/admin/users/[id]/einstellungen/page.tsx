@@ -4,6 +4,9 @@ import { redirect } from "next/navigation";
 import { assertKeyholderOrAdmin } from "@/lib/authGuards";
 import RoleSelect from "@/app/admin/RoleSelect";
 import CleaningToggle from "@/app/admin/CleaningToggle";
+import ToiletteToggle from "@/app/admin/ToiletteToggle";
+import OrgasmusBudgetToggle from "@/app/admin/OrgasmusBudgetToggle";
+import PlugToggle from "@/app/admin/PlugToggle";
 import AutoKontrolleToggle from "@/app/admin/AutoKontrolleToggle";
 import InspectionEscalationToggle from "@/app/admin/InspectionEscalationToggle";
 import OffenseRulesEditor from "@/app/admin/OffenseRulesEditor";
@@ -19,7 +22,7 @@ import BoxLockToggle from "@/app/admin/BoxLockToggle";
 import BoxPhotoDeadlineInput from "@/app/admin/BoxPhotoDeadlineInput";
 import BoxIdentityInfo from "@/app/admin/BoxIdentityInfo";
 import type { UnitSystem } from "@/lib/weight";
-import { parseReasonConfig, resolveOrgasmusOptions, ART_SEP } from "@/lib/reasonsService";
+import { parseReasonConfig, resolveOrgasmusOptions, ART_SEP, PROTECTED_OPENING_CODES } from "@/lib/reasonsService";
 import ReasonsEditor from "@/app/admin/ReasonsEditor";
 import { ORGASMUS_ARTEN, OEFFNEN_GRUENDE, ORGASMUS_ART_I18N_KEYS, GRUND_I18N_KEYS, boxCouplingEnabled } from "@/lib/constants";
 import AccountSection from "./AccountSection";
@@ -51,17 +54,20 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
 
   const { userId: actorId, isGlobalAdmin } = await assertKeyholderOrAdmin(id);
 
-  const [user, vorgaben, categories, keyholders, offenseRules, t, tc, dl, tOrgasm, tOpen, actor, box, healthHold] = await Promise.all([
+  const [user, vorgaben, categories, keyholders, offenseRules, aiKeyholderConfig, aiPersonas, t, tc, dl, tOrgasm, tOpen, actor, box, healthHold] = await Promise.all([
     prisma.user.findUnique({ where: { id } }),
     prisma.trainingVorgabe.findMany({ where: { userId: id, deletedAt: null }, orderBy: { gueltigAb: "desc" } }), // B-04: soft-gelöschte Ziele ausblenden
     // Vorgaben can only be set on KG-built-in or user-categories with allowVorgaben=true.
     prisma.deviceCategory.findMany({
       where: { userId: id, OR: [{ isBuiltIn: true }, { allowVorgaben: true }] },
       orderBy: [{ isBuiltIn: "desc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
-      select: { id: true, name: true },
+      select: { id: true, name: true, isBuiltIn: true, slug: true },
     }),
     getKeyholdersOfUser(id),
     getOffenseRules(id),
+    // Fork: KI-Keyholderin — Persona-Auswahl im Keyholder-Abschnitt.
+    prisma.aiKeyholderConfig.findUnique({ where: { userId: id }, select: { enabled: true, currentPersona: { select: { name: true } } } }),
+    prisma.aiPersona.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, systemPrompt: true } }),
     getTranslations("admin"),
     getTranslations("common"),
     getLocale().then(toDateLocale),
@@ -124,7 +130,7 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
       {/* Keyholder dieses Subs */}
       {isGlobalAdmin && (
         <SettingsSection defaultCollapsed title={t("sectionKeyholders")} description={t("keyholdersDesc")} bodyPadded>
-          <KeyholderManager subId={user.id} initial={keyholders.map((k) => ({ id: k.id, username: k.username }))} />
+          <KeyholderManager subId={user.id} initial={keyholders.map((k) => ({ id: k.id, username: k.username }))} aiKeyholderActive={aiKeyholderConfig?.enabled === true} aiPersonas={aiPersonas} currentPersonaName={aiKeyholderConfig?.currentPersona?.name ?? null} />
         </SettingsSection>
       )}
 
@@ -140,13 +146,17 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
         </div>
         {vorgaben.length > 0 && (() => {
           // Group by category — built-in (KG) first, then user-defined order, orphans last.
+          // Legacy-KG-Vorgaben haben categoryId = null → gehören zur KG-Kategorie (nicht "Ohne Kategorie").
+          // Nur die KG-Kategorie (slug "kg"), NICHT jede built-in (Plug ist ebenfalls built-in).
+          const kgCat = categories.find((c) => c.slug === "kg") ?? null;
           const groups = categories
             .map((c) => ({
               category: c,
-              vorgaben: vorgaben.filter((v) => v.categoryId === c.id),
+              vorgaben: vorgaben.filter((v) => v.categoryId === c.id || (c.slug === "kg" && v.categoryId == null)),
             }))
             .filter((g) => g.vorgaben.length > 0);
-          const orphans = vorgaben.filter((v) => !v.categoryId);
+          // Echte Waisen nur, wenn keine KG-Kategorie existiert (Edge Case).
+          const orphans = vorgaben.filter((v) => !v.categoryId && !kgCat);
           const showHeaders = categories.length > 1 && groups.length + (orphans.length > 0 ? 1 : 0) > 1;
           const renderRow = (v: (typeof vorgaben)[number]) => (
             <VorgabeRow
@@ -161,7 +171,7 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
               jahrH={v.minProJahrH}
               notiz={v.notiz}
               categories={categories}
-              categoryName={showHeaders ? null : (categories.find((c) => c.id === v.categoryId)?.name ?? null)}
+              categoryName={showHeaders ? null : (v.categoryId ? (categories.find((c) => c.id === v.categoryId)?.name ?? null) : (kgCat?.name ?? null))}
               initialValues={{
                 gueltigAb: goalDateToInput(v.gueltigAb, tz),
                 gueltigBis: v.gueltigBis ? goalDateToInput(v.gueltigBis, tz) : "",
@@ -206,14 +216,49 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
         })()}
       </SettingsSection>
 
-      {/* Reinigung */}
-      <SettingsSection defaultCollapsed title={t("sectionReinigung")} description={t("sectionReinigungDesc")} bodyPadded>
-        <CleaningToggle
+      {/* Fork: Käfig — Reinigung + Toilette in einer Box */}
+      <SettingsSection defaultCollapsed title={t("sectionCage")} description={t("sectionCageDesc")} bodyPadded>
+        <div className="flex flex-col gap-5">
+          <div>
+            <BlockHeading as="h3" className="mb-2">{t("sectionReinigung")}</BlockHeading>
+            <CleaningToggle
+              userId={user.id}
+              initialAllowed={user.cleaningAllowed}
+              initialMaxMinutes={user.cleaningMaxMinutes}
+              initialMaxPerDay={user.cleaningMaxPerDay}
+              initialWindows={parseCleaningWindows(user.cleaningWindows)}
+            />
+          </div>
+          <div className="border-t border-border-subtle pt-4">
+            <BlockHeading as="h3" className="mb-2">{t("sectionToilette")}</BlockHeading>
+            <ToiletteToggle
+              userId={user.id}
+              initialErlaubt={user.toiletteErlaubt}
+              initialMaxMinuten={user.toiletteMaxMinuten}
+              initialMaxProTag={user.toiletteMaxProTag}
+            />
+          </div>
+        </div>
+      </SettingsSection>
+
+      {/* Fork: Orgasmus-Budget */}
+      <SettingsSection defaultCollapsed title={t("sectionOrgasmBudget")} description={t("sectionOrgasmBudgetDesc")} bodyPadded>
+        <OrgasmusBudgetToggle
           userId={user.id}
-          initialAllowed={user.cleaningAllowed}
-          initialMaxMinutes={user.cleaningMaxMinutes}
-          initialMaxPerDay={user.cleaningMaxPerDay}
-          initialWindows={parseCleaningWindows(user.cleaningWindows)}
+          initialBudget={user.orgasmBudget}
+          initialPeriode={user.orgasmBudgetPeriode}
+        />
+      </SettingsSection>
+
+      {/* Fork: Anal-Plug — Reinigung + Toilette */}
+      <SettingsSection defaultCollapsed title={t("sectionPlug")} description={t("sectionPlugDesc")} bodyPadded>
+        <PlugToggle
+          userId={user.id}
+          initialReinigungErlaubt={user.plugReinigungErlaubt}
+          initialReinigungMaxMinuten={user.plugReinigungMaxMinuten}
+          initialReinigungMaxProTag={user.plugReinigungMaxProTag}
+          initialReinigungsFenster={parseCleaningWindows(user.plugReinigungsFenster)}
+          initialToiletteMaxMinuten={user.plugToiletteMaxMinuten}
         />
       </SettingsSection>
 
@@ -331,7 +376,7 @@ export default async function EinstellungenPage({ params }: { params: Promise<{ 
               configKey="oeffnenGruendeConfig"
               initial={parseReasonConfig(user.oeffnenGruendeConfig, "opening")}
               builtinLabels={openingBuiltinLabels}
-              protectedCode="REINIGUNG"
+              protectedCodes={PROTECTED_OPENING_CODES}
             />
           </div>
         </div>

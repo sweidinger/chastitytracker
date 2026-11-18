@@ -19,6 +19,9 @@ export interface OrgasmusPayload {
   startTime: string;
   orgasmusArt: string;
   note: string | null;
+  /** Optionaler Foto-Nachweis — Pflicht, wenn die offene Anforderung `fotoPflicht` setzt. */
+  imageUrl: string | null;
+  imageExifTime: string | null;
 }
 
 export interface PruefungPayload {
@@ -38,6 +41,9 @@ export interface PruefungPayload {
   boxImageUrl?: string | null;
   /** Anzeige-Drehung des Box-Fotos (siehe `imageRotation`). */
   boxImageRotation?: number;
+  /** Airlock-NFC: Nachweis vom gescannten Tag (Hardware-UID + NDEF-Text `AL1|code|token`).
+   *  Serverseitig verifiziert (Weg A) — bei einem Airlock-Verschluss ersetzt der Scan die Code-Abfrage. */
+  airlock?: { uid: string; ndefText: string } | null;
 }
 
 export interface VerschlussPayload {
@@ -58,6 +64,9 @@ export interface VerschlussPayload {
   codeImageUrl?: string | null;
   /** Bildersafe: Ziffern im Code-Foto erkannt (Lesbarkeits-✓). */
   codeReadable?: boolean | null;
+  /** Airlock-NFC: Nachweis vom gescannten Tag (Hardware-UID + NDEF-Text `AL1|code|token`).
+   *  Serverseitig verifiziert (Weg A); optional beim eigenständigen Verschluss, sonst leer. */
+  airlock?: { uid: string; ndefText: string } | null;
 }
 
 export interface OeffnenPayload {
@@ -69,6 +78,8 @@ export interface OeffnenPayload {
   note: string | null;
   /** Only set when user confirmed the Reinigung-limit-bypass sheet. */
   forcedCleaning?: boolean;
+  /** True when user reports an erection occurred during REINIGUNG or TOILETTE opening. */
+  erektionGemeldet?: boolean;
 }
 
 export interface WearBeginPayload {
@@ -93,6 +104,21 @@ export interface WearEndPayload {
   note: string | null;
 }
 
+/** Payload for the Plug "Tragen beenden" form (Fork) — mirrors OeffnenPayload but for WEAR_END. */
+export interface PlugEndPayload {
+  type: "WEAR_END";
+  startTime: string;
+  /** Der Träger hat die Zeit nicht angefasst: der Server datiert mit seiner Uhr, auf die Sekunde. */
+  startIsNow?: boolean;
+  deviceId: string;
+  oeffnenGrund: string;
+  note: string | null;
+  /** Only set when user confirmed the Reinigung-limit-bypass sheet. */
+  forcedCleaning?: boolean;
+  /** True when user reports an erection occurred during REINIGUNG or TOILETTE removal. */
+  erektionGemeldet?: boolean;
+}
+
 /** Bundled user-cleaning config (kept together to avoid prop sprawl). Enthält bewusst KEIN
  *  `erlaubt`-Flag mehr: ob gereinigt werden darf, beantwortet `cleaningBlock` vollständig — samt
  *  Grund. Zwei Quellen für dieselbe Frage waren der Ursprung dieser ganzen Fehlerfamilie. */
@@ -110,12 +136,30 @@ export interface CleaningConfig {
   /** Fenster sind konfiguriert, binden aber gerade nicht, weil keine Sperrzeit läuft. Der Sub soll
    *  das lesen, statt sich zu wundern, warum er ausserhalb seiner Fenster folgenlos reinigen kann. */
   windowsInactive?: boolean;
+  /** Nur der Plug-Pfad (Fork): dort gibt es kein `cleaningBlock`-Sammelurteil vom Server, deshalb
+   *  kommt die Reinigungs-Freigabe hier direkt. Der KG-Pfad lässt das Feld weg. */
+  erlaubt?: boolean;
+}
+
+/** Bundled Toilette config (Fork; like CleaningConfig but without windows). */
+export interface ToiletteConfig {
+  erlaubt: boolean;
+  maxMinutes: number;
+  maxPerDay: number;
+  usedToday: number;
 }
 
 /** Bundled Sperrzeit state (user-dashboard only — admin skips these warnings). Das Sperr-Flag
  *  `cleaningAllowed` steckt in `CleaningConfig.cleaningBlock`, wo es mit dem User-Flag und dem
- *  Zeitfenster zu EINEM Urteil verrechnet ist. */
+ *  Zeitfenster zu EINEM Urteil verrechnet ist. Die Toiletten-Freigabe (Fork) hat kein solches
+ *  Sammel-Urteil und bleibt deshalb hier. */
 export interface LockPeriodState {
   endsAt: string | null;
   indefinite: boolean;
+  /** Ob DIESE Sperrzeit Toilettenöffnungen erlaubt — dann ist ein TOILETTE-Öffnen keine Sperrverletzung. */
+  toiletteErlaubt: boolean;
+  /** Nur der Plug-Pfad (Fork): dort gibt es kein Server-Sammelurteil wie `cleaningBlock`, deshalb
+   *  wird die Reinigungs-Freigabe der Sperrzeit hier direkt mitgegeben. Der KG-Pfad lässt das Feld
+   *  weg und entscheidet über `CleaningConfig.cleaningBlock`. */
+  cleaningAllowed?: boolean;
 }

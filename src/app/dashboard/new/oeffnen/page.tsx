@@ -12,6 +12,7 @@ import { entryFormBase } from "@/lib/entryFormRoute";
 import { nowDatetimeLocal, APP_TZ } from "@/lib/utils";
 import { effectiveOeffnenGruende, resolveReasonList } from "@/lib/reasonsService";
 import { cleaningUsedToday, nextCleaningWindow, parseCleaningWindows, CLEANING_USER_SELECT } from "@/lib/cleaningService";
+import { toiletteVerbrauchtHeute } from "@/lib/toiletteService";
 import { boxHoldOutlook } from "@/lib/boxOpenOutlook";
 import { getTasksBlocking } from "@/lib/taskIntervals";
 import { structuredLog } from "@/lib/serverLog";
@@ -30,12 +31,18 @@ export default async function NewOeffnenPage() {
   if (latest?.type !== "VERSCHLUSS") redirect("/dashboard");
 
   const now = new Date();
-  // Tages-Zählung über `cleaningUsedToday` — dieselbe Kalendertag-Regel wie die
-  // Strafbuch-Ableitung (buildStrafbuch), statt sie hier ein zweites Mal auszuformulieren.
-  const [activeLockPeriod, user, cleaningToday, box, tasks] = await Promise.all([
+  // Tages-Zählung über `cleaningUsedToday` bzw. `toiletteVerbrauchtHeute` — dieselbe
+  // Kalendertag-Regel wie die Strafbuch-Ableitung (buildStrafbuch), statt sie hier ein zweites Mal
+  // auszuformulieren.
+  const [activeLockPeriod, user, cleaningToday, toiletteToday, box, tasks] = await Promise.all([
     getActiveLockPeriod(userId),
-    prisma.user.findUnique({ where: { id: userId }, select: { ...CLEANING_USER_SELECT, oeffnenGruendeConfig: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: {
+      ...CLEANING_USER_SELECT,
+      toiletteErlaubt: true, toiletteMaxMinuten: true, toiletteMaxProTag: true,
+      oeffnenGruendeConfig: true,
+    } }),
     cleaningUsedToday(userId, now, tz),
+    toiletteVerbrauchtHeute(userId, now, tz),
     // Die Selbstauskunft der Box: ihre eigene Frist.
     prisma.boxStatus.findFirst({ where: { userId }, orderBy: { name: "asc" }, select: { lockUntil: true } }),
     // Öffnen bricht jede Aufgabe ab, die den KG verschlossen verlangt — vorher warnen und
@@ -59,6 +66,7 @@ export default async function NewOeffnenPage() {
   const lockPeriodState: LockPeriodState = {
     endsAt: activeLockPeriod?.endsAt?.toISOString() ?? null,
     indefinite: !!activeLockPeriod && activeLockPeriod.endsAt === null,
+    toiletteErlaubt: activeLockPeriod?.toiletteErlaubt ?? false,
   };
 
   const boxHold = boxHoldOutlook({
@@ -67,7 +75,11 @@ export default async function NewOeffnenPage() {
     now,
   });
   const tf = await getTranslations("openForm");
-  const grundOptions = resolveReasonList(effectiveOeffnenGruende(user?.oeffnenGruendeConfig), "opening", tf);
+  // Reinigung/Toilette laufen ausschließlich über die Pause-Funktion → hier nicht als Öffnungsgrund anbieten.
+  const grundOptions = resolveReasonList(
+    effectiveOeffnenGruende(user?.oeffnenGruendeConfig).filter((r) => r.code !== "REINIGUNG" && r.code !== "TOILETTE"),
+    "opening", tf,
+  );
 
   // Nach dem letzten `await` und vor dem JSX — mehr als die Datenbeschaffung deckt die Zahl nicht ab,
   // und genau darum geht es. Ohne Kennung: welcher Träger geöffnet hat, steht ohnehin daneben.
@@ -101,6 +113,12 @@ export default async function NewOeffnenPage() {
             : (user?.cleaningAllowed ? null : "userNotAllowed"),
           nextWindow: nextCleaningWindow(user?.cleaningWindows, now, tz),
           windowsInactive: !activeLockPeriod && !!user?.cleaningAllowed && parseCleaningWindows(user?.cleaningWindows).length > 0,
+        }}
+        toilette={{
+          erlaubt: user?.toiletteErlaubt ?? false,
+          maxMinutes: user?.toiletteMaxMinuten ?? 15,
+          maxPerDay: user?.toiletteMaxProTag ?? 0,
+          usedToday: toiletteToday,
         }}
         boxHold={boxHold}
         hasBox={!!box}

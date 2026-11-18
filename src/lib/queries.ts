@@ -9,6 +9,7 @@ import { hasLockmebox } from "@/lib/boxStatus";
 import { APP_TZ } from "@/lib/utils";
 import { isHealthHoldActive } from "@/lib/healthHold";
 import { startAfter } from "@/lib/entryStart";
+import { KG_BUILTIN_SLUG } from "@/lib/deviceCategories";
 
 /**
  * Where-Fragment: bereits AKTIVE Kontroll-Anforderungen — sofortige (wirksamAb null) und
@@ -181,19 +182,28 @@ export async function getBoxFormContext(userId: string): Promise<{ boxConfirm: b
 }
 
 /** Returns active (non-archived) KG devices for a user, ordered by creation date.
- *  KG-specific filter: includes only devices in the built-in KG category — Plug, Collar
- *  etc. are excluded because Verschluss/Öffnen-Flows operate on KG only. Devices without
- *  a category are also included for legacy data (pre-DeviceCategory migration safety). */
+ *  KG-specific filter: only slug="kg" category — Plug and other built-in categories are excluded
+ *  because Verschluss/Öffnen-Flows operate on KG only. Devices without a category are also
+ *  included for legacy data (pre-DeviceCategory migration safety). */
 export async function getUserDeviceOptions(userId: string): Promise<DeviceOption[]> {
   return prisma.device.findMany({
     where: {
       userId,
       archivedAt: null,
       OR: [
-        { category: { isBuiltIn: true } },
+        { category: { slug: KG_BUILTIN_SLUG } },
         { categoryId: null },
       ],
     },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, name: true, imageUrl: true },
+  });
+}
+
+/** Returns active (non-archived) Plug devices for a user (devices in the plug category). */
+export async function getPlugDeviceOptions(userId: string, categoryId: string): Promise<DeviceOption[]> {
+  return prisma.device.findMany({
+    where: { userId, categoryId, archivedAt: null },
     orderBy: { createdAt: "asc" },
     select: { id: true, name: true, imageUrl: true },
   });
@@ -455,12 +465,32 @@ export async function prepareWearEntry(
   if (!deviceId) return { ok: false, code: "WEAR_DEVICE_REQUIRED" };
   const dev = await tx.device.findUnique({
     where: { id: deviceId },
-    select: { categoryId: true, category: { select: { isBuiltIn: true, requirePhoto: true } } },
+    select: { categoryId: true, category: { select: { isBuiltIn: true, slug: true, requirePhoto: true } } },
   });
   if (!dev?.categoryId) return { ok: false, code: "WEAR_DEVICE_NO_CATEGORY" };
-  if (dev.category?.isBuiltIn) return { ok: false, code: "WEAR_DEVICE_KG" };
-  if (type === "WEAR_BEGIN" && dev.category?.requirePhoto && !imageUrl) {
-    return { ok: false, code: "WEAR_PHOTO_REQUIRED" };
+  // KG uses VERSCHLUSS/OEFFNEN, not WEAR_BEGIN/END. Other built-ins (e.g. Plug) are allowed.
+  if (dev.category?.slug === "kg") return { ok: false, code: "WEAR_DEVICE_KG" };
+  // Foto-Pflicht hat ZWEI Quellen: den Kategorie-Default (requirePhoto) ODER eine offene
+  // Keyholder-Anforderung mit fotoPflicht=true. Beides serverseitig erzwingen, damit die Ansage
+  // der Keyholderin auch in Kategorien OHNE Kategorie-Foto-Default (z.B. Dildo) verbindlich ist –
+  // vorher nur im Client (wear-begin-Seite) gespiegelt und damit umgehbar.
+  if (type === "WEAR_BEGIN" && !imageUrl) {
+    let photoRequired = !!dev.category?.requirePhoto;
+    if (!photoRequired) {
+      const anfWithPhoto = await tx.verschlussAnforderung.findFirst({
+        where: {
+          userId,
+          deviceCategoryId: dev.categoryId,
+          art: "ANFORDERUNG",
+          fotoPflicht: true,
+          fulfilledAt: null,
+          withdrawnAt: null,
+        },
+        select: { id: true },
+      });
+      photoRequired = !!anfWithPhoto;
+    }
+    if (photoRequired) return { ok: false, code: "WEAR_PHOTO_REQUIRED" };
   }
 
   const latestWear = await tx.entry.findFirst({
@@ -501,7 +531,7 @@ export async function getActiveWearSessions(userId: string): Promise<(ActiveWear
       startTime: true,
       deviceId: true,
       imageUrl: true,
-      device: { select: { id: true, name: true, category: { select: { id: true, name: true, color: true, icon: true, isBuiltIn: true } } } },
+      device: { select: { id: true, name: true, category: { select: { id: true, name: true, color: true, icon: true, isBuiltIn: true, slug: true } } } },
     },
   });
   // Group by deviceId, keep only the latest per device.
@@ -510,7 +540,8 @@ export async function getActiveWearSessions(userId: string): Promise<(ActiveWear
   for (const e of latestPerDevice) {
     if (!e.deviceId || seenDevices.has(e.deviceId)) continue;
     seenDevices.add(e.deviceId);
-    if (e.type !== "WEAR_BEGIN" || !e.device?.category || e.device.category.isBuiltIn) continue;
+    // Skip KG (uses VERSCHLUSS/OEFFNEN); include Plug and all other non-KG categories.
+    if (e.type !== "WEAR_BEGIN" || !e.device?.category || e.device.category.slug === "kg") continue;
     sessions.push({
       categoryId: e.device.category.id,
       categoryName: e.device.category.name,
@@ -582,6 +613,8 @@ export const COUNTABLE_DEVICES_SELECT = { devices: { where: { archivedAt: null }
 export const CATEGORY_LIST_SELECT = {
   id: true, name: true, slug: true, color: true, icon: true, isBuiltIn: true,
   trackingEnabled: true, requirePhoto: true, allowVorgaben: true, sortOrder: true, createdAt: true,
+  // Fork-Felder: Session-Kategorien, Video-Pflicht, Orgasmus-Ziel, Koerperregion.
+  isSessionCategory: true, maxSessionMinutes: true, requiresVideo: true, orgasmusZiel: true, region: true,
   _count: { select: { ...COUNTABLE_DEVICES_SELECT, vorgaben: true } },
 } as const;
 
@@ -589,18 +622,20 @@ export const CATEGORY_LIST_ORDER = [
   { isBuiltIn: "desc" }, { sortOrder: "asc" }, { createdAt: "asc" },
 ] as const;
 
-/** Returns non-KG device categories with tracking enabled, ordered by sortOrder then createdAt. */
+/** Returns non-KG device categories with tracking enabled, ordered by sortOrder then createdAt.
+ *  Includes the plug built-in category (isBuiltIn=true, slug="plug") since it uses WEAR_BEGIN/END —
+ *  deshalb Ausschluss über den KG-Slug statt über `isBuiltIn`. */
 export async function getNonKgTrackingCategories(userId: string) {
   const rows = await prisma.deviceCategory.findMany({
-    where: { userId, isBuiltIn: false, trackingEnabled: true },
+    where: { userId, slug: { not: KG_BUILTIN_SLUG }, trackingEnabled: true },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     // `deviceCount` entscheidet, ob die Kategorie überhaupt bespielbar ist: ohne Gerät lässt sich
     // darin nichts erfassen, und das Dashboard weist sie als unfertig aus statt sie wie jede andere
     // zu behandeln (Issue #49). Im selben Select, also ohne zusätzliche Abfrage.
     //
     // `isBuiltIn`/`trackingEnabled` stehen hier nur, damit `categoryNeedsDevice()` die ganze Regel
-    // beantworten kann statt die Hälfte davon dem Aufrufer zu überlassen. Das `where` oben hält sie
-    // ohnehin konstant — die Redundanz kostet nichts und macht die Zeile für sich lesbar.
+    // beantworten kann statt die Hälfte davon dem Aufrufer zu überlassen. `trackingEnabled` hält das
+    // `where` oben konstant; `isBuiltIn` variiert seit der Fork-Plug-Kategorie (built-in, nicht KG).
     select: {
       id: true, name: true, color: true, icon: true, isBuiltIn: true, trackingEnabled: true,
       _count: { select: COUNTABLE_DEVICES_SELECT },
@@ -611,6 +646,15 @@ export async function getNonKgTrackingCategories(userId: string) {
   return rows.map(({ _count, ...c }) => ({ ...c, deviceCount: _count.devices }));
 }
 
+/** Returns session categories (isSessionCategory=true) for a user, ordered by sortOrder then createdAt. */
+export async function getSessionCategories(userId: string) {
+  return prisma.deviceCategory.findMany({
+    where: { userId, isSessionCategory: true },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    select: { id: true, name: true, color: true, icon: true, maxSessionMinutes: true, requiresVideo: true },
+  });
+}
+
 /** Returns the currently active KG TrainingVorgabe for a user, or null.
  *  Filters explicitly to the KG category — legacy rows with categoryId=null
  *  (pre-device-categories) OR rows linked to the built-in KG category.
@@ -619,7 +663,9 @@ export async function getNonKgTrackingCategories(userId: string) {
  *  vor (`categoryId: null` aus dem Bestand und über den MCP, sonst die eingebaute Kategorie). Als
  *  Konstante, damit die beiden Abfragen unten nicht auseinanderlaufen können — dass die zwei
  *  Schreibweisen genau das schon einmal taten, steht bei `goalCategoryKey`. */
-const KG_VORGABE_WHERE = { OR: [{ categoryId: null }, { category: { isBuiltIn: true } }] };
+// Fork: über den KG-SLUG statt `isBuiltIn` — die Plug-Kategorie ist ebenfalls eingebaut, ihre Ziele
+// sind aber Trage-Ziele, keine KG-Ziele. Gegenstück `isKgVorgabe` (vorgaben.ts) muss dieselbe Regel tragen.
+const KG_VORGABE_WHERE = { OR: [{ categoryId: null }, { category: { slug: KG_BUILTIN_SLUG } }] };
 
 export async function getActiveVorgabe(userId: string, now: Date) {
   return prisma.trainingVorgabe.findFirst({
@@ -666,13 +712,16 @@ export async function validateDeviceOwnership(
 
 /** Shared base `where` for KEYHOLDER Sperrzeit-Sichten: nicht zurückgezogen, noch nicht beendet —
  *  ABER OHNE wirksamAb-Gate, damit GEPLANTE Sperrzeiten dem Keyholder sichtbar/stornierbar sind.
- *  `activeLockPeriodWhere` baut darauf auf und ergänzt das wirksamAb-Gate für Sub/Enforcement. */
+ *  `activeLockPeriodWhere` baut darauf auf und ergänzt das wirksamAb-Gate für Sub/Enforcement.
+ *  Filtert explizit `deviceCategoryId: null` → KG only; Plug-Sperrzeiten laufen über
+ *  `getActivePlugSperrzeit`. */
 function keyholderLockPeriodWhere(userIdFilter: string | { in: string[] } | undefined, now: Date) {
   return {
     // `undefined` = kein User-Filter, also über ALLE Subs. Prisma lässt ein undefined-Feld weg,
     // statt auf null zu prüfen — genau das ist hier gewollt (siehe `subsWithActiveLockPeriod`).
     userId: userIdFilter,
     art: "SPERRZEIT" as const,
+    deviceCategoryId: null, // KG only — Plug-Sperrzeiten haben eine deviceCategoryId gesetzt
     withdrawnAt: null,
     OR: [{ endsAt: { gt: now } }, { endsAt: null }],
   };
@@ -760,9 +809,14 @@ export async function getOpenKontrollen(userId: string, now: Date = new Date()) 
 
 /** Offen = weder erfüllt noch zurückgezogen. Ohne Zeit-Gate — wer nur die bereits ausgelösten
  *  will, ergänzt `activeVerschlussAnforderungWhere`. Nimmt einen User ODER eine User-Menge (wie
- *  `getKeyholderLockPeriods`), damit die Admin-Übersicht dasselbe Fragment teilt. */
+ *  `getKeyholderLockPeriods`), damit die Admin-Übersicht dasselbe Fragment teilt.
+ *
+ *  KG-Sicht (Fork): `deviceCategoryId: null` — Plug-/Trage-Anforderungen tragen ihre Kategorie und
+ *  laufen über `getActivePlugAnforderung`/WEAR_BEGIN. Ohne den Filter hakte ein KG-Verschluss sie ab
+ *  (`entryFulfilment`) und der Sub-Dashboard-Banner zeigte sie als KG-Anforderung. Gleiche Regel wie
+ *  `keyholderLockPeriodWhere` für die Sperrzeiten. */
 export function openLockRequestWhere(userId: string | { userIds: string[] }): Prisma.VerschlussAnforderungWhereInput {
-  return { userId: lockPeriodUserFilter(userId), art: "ANFORDERUNG", fulfilledAt: null, withdrawnAt: null };
+  return { userId: lockPeriodUserFilter(userId), art: "ANFORDERUNG", deviceCategoryId: null, fulfilledAt: null, withdrawnAt: null };
 }
 
 /** Dringendste zuerst: frühste Frist gewinnt, bei gleicher Frist die neuere. Seit mehrere
@@ -850,6 +904,44 @@ export async function getKeyholderLockPeriod(userId: string, tx?: PrismaTx) {
 export async function getKeyholderLockPeriods(userId: string | { userIds: string[] }) {
   return prisma.verschlussAnforderung.findMany({
     where: keyholderLockPeriodWhere(lockPeriodUserFilter(userId), new Date()),
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+/** Returns the currently active Sperrzeit for a non-KG DeviceCategory (e.g. Plug), or null.
+ *  Parallel to `getActiveLockPeriod` but scoped to a specific category. Mit `wirksamAb`-Gate
+ *  ({@link triggeredWhere}): eine erst geplante Plug-Sperrzeit blockiert noch nichts. */
+export async function getActivePlugSperrzeit(userId: string, categoryId: string, tx?: PrismaTx) {
+  const client = tx ?? prisma;
+  const now = new Date();
+  return client.verschlussAnforderung.findFirst({
+    where: {
+      userId,
+      art: "SPERRZEIT" as const,
+      deviceCategoryId: categoryId,
+      withdrawnAt: null,
+      AND: [
+        triggeredWhere(now),
+        { OR: [{ endsAt: { gt: now } }, { endsAt: null }] },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+/** Returns the open Tragen-Anforderung (art=ANFORDERUNG, deviceCategoryId set) for a
+ *  non-KG category, or null. Parallel to the KG `getOpenLockRequest` query. */
+export async function getActivePlugAnforderung(userId: string, categoryId: string) {
+  const now = new Date();
+  return prisma.verschlussAnforderung.findFirst({
+    where: {
+      userId,
+      art: "ANFORDERUNG" as const,
+      deviceCategoryId: categoryId,
+      fulfilledAt: null,
+      withdrawnAt: null,
+      ...triggeredWhere(now),
+    },
     orderBy: { createdAt: "desc" },
   });
 }

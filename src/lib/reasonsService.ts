@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import {
   ORGASMUS_ARTEN,
   OEFFNEN_GRUENDE,
+  DEFAULT_OEFFNEN_GRUENDE,
   ORGASMUS_ART_I18N_KEYS,
   GRUND_I18N_KEYS,
   SYSTEM_ONLY_OPENING_CODES,
@@ -51,8 +52,15 @@ export interface ResolvedReason { code: string; label: string }
 
 const MAX_ENTRIES = 12;
 const LABEL_MAX = 40;
-/** Öffnungsgrund, an dem echte Logik hängt — immer vorhanden, Code eingefroren. */
+/** Öffnungsgründe, an denen echte Logik hängt — immer vorhanden, Codes eingefroren. */
+/** Reinigung/Toilette laufen ausschließlich über die Pause-Funktion und werden NICHT mehr als
+ *  Öffnungsgrund erzwungen — daher keine geschützten Öffnungs-Codes mehr. */
+export const PROTECTED_OPENING_CODES = [] as const;
+/** @deprecated Reinigung/Toilette sind keine geschützten Öffnungsgründe mehr (Pause-Funktion). */
 export const PROTECTED_OPENING_CODE = "REINIGUNG";
+/** Orgasmus-Arten, die immer wählbar sein müssen (auch bei Custom-Listen): "Belohnung" trägt die
+ *  Belohnungs-Ökonomie (grant_reward setzt vorgegebeneArt="Belohnung"). Nie entfernbar. */
+export const PROTECTED_ORGASM_CODES = ["Belohnung"] as const;
 /** Custom-Codes folgen diesem Muster (server-generiert). */
 const CUSTOM_CODE_RE = /^c_[0-9a-f]{8,}$/;
 /** Steuerzeichen (C0 + DEL), die aus Labels entfernt werden. */
@@ -78,7 +86,7 @@ function builtinI18nKey(code: string, kind: ReasonKind): string | undefined {
 
 /** Eingebaute Standardliste (bei `null`-Config) — Codes = Konstanten, kein Label-Override. */
 function defaultConfig(kind: ReasonKind): ReasonEntry[] {
-  const codes = kind === "orgasm" ? DEFAULT_ORGASM_ARTEN : OEFFNEN_GRUENDE;
+  const codes = kind === "orgasm" ? DEFAULT_ORGASM_ARTEN : DEFAULT_OEFFNEN_GRUENDE;
   return codes.map((code) => ({ code }));
 }
 
@@ -132,9 +140,25 @@ export function parseReasonConfig(raw: unknown, kind: ReasonKind): ReasonEntry[]
     out.push(label ? { code, label } : { code });
   }
 
-  // REINIGUNG-Invariante: für Öffnungsgründe immer vorhanden (Label erhalten, sonst vorne re-injizieren).
-  if (kind === "opening" && !used.has(PROTECTED_OPENING_CODE)) {
-    out.unshift({ code: PROTECTED_OPENING_CODE });
+  // Geschützte Öffnungsgründe: immer vorhanden (Label erhalten, sonst vorne re-injizieren).
+  if (kind === "opening") {
+    for (const protectedCode of [...PROTECTED_OPENING_CODES].reverse()) {
+      if (!used.has(protectedCode)) {
+        out.unshift({ code: protectedCode });
+        used.add(protectedCode);
+      }
+    }
+  }
+
+  // Geschützte Orgasmus-Arten (z.B. "Belohnung"): immer wählbar, auch bei Custom-Listen — hinten
+  // anhängen (überschreibt bewusst den MAX_ENTRIES-Deckel, analog zu den geschützten Öffnungsgründen).
+  if (kind === "orgasm") {
+    for (const protectedCode of PROTECTED_ORGASM_CODES) {
+      if (!used.has(protectedCode)) {
+        out.push({ code: protectedCode });
+        used.add(protectedCode);
+      }
+    }
   }
 
   return out.length > 0 ? out : defaultConfig(kind);
@@ -277,9 +301,9 @@ export function resolveReasonList(
 }
 
 /** Speichert eine Reason-Config (validiert/normalisiert via parseReasonConfig). Geteilt von der
- *  PATCH-Route. Für Öffnungsgründe ist REINIGUNG nach der Normalisierung garantiert enthalten. Gibt die
- *  normalisierte Liste zurück (u.a. server-generierte Custom-Codes) — der Editor re-seedet damit, sonst
- *  bekämen neu angelegte Zeilen bei jedem weiteren Speichern erneut einen Code (Duplikate). */
+ *  PATCH-Route. Reinigung/Toilette werden für Öffnungsgründe NICHT mehr erzwungen (Pause-Funktion).
+ *  Gibt die normalisierte Liste zurück (u.a. server-generierte Custom-Codes) — der Editor re-seedet
+ *  damit, sonst bekämen neu angelegte Zeilen bei jedem weiteren Speichern erneut einen Code (Duplikate). */
 export async function setReasonConfig(userId: string, kind: ReasonKind, raw: unknown): Promise<ReasonEntry[]> {
   const normalized = parseReasonConfig(raw, kind);
   const field = kind === "orgasm" ? "orgasmusArtenConfig" : "oeffnenGruendeConfig";

@@ -13,12 +13,12 @@ import { blockStackCls, wideColCls } from "@/app/components/inputStyles";
 /** Die Reiterleiste MIT dem, was auf die Entscheidung der Keyholderin wartet: dieselben Zählungen
  *  wie an der Karte der Übersicht (`attentionOffensesOf`, `pendingProofReviewWhere`). Das Strafbuch
  *  kommt aus `strafbuchCached` und wird auf der Strafbuch-Seite nicht noch einmal abgeleitet. */
-async function SubNavWithCounts({ userId, showJournal }: { userId: string; showJournal: boolean }) {
+async function SubNavWithCounts({ userId, showJournal, isGlobalAdmin }: { userId: string; showJournal: boolean; isGlobalAdmin: boolean }) {
   const [strafbuch, tasks] = await Promise.all([
     strafbuchCached(userId, requestNowMs()).then((sb) => attentionOffensesOf(selectSubOffenses(sb)).length),
     prisma.taskProof.count({ where: pendingProofReviewWhere(userId) }),
   ]);
-  return <UserSubNav userId={userId} showJournal={showJournal} counts={{ strafbuch, tasks }} />;
+  return <UserSubNav userId={userId} showJournal={showJournal} isGlobalAdmin={isGlobalAdmin} counts={{ strafbuch, tasks }} />;
 }
 
 export default async function AdminUserLayout({
@@ -90,8 +90,8 @@ export default async function AdminUserLayout({
       />
       {/* Die Zähler an den Reitern kosten ein volles Strafbuch: sie dürfen die Seite nicht aufhalten.
           Bis sie da sind, steht die Leiste ohne Zahlen da. */}
-      <Suspense fallback={<UserSubNav userId={id} showJournal={journalReader} />}>
-        <SubNavWithCounts userId={id} showJournal={journalReader} />
+      <Suspense fallback={<UserSubNav userId={id} showJournal={journalReader} isGlobalAdmin={isGlobalAdmin} />}>
+        <SubNavWithCounts userId={id} showJournal={journalReader} isGlobalAdmin={isGlobalAdmin} />
       </Suspense>
       {/* Kopfzeile und Reiter oben spannen die ganze HÜLLE (`adminShellColCls`, 1024) — sie rahmen
           die Seite und tragen die neun Reiter in einer Zeile. Der INHALT hier wird dagegen auf das

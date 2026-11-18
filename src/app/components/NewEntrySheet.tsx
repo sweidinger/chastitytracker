@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, type ReactNode } from "react";
-import { type LucideIcon } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Dices, type LucideIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 import useGuardedNavigation from "@/app/hooks/useGuardedNavigation";
 import { busyDimCls } from "@/app/components/inputStyles";
@@ -142,6 +142,20 @@ export default function NewEntrySheet({ open, onClose, isLocked, lockCallPending
   const nav = useGuardedNavigation(onClose);
   const base = entryFormBase(adminUserId);
 
+  // Schicksalsrad nur zeigen, wenn für diesen Sub ein aktiver (manueller) Zufalls-Pool existiert.
+  // Nur auf dem Sub-Pfad: `/api/zufall` liefert die Pools des ANGEMELDETEN Nutzers — in der
+  // Keyholder-Sicht (`adminUserId`) wären das die falschen.
+  const [hasZufall, setHasZufall] = useState(false);
+  useEffect(() => {
+    if (adminUserId) return;
+    let cancelled = false;
+    fetch("/api/zufall")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && Array.isArray(d?.pools) && d.pools.length > 0) setHasZufall(true); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [adminUserId]);
+
   const options = [
     {
       type: "verschluss",
@@ -250,6 +264,17 @@ export default function NewEntrySheet({ open, onClose, isLocked, lockCallPending
             disabled={opt.disabled}
           />
         ))}
+
+        {hasZufall && (
+          <SheetActionRow
+            {...rowNav}
+            icon={Dices}
+            tone="text-sperrzeit"
+            label={t("zufall")}
+            desc={t("zufallSubtitle")}
+            href="/dashboard/zufall"
+          />
+        )}
 
         {/* Per-Category wear actions (begin or end based on state). */}
         {categoryRows.map((c) => {

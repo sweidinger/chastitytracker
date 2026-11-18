@@ -17,6 +17,7 @@ import { subWorld } from "@/lib/theme";
 import pkg from "../../../package.json";
 import { readingColCls } from "@/app/components/inputStyles";
 import PhotoAnalysisScope from "@/app/components/PhotoAnalysisScope";
+import { KeyholderEnabledProvider } from "@/app/components/KeyholderEnabledContext";
 
 // SECURITY: user-spezifisch (auth() → Rolle/Avatar/Daten). Nie statisch/geteilt cachen — erzwingt
 // per-Request-Rendering inkl. der RSC-Navigations-Payloads. Härtet gegen einen fehlkonfigurierten
@@ -32,7 +33,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // so the keyholder nav entry appears exactly when access actually works. No extra DB query.
   const isKeyholder = (user as { controlsSubs?: boolean } | undefined)?.controlsSubs ?? false;
 
-  const [latestKg, lockCallAt, categoryRows, weightUser, inspections] = await Promise.all([
+  const [latestKg, lockCallAt, categoryRows, weightUser, inspections, aiKeyholderCfg, zufallPoolCount] = await Promise.all([
     // Der jüngste Lock-Eintrag trägt den Zustand (`getIsLocked`) UND, ob der laufende Verschluss
     // schon ein Bildersafe-Foto hat — eine Abfrage für beides.
     userId ? getLatestKgEntry(userId) : Promise.resolve(null),
@@ -53,12 +54,22 @@ export default async function DashboardLayout({ children }: { children: React.Re
     // gemeinsamen Zeitpunkt teilt sich das Layout die Abfrage mit dem Alarm-Block der Übersicht —
     // dort, wo sie ohnehin läuft, kostet sie nichts.
     userId ? subVisibleInspectionsNow(userId) : Promise.resolve([]),
+    // Fork: KI-Keyholderin-Navigation nur, wenn sie für diesen Träger eingeschaltet ist.
+    userId
+      ? prisma.aiKeyholderConfig.findUnique({ where: { userId }, select: { enabled: true } })
+      : Promise.resolve(null),
+    // Fork: Schicksalsrad-Navigation nur bei mindestens einem aktiven, manuell drehbaren Pool.
+    userId
+      ? prisma.zufallsPool.count({ where: { userId, aktiv: true, triggerType: "MANUAL" } })
+      : Promise.resolve(0),
   ]);
   const weight = !!weightUser?.weightTrackingEnabled;
   const isLocked = latestKg?.type === "VERSCHLUSS";
   const bildersafe = bildersafeEnabled() ? bildersafeMenuAction(latestKg) : null;
 
   const openInspection = pendingInspection(inspections);
+  const aiKeyholderEnabled = aiKeyholderCfg?.enabled ?? false;
+  const zufallActive = zufallPoolCount > 0;
 
   return (
     // Die Welt kommt aus dem Verschluss-Zustand, den dieses Layout ohnehin schon lädt — kein
@@ -82,6 +93,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
         bildersafe={bildersafe}
         weight={weight}
         openInspection={openInspection}
+        aiKeyholderEnabled={aiKeyholderEnabled}
+        zufallActive={zufallActive}
       />
 
       {/* Content area: offset for sidebar on desktop. Der Platz für die fixe Bottom-Nav (Mobile)
@@ -112,7 +125,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <div className={`${readingColCls} [--block-col:100%] [--block-gutter:0px]`}>
           <PhotoAnalysisScope>
             <OfflineIndicator />
-            {children}
+            <KeyholderEnabledProvider enabled={aiKeyholderEnabled}>
+              {children}
+            </KeyholderEnabledProvider>
           </PhotoAnalysisScope>
         </div>
         <BottomNavSpacer />
@@ -128,6 +143,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         bildersafe={bildersafe}
         weight={weight}
         openInspection={openInspection}
+        aiKeyholderEnabled={aiKeyholderEnabled}
       />
       <InstallBanner />
     </div>

@@ -250,6 +250,8 @@ ENABLE_BILDERSAFE=true             # sealed key-box code photo (default off)
 BLE_BRIDGE_KEY=<32 hex chars>      # LockMeBox: the box firmware's own AES key, NOT a random value (see "LockMeBox over Bluetooth")
 
 # Optional integrations
+AI_KEYHOLDER_CRON_SECRET=<secret>  # shared bearer for the optional background jobs (autonomous AI
+                                   # keyholder + automatic reward crediting); see docs/cron.md
 PORTAL_SHARED_SECRET=<secret>      # JWT secret for the self-service portal's login flow
 USE_ADMIN_RELATIONSHIPS=true       # enable n:m admin-user supervision
 ALLOW_ENTRY_GAP=true               # allow keyholders (and the MCP tools add_missed_break / add_missed_session) to backfill a forgotten break or locked period in the past; off by default

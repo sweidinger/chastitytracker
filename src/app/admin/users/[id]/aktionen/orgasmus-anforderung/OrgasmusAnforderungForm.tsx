@@ -9,7 +9,6 @@ import {
   ORGASMUS_ANFORDERUNG_ARTEN, orgasmusAnforderungArtLabel,
   DURATION_QUICK_HOURS, durationHoursOr, type DurationUnit,
 } from "@/lib/constants";
-import type { ResolvedReason } from "@/lib/reasonsService";
 import AdminActionFormShell from "@/app/components/AdminActionFormShell";
 import { actionSign } from "@/app/entries/actionSign";
 import DateTimePicker from "@/app/components/DateTimePicker";
@@ -34,7 +33,17 @@ type EndMode = "duration" | "datetime";
 /** Vorgabe-Fenster: ein Tag. */
 const DEFAULT_WINDOW_H = 24;
 
-export default function OrgasmusAnforderungForm({ userId, artOptions, tz, nowDefault }: { userId: string; artOptions: ResolvedReason[]; tz: string; nowDefault: string }) {
+/** Fork: Kuratierte Art-Presets für „Orgasmus anfordern". Jedes Preset codiert Orgasmus-Art + ob
+ *  geöffnet werden darf — dadurch entfällt eine separate „Öffnen erlaubt"-Checkbox (und die freie
+ *  Art-Liste des Subs). */
+type ArtPreset = "orgasmus" | "ruiniert_verschlossen" | "ruiniert_offen";
+const ART_PRESETS: Record<ArtPreset, { requiredType: string; openingAllowed: boolean }> = {
+  orgasmus: { requiredType: "Orgasmus", openingAllowed: true },
+  ruiniert_verschlossen: { requiredType: "ruinierter Orgasmus", openingAllowed: false },
+  ruiniert_offen: { requiredType: "ruinierter Orgasmus", openingAllowed: true },
+};
+
+export default function OrgasmusAnforderungForm({ userId, tz, nowDefault }: { userId: string; tz: string; nowDefault: string }) {
   const t = useTranslations("admin");
   const tc = useTranslations("common");
   const apiError = useApiError();
@@ -50,8 +59,11 @@ export default function OrgasmusAnforderungForm({ userId, artOptions, tz, nowDef
   // `switchEndMode`). Ein beim Seitenaufruf gerechnetes Ende wäre nach zehn Minuten
   // Formularausfüllen zehn Minuten zu früh.
   const [endsAt, setEndsAt] = useState("");
-  const [requiredType, setRequiredType] = useState("");
-  const [openingAllowed, setOpeningAllowed] = useState(false);
+  const [artPreset, setArtPreset] = useState<ArtPreset>("orgasmus");
+  // Fork: Belohnung (bucht 1 vom verdienten Guthaben ab), Straf-Anweisung, Foto-Pflicht.
+  const [belohnung, setBelohnung] = useState(false);
+  const [istStrafe, setIstStrafe] = useState(false);
+  const [fotoPflicht, setFotoPflicht] = useState(false);
   const [message, setMessage] = useState("");
   // Terminierung — dasselbe Bauteil und dieselben zwei Felder wie an Aufgabe und
   // Verschluss-Anforderung. Bis zur Auslösung ist die Anweisung für den Träger unsichtbar: sie
@@ -64,9 +76,10 @@ export default function OrgasmusAnforderungForm({ userId, artOptions, tz, nowDef
     value: a,
     label: orgasmusAnforderungArtLabel(a, t),
   }));
-  const requiredTypeOptions = [
-    { value: "", label: t("orgasmReqArtAny") },
-    ...artOptions.map((r) => ({ value: r.code, label: r.label })),
+  const presetOptions: { value: ArtPreset; label: string }[] = [
+    { value: "orgasmus", label: t("orgasmReqPresetOrgasmus") },
+    { value: "ruiniert_verschlossen", label: t("orgasmReqPresetRuiniertClosed") },
+    { value: "ruiniert_offen", label: t("orgasmReqPresetRuiniertOpen") },
   ];
 
   /**
@@ -95,7 +108,7 @@ export default function OrgasmusAnforderungForm({ userId, artOptions, tz, nowDef
       setError(t("orgasmReqEndAfterStart"));
       return;
     }
-    if (scheduleIsPast(schedule, tz)) {
+    if (!belohnung && scheduleIsPast(schedule, tz)) {
       setError(t("scheduleFutureRequired"));
       return;
     }
@@ -103,26 +116,40 @@ export default function OrgasmusAnforderungForm({ userId, artOptions, tz, nowDef
     // 48 h" liegt das Ende zwar in der Zukunft, aber vor der Zustellung — der Server lehnt das ab,
     // und seine Meldung („Das Ende des Fensters muss in der Zukunft liegen") beschreibt genau das
     // Gegenteil dessen, was der Keyholder sieht. Deshalb hier, wo beide Zahlen stehen.
-    if (endet <= new Date(scheduleAnchorMs(schedule, tz, Date.now()))) {
+    if (!belohnung && endet <= new Date(scheduleAnchorMs(schedule, tz, Date.now()))) {
       setError(t("orgasmReqEndAfterSend"));
       return;
     }
     setSaving(true);
     setError("");
     try {
+      // Belohnung: kein Modus/keine Art/keine Terminierung — das Fenster gewährt der Belohnungs-Dienst
+      // (Öffnen immer erlaubt, sonst wäre der Orgasmus nicht durchführbar).
+      const body: Record<string, unknown> = belohnung
+        ? {
+            userId,
+            belohnung: true,
+            beginsAt: beginsAtDate.toISOString(),
+            endsAt: endet.toISOString(),
+            message: message.trim() || undefined,
+            fotoPflicht,
+          }
+        : {
+            userId,
+            art,
+            beginsAt: beginsAtDate.toISOString(),
+            endsAt: endet.toISOString(),
+            requiredType: ART_PRESETS[artPreset].requiredType,
+            openingAllowed: ART_PRESETS[artPreset].openingAllowed,
+            istStrafe: art === "ANWEISUNG" ? istStrafe : false,
+            fotoPflicht,
+            message: message.trim() || undefined,
+            ...schedulePayload(schedule, tz),
+          };
       const res = await fetch("/api/admin/orgasmus-anforderung", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId,
-          art,
-          beginsAt: beginsAtDate.toISOString(),
-          endsAt: endet.toISOString(),
-          requiredType: requiredType || undefined,
-          openingAllowed,
-          message: message.trim() || undefined,
-          ...schedulePayload(schedule, tz),
-        }),
+        body: JSON.stringify(body),
       });
       if (res.ok) router.push(target);
       else setError(apiError(await parseApiErrorCode(res)));
@@ -141,12 +168,14 @@ export default function OrgasmusAnforderungForm({ userId, artOptions, tz, nowDef
       title={t("requestOrgasm")}
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <Select
-          label={t("orgasmReqMode")}
-          options={modeOptions}
-          value={art}
-          onChange={(e) => setArt(e.target.value as (typeof ORGASMUS_ANFORDERUNG_ARTEN)[number])}
-        />
+        {!belohnung && (
+          <Select
+            label={t("orgasmReqMode")}
+            options={modeOptions}
+            value={art}
+            onChange={(e) => setArt(e.target.value as (typeof ORGASMUS_ANFORDERUNG_ARTEN)[number])}
+          />
+        )}
         {/* `min`: ein Fenster in der Vergangenheit ist der Fehler, den dieses Formular hatte. Der
             Dienst erlaubt einen rückdatierten START weiterhin (ein rückwirkend geöffnetes Fenster
             ist ein legitimer Fall, siehe `checkOrgasmWindowEnd`) — über den MCP bleibt er erreichbar,
@@ -187,18 +216,36 @@ export default function OrgasmusAnforderungForm({ userId, artOptions, tz, nowDef
           />
         </DurationOrDatetimeField>
 
-        <Select
-          label={t("orgasmReqArt")}
-          options={requiredTypeOptions}
-          value={requiredType}
-          onChange={(e) => setRequiredType(e.target.value)}
-          hint={t("orgasmReqArtHint")}
-        />
+        {!belohnung && (
+          <Select
+            label={t("orgasmReqArt")}
+            options={presetOptions}
+            value={artPreset}
+            onChange={(e) => setArtPreset(e.target.value as ArtPreset)}
+          />
+        )}
+
+        {/* Belohnung — wie „Belohnung gewähren": bucht 1 vom verdienten Guthaben ab. */}
         <Checkbox
-          label={t("orgasmReqOpenAllowedLabel")}
-          description={t("orgasmReqOpenAllowedHint")}
-          checked={openingAllowed}
-          onChange={(e) => setOpeningAllowed(e.target.checked)}
+          label={t("orgasmReqBelohnungLabel")}
+          description={t("orgasmReqBelohnungHint")}
+          checked={belohnung}
+          onChange={(e) => setBelohnung(e.target.checked)}
+        />
+        {!belohnung && art === "ANWEISUNG" && (
+          <Checkbox
+            label={t("orgasmReqIstStrafeLabel")}
+            description={t("orgasmReqIstStrafeHint")}
+            checked={istStrafe}
+            onChange={(e) => setIstStrafe(e.target.checked)}
+          />
+        )}
+        {/* Foto-Nachweis: Pflicht beim Erfassen. Ohne Haken ist ein Foto freiwillig möglich. */}
+        <Checkbox
+          label={t("orgasmReqFotoPflichtLabel")}
+          description={t("orgasmReqFotoPflichtHint")}
+          checked={fotoPflicht}
+          onChange={(e) => setFotoPflicht(e.target.checked)}
         />
         <Textarea
           label={t("orgasmReqMessage")}
@@ -207,24 +254,20 @@ export default function OrgasmusAnforderungForm({ userId, artOptions, tz, nowDef
           rows={2}
         />
 
-        <ScheduleFields
-          value={schedule}
-          onChange={setSchedule}
-          minNow={nowDefault}
-          delayHint={t("orgasmScheduleDelayHint")}
-          atHint={t("orgasmScheduleAtHint")}
-        />
+        {/* Terminierung nicht bei der Belohnung: der Belohnungs-Dienst gewährt sofort. */}
+        {!belohnung && (
+          <ScheduleFields
+            value={schedule}
+            onChange={setSchedule}
+            minNow={nowDefault}
+            delayHint={t("orgasmScheduleDelayHint")}
+            atHint={t("orgasmScheduleAtHint")}
+          />
+        )}
 
         <FormError message={error} variant="compact" />
 
-        <Button
-          type="submit"
-          variant="semantic"
-          semantic="orgasm"
-          fullWidth
-          loading={saving}
-          icon={<Droplets size={16} />}
-        >
+        <Button type="submit" variant="semantic" semantic="orgasm" fullWidth loading={saving} icon={<Droplets size={16} />}>
           {saving ? t("sending") : t("orgasmReqSubmit")}
         </Button>
       </form>

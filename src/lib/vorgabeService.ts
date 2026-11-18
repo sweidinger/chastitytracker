@@ -280,7 +280,7 @@ export async function listVorgaben(userId: string, opts: { includeDeleted?: bool
   return prisma.trainingVorgabe.findMany({
     where,
     orderBy: [{ categoryId: "asc" }, { gueltigAb: "asc" }],
-    // `isBuiltIn` mit: die Aufrufer filtern über `goalCategoryKey`, das es braucht.
-    include: { category: { select: { name: true, isBuiltIn: true } } },
+    // `slug` mit: die Aufrufer filtern über `goalCategoryKey`, das es braucht (KG = slug "kg").
+    include: { category: { select: { name: true, isBuiltIn: true, slug: true } } },
   });
 }

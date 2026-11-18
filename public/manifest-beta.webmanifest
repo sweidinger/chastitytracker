@@ -1,0 +1,60 @@
+{
+  "name": "Chastity Tracker BETA",
+  "short_name": "Chastity Tracker BETA",
+  "description": "Keuschheitsgürtel Tracking",
+  "id": "/dashboard",
+  "lang": "de",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#0b0609",
+  "theme_color": "#ef4444",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-192-beta.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512-beta.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512-beta.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Neuer Eintrag",
+      "short_name": "Neu",
+      "url": "/dashboard?action=new",
+      "icons": [
+        {
+          "src": "/icon-192-beta.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Statistiken",
+      "short_name": "Stats",
+      "url": "/dashboard/stats",
+      "icons": [
+        {
+          "src": "/icon-192-beta.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
+  "categories": [
+    "health",
+    "lifestyle"
+  ]
+}

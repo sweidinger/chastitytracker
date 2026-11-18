@@ -14,10 +14,15 @@ CREATE TABLE "new_StrafeRecord" (
     "erledigtAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "taskId" TEXT,
+    -- Fork-Spalten (sweidinger): beim Tabellen-Neuaufbau mitnehmen, sonst gehen sie verloren
+    "gemeldetAt" DATETIME,
+    "nachweisUrl" TEXT,
+    "erledigungNotiz" TEXT,
+    "ablehnungGrund" TEXT,
     CONSTRAINT "StrafeRecord_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "StrafeRecord_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "Task" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
-INSERT INTO "new_StrafeRecord" ("bestraftDatum", "createdAt", "erledigtAt", "id", "judgedBy", "notiz", "offenseType", "reason", "refId", "status", "userId") SELECT "bestraftDatum", "createdAt", "erledigtAt", "id", "judgedBy", "notiz", "offenseType", "reason", "refId", "status", "userId" FROM "StrafeRecord";
+INSERT INTO "new_StrafeRecord" ("bestraftDatum", "createdAt", "erledigtAt", "id", "judgedBy", "notiz", "offenseType", "reason", "refId", "status", "userId", "gemeldetAt", "nachweisUrl", "erledigungNotiz", "ablehnungGrund") SELECT "bestraftDatum", "createdAt", "erledigtAt", "id", "judgedBy", "notiz", "offenseType", "reason", "refId", "status", "userId", "gemeldetAt", "nachweisUrl", "erledigungNotiz", "ablehnungGrund" FROM "StrafeRecord";
 DROP TABLE "StrafeRecord";
 ALTER TABLE "new_StrafeRecord" RENAME TO "StrafeRecord";
 CREATE UNIQUE INDEX "StrafeRecord_refId_key" ON "StrafeRecord"("refId");

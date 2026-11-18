@@ -17,9 +17,9 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     deviceCategory: {
       findMany: vi.fn().mockResolvedValue([
-        { id: "cat-kg", name: "KG", isBuiltIn: true },
-        { id: "cat-plug", name: "Plug", isBuiltIn: false },
-        { id: "cat-collar", name: "Halsband", isBuiltIn: false },
+        { id: "cat-kg", name: "KG", slug: "kg", isBuiltIn: true },
+        { id: "cat-plug", name: "Plug", slug: "plug", isBuiltIn: false },
+        { id: "cat-collar", name: "Halsband", slug: "halsband", isBuiltIn: false },
       ]),
     },
     device: { findFirst: (...a: unknown[]) => deviceFindFirst(...a) },
@@ -33,9 +33,9 @@ vi.mock("@/lib/mcp/common", async (orig) => ({
 import { deviceStats, records, denialTrend, periodGoal, type DeviceStatsResult } from "./stats";
 
 const NOW = new Date("2026-07-14T18:00:00+02:00");
-const KG = { id: "cat-kg", name: "KG", isBuiltIn: true };
-const PLUG = { id: "cat-plug", name: "Plug", isBuiltIn: false };
-const COLLAR = { id: "cat-collar", name: "Halsband", isBuiltIn: false };
+const KG = { id: "cat-kg", name: "KG", slug: "kg", isBuiltIn: true };
+const PLUG = { id: "cat-plug", name: "Plug", slug: "plug", isBuiltIn: false };
+const COLLAR = { id: "cat-collar", name: "Halsband", slug: "halsband", isBuiltIn: false };
 
 const KAEFIG = { id: "d-kg", name: "Flatty", categoryId: KG.id };
 const PLUG_DEV = { id: "d-plug", name: "njoy pure plug large", categoryId: PLUG.id };

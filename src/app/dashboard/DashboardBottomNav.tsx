@@ -17,9 +17,11 @@ interface Props {
   weight?: boolean;
   /** Die dringendste offene Kontroll-Anforderung — Begründung in `NewEntrySheet`. */
   openInspection?: { code: string | null; href: string } | null;
+  /** Fork: KI-Keyholderin-Eintrag in der Navigation zeigen. */
+  aiKeyholderEnabled?: boolean;
 }
 
-export default function DashboardBottomNav({ isAdmin, isKeyholder, isLocked, lockCallPending, version, categoryRows, bildersafe, weight, openInspection }: Props) {
+export default function DashboardBottomNav({ isAdmin, isKeyholder, isLocked, lockCallPending, version, categoryRows, bildersafe, weight, openInspection, aiKeyholderEnabled }: Props) {
   const [sheetOpen, setSheetOpen] = useState(false);
 
   return (
@@ -30,6 +32,7 @@ export default function DashboardBottomNav({ isAdmin, isKeyholder, isLocked, loc
         isLocked={isLocked}
         onNewEntry={() => setSheetOpen(true)}
         version={version}
+        aiKeyholderEnabled={aiKeyholderEnabled}
       />
       <NewEntrySheet
         open={sheetOpen}

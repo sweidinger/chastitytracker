@@ -119,6 +119,24 @@ export const MESSAGE_BODY_KEYS = [
   // Fristen-Joker: der Träger hat eine Kontrollfrist selbst verschoben. An die Keyholder.
   "inspectionJokerUsedMessageKeyholder",
   "inspectionJokerUsedReasonMessageKeyholder",
+  // ── Fork ──
+  // Strafen-Erledigung (`strafErledigung.ts`): die Keyholderin bestätigt bzw. lehnt die Erledigt-
+  // Meldung des Trägers ab. Die Meldung selbst läuft über `penaltyReportedDoneMessage`.
+  "penaltyConfirmedMessage",
+  "penaltyConfirmedMessagePlain",
+  "penaltyRejectedMessage",
+  // Belohnungs-Guthaben (`belohnung.ts`): verdient, als Strafe entzogen bzw. verschoben.
+  "rewardEarnedMessage",
+  "rewardRevokedMessage",
+  "rewardPostponedMessage",
+  // Gesundheits-Stopp des Trägers (`healthHoldService.ts`) — an die Keyholder.
+  "healthHoldOnMessage",
+  "healthHoldOffMessage",
+  // Pause über die Höchstdauer, automatisch geöffnet (`pauseOverstayService.ts`).
+  "pauseExpiredMessageSub",
+  "pauseExpiredMessageKeyholder",
+  // Schicksalsrad (`zufallService.ts`): Ergebnis einer Ziehung.
+  "zufallResultMessage",
 ] as const;
 
 export type MessageBodyKey = (typeof MESSAGE_BODY_KEYS)[number];

@@ -16,6 +16,9 @@ interface Props {
   /** Currently-running wear sessions (already fetched by the dashboard page) — their categories tick
    *  live. Omitted by the admin view, which then shows render-time values without live ticking. */
   activeWearSessions?: { categoryId: string }[];
+  /** Kategorien, deren Trainingsvorgaben bereits in einer eigenen Session-Karte gezeigt werden
+   *  (z.B. der aktive Plug in LaufendePlugSessionCard) — hier NICHT nochmal rendern (kein Doppel). */
+  excludeCategoryIds?: string[];
   /** Die schon geladenen Einträge des Dashboards — erspart eine zweite Entry-Query. */
   entries?: SegmentEntry[];
   /** Das KG-Ziel als führende Zeile — `null` = nicht zeigen (bei aktiver Sperre steht es in der
@@ -31,14 +34,18 @@ interface Props {
 /** Server component — fetches per-category wear hours + goals (tracking-enabled non-KG categories
  *  with at least one period target) and hands them to the live client renderer. Categories with a
  *  running wear session tick up live there. Trägt zusätzlich das KG-Ziel als führende Zeile, wenn
- *  `kgGoal` gesetzt ist. Hidden when neither a KG goal nor any category goal is present. */
-export default async function CategoryGoalsToday({ userId, tz, activeWearSessions = [], entries, kgGoal, includeCategories = true, defaultCollapsed }: Props) {
+ *  `kgGoal` gesetzt ist. Kategorien, die bereits in einer eigenen Session-Karte stehen
+ *  (excludeCategoryIds), werden hier ausgelassen. Hidden when neither a KG goal nor any category goal
+ *  is present. */
+export default async function CategoryGoalsToday({ userId, tz, activeWearSessions = [], excludeCategoryIds = [], entries, kgGoal, includeCategories = true, defaultCollapsed }: Props) {
   const now = new Date();
   const activeCategoryIds = new Set(activeWearSessions.map((s) => s.categoryId));
+  const excluded = new Set(excludeCategoryIds);
 
   const rows = includeCategories
     ? (await buildCategoryWearGoals(userId, now, entries))
         .filter(hasAnyGoal)
+        .filter((r) => !excluded.has(r.categoryId))
         .map((r) => ({ ...r, active: activeCategoryIds.has(r.categoryId) }))
     : [];
   if (!kgGoal && rows.length === 0) return null;
